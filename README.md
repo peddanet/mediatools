@@ -19,7 +19,7 @@ mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
 mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
 mediatools config    one local file for paths and names (kept outside the repo)
-mediatools rename-db rename shrink databases to the configured name
+mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 ```
 
 ---
@@ -80,6 +80,7 @@ identified, where logs go).
 | A player that exits immediately is treated as an error, its file is kept | `triage` |
 | `rsync --delete` is **never** used; target-only files are reported, not removed | `sync` |
 | A newer file on the receiving side is never overwritten (`rsync -u`) | `sync` |
+| Empty placeholders are never copied over a full file (`rsync --min-size=1`) | `sync` |
 | Every run writes a time-stamped log; every flatten run a reversible plan | all |
 | `snapshot` refuses to adopt or sync a directory that is not a copy of the source (dry-run probe) | `snapshot` |
 | `snapshot` aborts if a run would remove more files than `max_deletions` from the newest snapshot | `snapshot` |
@@ -182,15 +183,30 @@ the [data directory](#data-directory) and prints the counts.
 
 ```bash
 mediatools triage [PATH] [--max-seconds 60] [--min-seconds 0] [--batch 10]
-                       [--player vlc] [--audio] [--delete] [--include-kept] [--dry-run]
+                         [--player vlc] [--audio] [--delete] [--no-placeholder]
+                         [--include-kept] [--dry-run] [-y]
 ```
 
-1. Finds videos with a duration between the two thresholds.
+1. Counts the videos with a duration between the two thresholds and reports
+   number, batches, total length and a rough review-time estimate, then asks
+   whether to start (`--dry-run`: report and list only; `-y`: no start
+   question). Durations are cached, so a second count is fast.
 2. Opens a batch, **one player process per video** (muted, looping).
-3. You close the windows of the clips you do not want and press Enter.
-4. The script lists *remove / keep / player error* and asks for confirmation.
+3. **Close the window = remove the video. Leave the window open = keep it.**
+   Then press Enter.
+4. The script lists *remove / keep / player error* and asks for confirmation
+   (always, also with `-y`).
 5. Removed: the file **and its `_flat` hard links** (otherwise no space would
-   be freed). Kept files are remembered and not shown again.
+   be freed). By default an **empty placeholder (0 bytes)** is left under the
+   original name, so a downloader that skips existing names does not fetch
+   the video again; `--no-placeholder` removes the name completely. Every
+   removal is recorded in `state/triage_discarded.tsv`. Kept files are
+   remembered and not shown again.
+
+Placeholders are ignored by `shrink`, `progress`, `flatten` and `triage`, and
+`sync` never copies them over the full file on the backup (`--min-size=1`).
+Whether a downloader really skips a 0-byte file depends on the downloader -
+check it once with one video before a large session.
 
 VLC is started with `--no-one-instance --no-playlist-enqueue`; a player that
 exits within three seconds counts as an error and its file is kept. Trashed
@@ -242,7 +258,7 @@ Without `TARGET` you are asked which mounted disk to use; the choice is
 remembered. The transfer is
 
 ```bash
-rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude='*.part' SOURCE/ TARGET/
+rsync -aHu --no-inc-recursive --min-size=1 --exclude=newShrinkedFiles/ --exclude='*.part' SOURCE/ TARGET/
 ```
 
 preceded by a dry run with a summary and a confirmation. Before that the
@@ -304,6 +320,9 @@ They live in `~/scripts/mediatools.d/mediatools.ini` (or
 [collection]
 root = ~/Pictures/collection
 
+[sync]
+source = ~
+
 [shrink]
 db_name = shrink.db
 
@@ -323,8 +342,17 @@ max_deletions = 500
 ```
 
 `mediatools config` prints the effective values. If the database name is
-changed, `mediatools rename-db OLDNAME [PATH]` renames existing databases
-(and their `.bak_*` backups) in one pass; `--dry-run` lists them first.
+changed, `mediatools rename-db OLDNAME NEWNAME [PATH]` renames existing
+databases (and their `.bak_*` backups) in one pass without further questions
+and stores the new name as `[shrink] db_name`; `--dry-run` lists them first.
+
+Every command takes an explicit path, which always wins over the file. To
+change a default permanently:
+
+```bash
+mediatools config --set collection.root=~/Pictures/other   # shrink, triage, flatten, ...
+mediatools config --set sync.source=~                      # default source of sync
+```
 
 ## How the pieces fit together
 
@@ -350,7 +378,8 @@ All logs and state live in `$MEDIATOOLS_HOME` (default
 ```text
 mediatools.ini   configuration
 logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
-state/     triage_kept.tsv, sync_targets.json, snapshot_levels.json
+state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
+           sync_targets.json, snapshot_levels.json
 plans/     flatten_<ts>.tsv  (input for --undo)
 reports/   progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
 snapshot/  rsnapshot.conf (generated), rsnapshot.log
@@ -388,6 +417,7 @@ and all paths come from the configuration file; the defaults are generic.
 pip install -e '.[dev]'                  # pytest, pylint, mypy, pycodestyle, bandit
 git config core.hooksPath .githooks      # pre-push hook runs the gates
 tools/check.sh                           # format, lint, types, security, tests
+                                         # (needs ffmpeg, rsync, rsnapshot installed)
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```
 
