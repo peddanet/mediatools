@@ -134,3 +134,31 @@ def test_cli_rename_db(datadir: Path, tmp_path: Path) -> None:
     assert (tmp_path / "c/d/legacy.db").exists()
     assert main(["rename-db", "legacy.db", str(tmp_path / "c"), "-y"]) == 0
     assert (tmp_path / "c/d/fresh.db").exists()
+
+
+def test_set_value_keeps_comments() -> None:
+    """Changing one value keeps comments and other values."""
+    config = Config()
+    config.set_value("shrink", "db_name", "renamed.db")
+    text = Path(config.path).read_text(encoding="utf-8")
+    assert "db_name = renamed.db" in text and "# File name of the per-directory" in text
+    assert Config().db_name() == "renamed.db"
+    config.set_value("extra", "key", "v")
+    assert Config().get("extra", "key") == "v"
+
+
+def test_cli_rename_db_to_option_and_trailing_path(tmp_path: Path) -> None:
+    """``--to`` sets the new name and stores it; a path may follow options.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    make_file(tmp_path / "c/d/legacy.db")
+    assert main(["rename-db", "legacy.db", "--dry-run", "--to", "plain.db",
+                 str(tmp_path / "c")]) == 0
+    assert (tmp_path / "c/d/legacy.db").exists() and not Config().exists()
+    assert main(["rename-db", "legacy.db", "-y", "--to", "plain.db", str(tmp_path / "c")]) == 0
+    assert (tmp_path / "c/d/plain.db").exists()
+    assert Config().db_name() == "plain.db"
+    with pytest.raises(SystemExit):
+        main(["rename-db", "legacy.db", "one", "two"])
