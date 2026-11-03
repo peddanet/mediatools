@@ -129,6 +129,7 @@ mediatools config               # print the effective values incl. defaults
 | Section / key | Default | Used by |
 |---|---|---|
 | `[collection] root` | -- | every command called without a path |
+| `[sync] source` | `[collection] root` | `sync` called without a source |
 | `[shrink] db_name` | `shrink.db` | shrink, progress, rename-db |
 | `[flatten] abbreviations` | `Videos=V, Images=I, Audios=U` | flatten, naming level 1 |
 | `[snapshot] source`, `disk` | -- | snapshot (required) |
@@ -140,6 +141,24 @@ mediatools config               # print the effective values incl. defaults
 A missing or invalid value stops the command with a message that names the
 key and the expected format.
 
+**Which directory is used.** A path on the command line always wins; the
+file only provides defaults. Different jobs usually start at different
+levels -- for example the collection for `shrink`, `triage` and `flatten`,
+but the whole home directory for `sync` and `snapshot` -- hence the separate
+keys. Change a default without an editor:
+
+~~~bash
+mediatools config --set collection.root=~/Pictures/collection
+mediatools config --set sync.source=~ --set snapshot.source=~
+mediatools config                      # show the effective values
+~~~
+
+`--set SECTION.KEY=VALUE` replaces only that line and keeps all comments;
+a missing file is created from the template first.
+
+For `flatten`, `root` must be the **master level**: each direct
+sub-directory is treated as one unit with its own `_flat`.
+
 ## Renaming existing databases
 
 If the shrink databases of an existing collection carry another file name,
@@ -147,15 +166,15 @@ set `[shrink] db_name` and rename them in one pass. The old name is passed
 on the command line only:
 
 ~~~bash
-mediatools rename-db OLDNAME.db --to NEWNAME.db --dry-run     # list, change nothing
-mediatools rename-db OLDNAME.db --to NEWNAME.db -y            # rename, no question
+mediatools rename-db OLDNAME.db NEWNAME.db PATH --dry-run     # list, change nothing
+mediatools rename-db OLDNAME.db NEWNAME.db PATH               # rename
 ~~~
 
 `OLDNAME.db` and its backups `OLDNAME.db.bak_*` become `NEWNAME.db` and
-`NEWNAME.db.bak_*`. `--to` also stores `NEWNAME.db` as `[shrink] db_name`
-(comments in the file are kept), so `shrink` and `progress` find the renamed
-databases. Without `--to` the current `[shrink] db_name` is used. The path
-defaults to `[collection] root` and may also follow the options. Renaming within a directory keeps the inode; content and
+`NEWNAME.db.bak_*`; there is no further question. Afterwards `NEWNAME.db` is
+stored as `[shrink] db_name` (comments in the file are kept), so `shrink` and
+`progress` find the renamed databases. `PATH` defaults to `[collection] root`
+and may also follow the options. Renaming within a directory keeps the inode; content and
 time stamps are unchanged. A directory that already contains the new name
 is reported as a conflict and left alone -- nothing is overwritten.
 

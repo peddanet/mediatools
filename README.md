@@ -19,7 +19,7 @@ mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
 mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
 mediatools config    one local file for paths and names (kept outside the repo)
-mediatools rename-db rename shrink databases to the configured name
+mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 ```
 
 ---
@@ -320,6 +320,9 @@ They live in `~/scripts/mediatools.d/mediatools.ini` (or
 [collection]
 root = ~/Pictures/collection
 
+[sync]
+source = ~
+
 [shrink]
 db_name = shrink.db
 
@@ -339,9 +342,17 @@ max_deletions = 500
 ```
 
 `mediatools config` prints the effective values. If the database name is
-changed, `mediatools rename-db OLDNAME [PATH] [--to NEWNAME]` renames existing
-databases (and their `.bak_*` backups) in one pass; `--to` also stores the new
-name as `[shrink] db_name`; `--dry-run` lists them first.
+changed, `mediatools rename-db OLDNAME NEWNAME [PATH]` renames existing
+databases (and their `.bak_*` backups) in one pass without further questions
+and stores the new name as `[shrink] db_name`; `--dry-run` lists them first.
+
+Every command takes an explicit path, which always wins over the file. To
+change a default permanently:
+
+```bash
+mediatools config --set collection.root=~/Pictures/other   # shrink, triage, flatten, ...
+mediatools config --set sync.source=~                      # default source of sync
+```
 
 ## How the pieces fit together
 
@@ -406,6 +417,7 @@ and all paths come from the configuration file; the defaults are generic.
 pip install -e '.[dev]'                  # pytest, pylint, mypy, pycodestyle, bandit
 git config core.hooksPath .githooks      # pre-push hook runs the gates
 tools/check.sh                           # format, lint, types, security, tests
+                                         # (needs ffmpeg, rsync, rsnapshot installed)
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```
 
