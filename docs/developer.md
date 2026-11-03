@@ -187,10 +187,11 @@ directory, configuration -- lives in `core`.
 
 | Class | Responsibility |
 |---|---|
-| `CandidateFinder` | lazy search of videos within a duration range |
+| `CandidateFinder` | search of videos within a duration range; `collect()` counts first |
+| `DurationCache` | ffprobe durations keyed by path, size and mtime |
 | `PlayerSession` | one player process per video, classification |
 | `FlatLinkResolver` | `_flat` names of a file by inode |
-| `FileRemover` | `gio trash` or permanent deletion |
+| `FileRemover` | `gio trash` or permanent deletion; `discard()` leaves a 0-byte placeholder |
 | `KeptList` | decisions across sessions |
 | `Triage` | batch workflow |
 
@@ -299,6 +300,8 @@ Invariants:
 <unit>/_flat/_index.tsv               FlatIndex        link name TAB relative source path
 <data>/plans/flatten_<ts>.tsv         FlatPlan         action unit link source level note
 <data>/state/triage_kept.tsv          KeptList         path TAB size TAB mtime
+<data>/state/triage_discarded.tsv     Triage           time TAB size TAB path
+<data>/state/triage_durations.tsv     DurationCache    path TAB size TAB mtime_ns TAB seconds
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
 <data>/reports/sync_target_only_*.tsv TargetReport     status size path same_as
@@ -353,6 +356,9 @@ progress is read-only                         test_progress_is_read_only
 early player exit never deletes               test_player_early_exit_is_error
 _flat link removed with the original          test_triage_removes_original_and_flat_link
 no removal without confirmation               test_triage_not_confirmed_removes_nothing
+placeholder left, never overwrites a file     test_triage_removes_original_and_flat_link,
+                                              test_placeholder_never_overwrites
+placeholder never replaces a backup copy      test_sync_placeholder_keeps_backup_copy
 originals untouched by flatten                test_flatten_never_touches_originals
 hard links preserved, nothing deleted         test_sync_preserves_hardlinks_and_never_deletes
 newer receiver file kept (rsync -u)           test_sync_update_does_not_overwrite_newer_target

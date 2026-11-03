@@ -147,12 +147,15 @@ set `[shrink] db_name` and rename them in one pass. The old name is passed
 on the command line only:
 
 ~~~bash
-mediatools rename-db OLDNAME.db --dry-run     # list, change nothing
-mediatools rename-db OLDNAME.db               # rename after confirmation
+mediatools rename-db OLDNAME.db --to NEWNAME.db --dry-run     # list, change nothing
+mediatools rename-db OLDNAME.db --to NEWNAME.db -y            # rename, no question
 ~~~
 
-`OLDNAME.db` and its backups `OLDNAME.db.bak_*` become `shrink.db` and
-`shrink.db.bak_*`. Renaming within a directory keeps the inode; content and
+`OLDNAME.db` and its backups `OLDNAME.db.bak_*` become `NEWNAME.db` and
+`NEWNAME.db.bak_*`. `--to` also stores `NEWNAME.db` as `[shrink] db_name`
+(comments in the file are kept), so `shrink` and `progress` find the renamed
+databases. Without `--to` the current `[shrink] db_name` is used. The path
+defaults to `[collection] root` and may also follow the options. Renaming within a directory keeps the inode; content and
 time stamps are unchanged. A directory that already contains the new name
 is reported as a conflict and left alone -- nothing is overwritten.
 
@@ -303,20 +306,57 @@ mediatools triage ~/Pictures/collection/A --batch 3
 mediatools triage ~/Pictures/collection --min-seconds 10 --max-seconds 30
 ~~~
 
-1. `CandidateFinder` walks the tree lazily and yields clips within the
-   duration range that are not on the kept list.
+1. **Count first.** `CandidateFinder` collects all clips within the
+   duration range that are not on the kept list; empty placeholders are
+   skipped. Durations come from `state/triage_durations.tsv` when size and
+   modification time are unchanged, otherwise from ffprobe. The session then
+   reports, for example (numbers illustrative):
+
+~~~text
+412 of 18230 videos match: 42 batch(es) of up to 10, total clip length 196 min,
+estimated review time about 75 min
+CLOSE a window = REMOVE that video (an empty placeholder keeps its name);
+leave it OPEN = KEEP it.
+Start the review? [Y/n]
+~~~
+
+   The estimate assumes that each batch is watched once through its longest
+   clip plus 15 s for the decision. `--dry-run` prints the list and this
+   report and stops; `-y` skips only this start question.
 2. `PlayerSession` starts one player process per clip (VLC muted and
    looping by default), then waits 3 s and flags processes that already
    ended.
-3. The user closes the windows of clips to discard and presses Enter
-   (`s` skips the batch, `q` quits).
-4. Classification and summary, then confirmation:
+3. **Close the window of every video to remove; leave the windows of the
+   videos to keep open.** Then press Enter (`s` skips the batch, `q` quits).
+4. Classification and summary, then confirmation -- always, also with `-y`:
 
 | Process state | Meaning | Action after `y` |
 |---|---|---|
-| running | keep | close window, add to kept list |
-| ended with 0 after the start window | discard | remove file and its `_flat` links |
+| running (window still open) | keep | close window, add to kept list |
+| ended with 0 after the start window (window closed) | remove | remove file and its `_flat` links, leave placeholder |
 | ended within 3 s or with code ≠ 0 | player error | keep, not added to kept list |
+
+## Placeholders
+
+A removed video is replaced by an empty file (0 bytes) with the same name.
+Download tools that skip files whose name already exists therefore do not
+fetch it again. Details:
+
+* The original goes to the trash (or is deleted with `--delete`); the
+  placeholder is created right afterwards and never overwrites a file.
+* `shrink`, `progress`, `flatten` and `triage` ignore 0-byte files.
+* `sync` passes `--min-size=1` to rsync: the placeholder is not copied over
+  the full file on the backup, and because the placeholder is newer, `-u`
+  prevents a reverse sync from restoring the old file over it.
+* `snapshot` treats the placeholder like any change: the newest snapshot
+  holds the empty file, older snapshots keep the video.
+* Every removal is appended to `state/triage_discarded.tsv`
+  (`time<TAB>size<TAB>path`).
+* `--no-placeholder` removes the name completely.
+
+Whether a particular downloader treats a 0-byte file as "already present" or
+as an incomplete download is a property of that downloader; test it with a
+single file before a large session.
 
 ## Why `_flat` links are removed too
 
@@ -343,6 +383,8 @@ Trashed files occupy space until the trash is emptied (`gio trash --empty`).
 | `--player` | `vlc` | e.g. `mpv`, `"flatpak run org.videolan.VLC"` |
 | `--audio` | off | play with sound |
 | `--delete` | off | permanent deletion instead of trash |
+| `--no-placeholder` | off | do not leave an empty file under the removed name |
+| `-y` | off | skip the start question; batches are still confirmed |
 | `--include-kept` | off | show kept clips again |
 | `--dry-run` | off | list candidates only |
 
@@ -437,7 +479,8 @@ Without a target, mounted file systems below `/media`, `/run/media` and
 ## rsync options
 
 ~~~text
-rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude=*.part \
+rsync -aHu --no-inc-recursive --min-size=1 \
+      --exclude=newShrinkedFiles/ --exclude=*.part \
       --exclude=.Trash-*/ --exclude=.mediatools-hl-* SOURCE/ TARGET/
 ~~~
 
@@ -447,6 +490,7 @@ rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude=*.part \
 | `-H` | hard links stay hard links -- `_flat` costs no space on the target |
 | `-u` | a newer file on the receiver is never overwritten (protects shrunk files when copying back) |
 | `--no-inc-recursive` | complete file list first; recommended by the rsync manual with `-H` |
+| `--min-size=1` | empty triage placeholders never replace the full file on the target |
 | no `--delete` | files that exist only in the target are kept and reported |
 
 rsync detects hard links only inside the transfer set; therefore the unit
