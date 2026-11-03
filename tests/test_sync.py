@@ -28,6 +28,7 @@ def test_rsync_command_never_deletes() -> None:
     """The rsync command preserves hard links and has no --delete."""
     cmd = RsyncRunner("/a", "/b").command(dry_run=False)
     assert "-aHu" in cmd and "--no-inc-recursive" in cmd
+    assert "--min-size=1" in cmd                     # placeholders never overwrite backups
     assert not any(arg.startswith("--delete") for arg in cmd)
     assert cmd[-2:] == ["/a/", "/b/"]
 
@@ -80,3 +81,20 @@ def test_sync_update_does_not_overwrite_newer_target(tmp_path: Path) -> None:
     os.utime(old, (1_000_000, 1_000_000))
     Syncer(str(src), str(dst), LOG, Prompt(assume_yes=True), report=False).run()
     assert read(new) == b"shrunk"
+
+
+@needs_rsync
+def test_sync_placeholder_keeps_backup_copy(tmp_path: Path) -> None:
+    """A triage placeholder neither replaces nor is replaced by the backup copy.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    full = make_file(dst / "a.mp4", b"full video")
+    os.utime(full, (1_000_000, 1_000_000))
+    placeholder = make_file(src / "a.mp4", b"")
+    Syncer(str(src), str(dst), LOG, Prompt(assume_yes=True), report=False).run()
+    assert read(full) == b"full video"
+    Syncer(str(dst), str(src), LOG, Prompt(assume_yes=True), report=False).run()
+    assert read(placeholder) == b""

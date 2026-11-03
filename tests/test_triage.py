@@ -6,9 +6,10 @@ import time
 from pathlib import Path
 
 from conftest import make_file
+from mediatools.core import Prompt
 from mediatools.flatten import Flattener
-from mediatools.triage import (FileRemover, FlatLinkResolver, KeptList, PlayerSession,
-                               Triage)
+from mediatools.triage import (CandidateFinder, DurationCache, FileRemover, FlatLinkResolver,
+                               KeptList, PlayerSession, Triage)
 
 LOG = logging.getLogger("test")
 
@@ -147,7 +148,9 @@ class FakePlayer:
 
 
 def test_triage_removes_original_and_flat_link(tmp_path: Path) -> None:
-    """Discarding removes the original and its _flat link; keeps the rest.
+    """Closing a window removes the video and its _flat link; open ones stay.
+
+    A 0-byte placeholder keeps the original name and the removal is logged.
 
     Args:
         tmp_path: Temporary directory (fixture).
@@ -159,10 +162,12 @@ def test_triage_removes_original_and_flat_link(tmp_path: Path) -> None:
     kept = KeptList(str(tmp_path / "kept.tsv"))
     triage = Triage(str(tmp_path), LOG, finder=[(first, 1.0), (second, 1.0)],
                     player=FakePlayer(), remover=FileRemover(permanent=True, logger=LOG),
-                    kept=kept, batch=10, prompt=FakePrompt())
+                    kept=kept, batch=10, prompt=FakePrompt(),
+                    discarded_log=str(tmp_path / "discarded.tsv"))
     assert triage.run() == 0
-    assert not os.path.exists(first)
+    assert os.path.getsize(first) == 0                                   # placeholder
     assert not os.path.exists(tmp_path / "unit/_flat/posts__a.mp4")
+    assert first in (tmp_path / "discarded.tsv").read_text(encoding="utf-8")
     assert os.path.exists(second) and os.path.exists(tmp_path / "unit/_flat/posts__b.mp4")
     assert kept.contains(second)
 
@@ -179,3 +184,96 @@ def test_triage_not_confirmed_removes_nothing(tmp_path: Path) -> None:
                     kept=KeptList(str(tmp_path / "k.tsv")), prompt=FakePrompt(yes=False))
     triage.run()
     assert os.path.exists(path)
+
+
+def test_triage_without_placeholder_deletes(tmp_path: Path) -> None:
+    """With placeholder=False the name disappears completely.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    first = make_file(tmp_path / "unit/a.mp4", b"a")
+    second = make_file(tmp_path / "unit/b.mp4", b"b")
+    triage = Triage(str(tmp_path), LOG, finder=[(first, 1.0), (second, 1.0)],
+                    player=FakePlayer(), remover=FileRemover(permanent=True, logger=LOG),
+                    kept=KeptList(str(tmp_path / "kept.tsv")), prompt=FakePrompt(),
+                    placeholder=False, discarded_log=str(tmp_path / "d.tsv"))
+    assert triage.run() == 0
+    assert not os.path.exists(first) and os.path.exists(second)
+
+
+def test_placeholder_never_overwrites(tmp_path: Path) -> None:
+    """If the name is taken again before the placeholder is made, it is kept.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    path = make_file(tmp_path / "a.mp4", b"a")
+
+    class Recreating(FileRemover):
+        """Remover whose removal is immediately undone by someone else."""
+
+        def remove(self, path: str) -> bool:
+            """Pretend to remove, but leave a new file behind.
+
+            Args:
+                path: File to remove.
+
+            Returns:
+                Always True.
+            """
+            Path(path).write_bytes(b"new")
+            return True
+
+    assert not Recreating(permanent=True, logger=LOG).discard(path)
+    assert Path(path).read_bytes() == b"new"
+
+
+def test_announce_counts_and_estimates(tmp_path: Path) -> None:
+    """The start message reports count, batches and asks only if wanted.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    candidates = [(str(tmp_path / f"{n}.mp4"), 30.0) for n in range(25)]
+    triage = Triage(str(tmp_path), LOG, finder=candidates, player=FakePlayer(),
+                    remover=FileRemover(permanent=True, logger=LOG),
+                    kept=KeptList(str(tmp_path / "kept.tsv")), batch=10,
+                    prompt=Prompt(False, lambda _q: "n"), discarded_log=str(tmp_path / "d"))
+    assert not triage.announce(candidates, 100)                  # user answers no
+    assert triage.announce(candidates, 100, ask=False)            # -y / dry run
+    assert not triage.announce([], 100, ask=False)                # nothing to do
+
+
+def test_duration_cache_and_empty_files(tmp_path: Path) -> None:
+    """Cached durations are reused while size and mtime are unchanged.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    video = make_file(tmp_path / "v.mp4", b"video")
+    make_file(tmp_path / "placeholder.mp4", b"")
+
+    class CountingProbe:
+        """Probe that counts its calls."""
+
+        calls = 0
+
+        def duration(self, _path: str) -> float:
+            """Return a fixed duration (the path is ignored).
+
+            Returns:
+                Always 5.0.
+            """
+            CountingProbe.calls += 1
+            return 5.0
+
+    cache_file = str(tmp_path / "cache.tsv")
+    for _run in range(2):
+        finder = CandidateFinder(str(tmp_path), frozenset({".mp4"}), 0, 60,
+                                 probe=CountingProbe(),  # type: ignore[arg-type]
+                                 cache=DurationCache(cache_file))
+        assert finder.collect() == [(video, 5.0)]               # placeholder skipped
+    assert CountingProbe.calls == 1
+    Path(video).write_bytes(b"changed video")
+    assert DurationCache(cache_file).get(video, os.stat(video)) is None

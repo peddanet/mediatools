@@ -3,6 +3,37 @@
 All notable changes are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `triage`: counts the matching videos first and reports batches, total
+  length and an estimated review time before asking to start; durations
+  are cached in `state/triage_durations.tsv`; `-y` skips only the start
+  question.
+- `triage`: a removed video is replaced by an empty placeholder (0 bytes)
+  under its original name, so downloaders that skip existing names do not
+  fetch it again (`--no-placeholder` to disable); removals are recorded in
+  `state/triage_discarded.tsv`.
+- `config --set SECTION.KEY=VALUE`: change defaults without an editor;
+  comments in the file are kept.
+- `[sync] source`: own default source for `sync` (e.g. the home
+  directory), independent of `[collection] root`.
+
+### Changed
+- `rename-db OLD NEW [PATH]`: both names on the command line, no
+  confirmation question; NEW is stored as `[shrink] db_name`.
+- `tools/check.sh` stops with an installation hint if ffmpeg, rsync or
+  rsnapshot are missing instead of skipping integration tests.
+- Wording of the triage instructions: close a window = remove, leave it
+  open = keep.
+- 0-byte files are ignored by `shrink`, `progress`, `flatten` and `triage`.
+- `sync` uses `rsync --min-size=1`, so a placeholder never replaces the
+  full file on the backup.
+
+### Fixed
+- A path given after options (`rename-db OLD --dry-run PATH`) was rejected
+  as "unrecognized argument".
+
 ## [1.1.0] - 2026-11-03
 
 First public release.

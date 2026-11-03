@@ -8,9 +8,21 @@ classDiagram
     +kept
     +probe
     +log
+    +cache
     +scanned
-    +init(root, extensions, min_s, max_s, kept, probe, logger)
+    +init(root, extensions, min_s, max_s, kept, probe, logger, cache)
     +iter()
+    -_duration(path)
+    +collect()
+  }
+  class DurationCache {
+    +path
+    +entries
+    +hits
+    +init(path)
+    +get(file_path, st)
+    +put(file_path, st, duration)
+    +save()
   }
   class KeptList {
     +path
@@ -45,6 +57,7 @@ classDiagram
     +init(permanent, logger, gio)
     +verb()
     +remove(path)
+    +discard(path, placeholder)
   }
   class Triage {
     +root
@@ -57,15 +70,20 @@ classDiagram
     +prompt
     +links
     +batch_no
-    +init(root, logger, finder, player, remover, kept, batch, prompt)
+    +placeholder
+    +discarded_log
+    +init(root, logger, finder, player, remover, kept, batch, prompt, placeholder, discarded_log)
     +install_signal_handlers()
     -_on_signal(signum, _frame)
+    +announce(candidates, scanned, ask)
     +run()
     +review(batch)
+    -_discard(path, flat_names)
     -_summary(plan, still_open, errors)
     -_other_links(path, flat)
     +kept_list(datadir)
   }
+  CandidateFinder --> DurationCache
   CandidateFinder --> KeptList
   Triage --> CandidateFinder
   Triage --> FileRemover

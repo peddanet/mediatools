@@ -13,6 +13,10 @@ class FileRemover:
     ``gio trash --restore <uri>``. Trashed files still occupy disk space
     until the trash is emptied.
 
+    :meth:`discard` additionally leaves an empty placeholder under the
+    original name, so a downloader that skips existing file names does not
+    fetch the discarded video again.
+
     Attributes:
         permanent: Delete instead of trashing.
         log: Optional logger.
@@ -62,4 +66,36 @@ class FileRemover:
         except (OSError, subprocess.CalledProcessError) as exc:
             if self.log:
                 self.log.error("could not remove %s: %s", path, exc)
+            return False
+
+    def discard(self, path: str, placeholder: bool = True) -> bool:
+        """Remove a file and optionally leave a 0-byte placeholder.
+
+        The placeholder is created exclusively (``open(..., "x")``) right
+        after the removal, so an existing file is never overwritten. Its
+        modification time is the current time; ``sync`` therefore neither
+        copies it over the full file on a backup (``--min-size=1``) nor
+        restores the old file over it (``-u``).
+
+        Args:
+            path: File to remove.
+            placeholder: Create the empty file under the same name.
+
+        Returns:
+            True if the file was removed (and, if requested, the placeholder
+            created); False otherwise (logged).
+        """
+        if not self.remove(path):
+            return False
+        if not placeholder:
+            return True
+        try:
+            with open(path, "x", encoding="utf-8"):
+                pass
+            if self.log:
+                self.log.info("PLACEHOLDER (0 bytes): %s", path)
+            return True
+        except OSError as exc:
+            if self.log:
+                self.log.error("could not create placeholder %s: %s", path, exc)
             return False

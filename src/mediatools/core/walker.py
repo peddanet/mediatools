@@ -64,8 +64,9 @@ class TreeWalker:
             extensions: Accepted lower-case extensions including the dot.
 
         Yields:
-            Absolute paths of matching regular files.
+            Absolute paths of matching regular files; empty files (0 bytes,
+            e.g. triage placeholders) are left out.
         """
         for path in self.files(root):
-            if MediaTypes.extension(path) in extensions:
+            if MediaTypes.extension(path) in extensions and os.path.getsize(path) > 0:
                 yield path
