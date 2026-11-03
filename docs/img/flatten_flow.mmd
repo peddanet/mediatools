@@ -1,0 +1,9 @@
+flowchart LR
+  M[master dir] --> U1[unit A] & U2[unit B]
+  U1 --> W[walk media files<br/>skip _flat, newShrinkedFiles, symlinks]
+  W --> I{inode already<br/>in _flat?}
+  I -- yes --> OK[ok]
+  I -- no --> N[FlatNamer: level 0..3<br/>within statvfs name limit]
+  N --> P[(plan TSV)]
+  P --> C{confirm}
+  C -- yes --> L[os.link into unit/_flat<br/>update _index.tsv]

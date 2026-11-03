@@ -1,0 +1,91 @@
+classDiagram
+  direction LR
+  class RsnapshotConf {
+    +settings
+    +path
+    +log_file
+    +lock_file
+    +init(settings, datadir)
+    +render()
+    +write()
+    +command(args)
+    +configtest()
+    +run(args)
+  }
+  class LevelSchedule {
+    +settings
+    +path
+    +init(settings, datadir)
+    +load()
+    +due(now)
+    +record(level, when)
+  }
+  class SnapshotSettings {
+    +source
+    +disk
+    +root
+    +retain
+    +exclude
+    +max_deletions
+    +from_config(config)
+    +mirror(base)
+    +init(source, disk, root, retain, exclude, max_deletions)
+  }
+  class Snapshotter {
+    +settings
+    +log
+    +prompt
+    +conf
+    +probe
+    +schedule
+    +fscheck
+    +datadir
+    +ismount
+    +init(settings, logger, prompt, conf, probe, schedule, fscheck, datadir, ismount)
+    -_path(name)
+    +latest_mirror()
+    -_write_list(prefix, paths)
+    -_log_probe(result, label)
+    -_top(directory)
+    +check()
+    +probe_report()
+    -_which(tool)
+    -_configtest()
+    +init()
+    +adopt(existing, keep_stand0)
+    -_adoptable(existing)
+    -_matches(existing)
+    +run(dry_run, now)
+    -_root_ready()
+    -_probe_acceptable()
+    -_sync_and_rotate(now)
+    -_inode(name)
+    +status()
+  }
+  class SyncProbe {
+    +settings
+    +rsync
+    +init(settings, rsync)
+    +command(mirror)
+    +run(mirror)
+    +parse(output)
+    +looks_like_copy(result, tolerance)
+  }
+  class SystemdTrigger {
+    +disk
+    +launcher
+    +unit_dir
+    +init(disk, launcher, unit_dir)
+    +mount_unit()
+    +mount_unit_known()
+    +render()
+    +install()
+  }
+  RsnapshotConf --> SnapshotSettings
+  LevelSchedule --> SnapshotSettings
+  SnapshotSettings ..> Snapshotter
+  Snapshotter --> LevelSchedule
+  Snapshotter --> RsnapshotConf
+  Snapshotter --> SnapshotSettings
+  Snapshotter --> SyncProbe
+  SyncProbe --> SnapshotSettings

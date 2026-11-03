@@ -1,0 +1,69 @@
+classDiagram
+  direction LR
+  class Cli { +main(argv) int }
+  class Config { +db_name() +abbreviations() +require_path() }
+  class DataDir { +sub(name) +file(sub,prefix,suffix) }
+  class RunLog { +logger +path }
+  class MediaTypes { <<static>> MEDIA VIDEO SKIP_DIRS }
+  class MediaProbe { +duration(p) +video_codec(p) }
+  class TreeWalker { +walk(root) +media_files(root) }
+  class Prompt { +yes_no(q) +text(q) }
+  class Shrinker { +run() int }
+  class ShrinkDatabase { +ensure() +is_done(p) +record(p) }
+  class HevcEncoder { +encode(src,dst) +validate(src,dst) }
+  class ProgressReport { +run() int }
+  class DatabaseRenamer { +plan() +apply(plan) }
+  class Triage { +run() +review(batch) }
+  class CandidateFinder { +__iter__() }
+  class PlayerSession { +open(paths) +classify() +close_all() }
+  class FlatLinkResolver { +flat_names(p) }
+  class FileRemover { +remove(p) }
+  class KeptList { +contains(p) +add(paths) }
+  class Flattener { +analyse() FlatPlan +apply(plan) +undo(plan) }
+  class FlatNamer { +name(parts) +disambiguate(n,rel) }
+  class FlatIndex { +load() +save() }
+  class FlatPlan { +save(p) +load(p) }
+  class Syncer { +check() +run() +write_report() }
+  class FsCheck { +fs_type(p) +can_hardlink(d) }
+  class TargetPicker { +pick(src) +remember(src,dst) }
+  class RsyncRunner { +command() +dry_run() +run() }
+  class TargetReport { +analyse() +write() }
+  class Snapshotter { +check() +adopt(dir) +init() +run() +status() }
+  class SnapshotSettings { +from_config(cfg) +mirror(base) }
+  class RsnapshotConf { +render() +configtest() +run(args) }
+  class SyncProbe { +run(mirror) +looks_like_copy(r) }
+  class LevelSchedule { +due(now) +record(level,when) }
+  class SystemdTrigger { +mount_unit() +install() }
+  Cli --> Shrinker
+  Cli --> ProgressReport
+  Cli --> Triage
+  Cli --> Flattener
+  Cli --> Syncer
+  Shrinker --> ShrinkDatabase
+  Shrinker --> HevcEncoder
+  Shrinker --> TreeWalker
+  HevcEncoder --> MediaProbe
+  ProgressReport --> ShrinkDatabase
+  Triage --> CandidateFinder
+  Triage --> PlayerSession
+  Triage --> FlatLinkResolver
+  Triage --> FileRemover
+  Triage --> KeptList
+  Flattener --> FlatNamer
+  Flattener --> FlatIndex
+  Flattener --> FlatPlan
+  Syncer --> FsCheck
+  Syncer --> RsyncRunner
+  Syncer --> TargetReport
+  Cli --> TargetPicker
+  Cli --> Config
+  Cli --> DatabaseRenamer
+  Cli --> Snapshotter
+  Cli --> SystemdTrigger
+  ShrinkDatabase <.. DatabaseRenamer : renames files of
+  Snapshotter --> SnapshotSettings
+  Snapshotter --> RsnapshotConf
+  Snapshotter --> SyncProbe
+  Snapshotter --> LevelSchedule
+  Snapshotter --> FsCheck
+  SnapshotSettings ..> Config

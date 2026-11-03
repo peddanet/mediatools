@@ -1,0 +1,69 @@
+classDiagram
+  direction LR
+  class Config {
+    +path
+    +parser
+    +init(datadir)
+    +exists()
+    +write_template()
+    +get(section, key)
+    +path_value(section, key)
+    +integer(section, key)
+    +db_name()
+    +abbreviations()
+    +require_path(section, key, given)
+    +render()
+  }
+  class DataDir {
+    +root
+    +init(root)
+    +sub(name)
+    +file(sub, prefix, suffix)
+    +stamp()
+  }
+  class MediaTypes {
+    +FLAT_DIR
+    +SHRINK_TMP_DIR
+    +SKIP_DIRS
+    +VIDEO
+    +IMAGE
+    +AUDIO
+    +MEDIA
+    +extension(name)
+    +is_media(name)
+    +is_video(name)
+    +parse_extensions(csv)
+  }
+  class MediaProbe {
+    +ffprobe
+    +init(ffprobe)
+    +available()
+    +value(path, entry, stream)
+    +duration(path)
+    +video_codec(path)
+    +has_video(path)
+  }
+  class Prompt {
+    +assume_yes
+    +input
+    +init(assume_yes, input_func)
+    +yes_no(question, default)
+    +text(question, default)
+  }
+  class RunLog {
+    +datadir
+    +path
+    +logger
+    +init(name, verbose, datadir)
+    +close()
+  }
+  class TreeWalker {
+    +skip
+    +init(extra_skip)
+    +walk(root)
+    +files(root)
+    +media_files(root, extensions)
+  }
+  Config --> DataDir
+  RunLog --> DataDir
+  TreeWalker --> MediaTypes

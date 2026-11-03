@@ -1,0 +1,18 @@
+flowchart TD
+  A([mediatools snapshot run]) --> B{disk mounted,<br/>ext4/btrfs/xfs,<br/>tools present?}
+  B -- no --> X1[stop: explain what is missing]
+  B -- yes --> C{snapshot root<br/>exists?}
+  C -- no --> X2[stop: use adopt or init]
+  C -- yes --> D[probe: rsync -aHn --delete --stats<br/>source vs newest snapshot]
+  D --> E[write list of removals to reports/]
+  E --> F{data to write<br/>> 95 % of free space?}
+  F -- yes --> X3[stop: not enough space]
+  F -- no --> G{removals ><br/>max_deletions?}
+  G -- yes, -y --> X4[stop: deletion limit]
+  G -- yes, interactive --> H{user confirms?}
+  H -- no --> X4
+  H -- yes --> I
+  G -- no --> I[rsnapshot sync into .sync<br/>link-dest = alpha.0]
+  I --> J[rotate due levels:<br/>delta, gamma, beta]
+  J --> K[rsnapshot alpha:<br/>.sync becomes alpha.0]
+  K --> L([done])

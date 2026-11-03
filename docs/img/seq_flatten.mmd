@@ -1,0 +1,29 @@
+sequenceDiagram
+  actor U as User
+  participant C as Cli
+  participant FL as Flattener
+  participant N as FlatNamer
+  participant I as FlatIndex
+  participant P as FlatPlan
+  participant FS as file system
+  U->>C: mediatools flatten MASTER
+  C->>FL: analyse()
+  loop every unit
+    FL->>FS: statvfs(unit).f_namemax
+    FL->>I: load _flat/_index.tsv
+    FL->>FS: scandir(_flat) -> existing inodes
+    loop every media file
+      alt inode already in _flat
+        FL->>P: ok
+      else
+        FL->>N: name(parts) -> (name, level)
+        FL->>P: link / relink / skip
+      end
+    end
+  end
+  C->>P: save(plans/flatten_ts.tsv)
+  C->>U: summary, confirm?
+  U-->>C: y
+  C->>FL: apply(plan)
+  FL->>FS: os.link(source, _flat/name)
+  FL->>I: save()

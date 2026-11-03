@@ -1,0 +1,461 @@
+"""Command line interface: ``mediatools <subcommand> ...``."""
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import shutil
+import sys
+
+from mediatools import __version__
+from mediatools.core.config import Config
+from mediatools.core.datadir import DataDir
+from mediatools.core.mediatypes import MediaTypes
+from mediatools.core.probe import MediaProbe
+from mediatools.core.prompt import Prompt
+from mediatools.core.runlog import RunLog
+from mediatools.flatten import FlatPlan, Flattener
+from mediatools.shrink import DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker
+from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
+from mediatools.sync import Syncer, TargetPicker
+from mediatools.triage import CandidateFinder, FileRemover, PlayerSession, Triage
+
+
+class Cli:
+    """Parses arguments and dispatches to the subcommand classes.
+
+    Each ``cmd_*`` method builds the objects of one subcommand, runs it and
+    returns the process exit code.
+
+    Attributes:
+        parser: The configured :class:`argparse.ArgumentParser`.
+    """
+
+    def __init__(self):
+        """Build the argument parser."""
+        self.parser = self._build_parser()
+
+    # -- parser ----------------------------------------------------------
+    @staticmethod
+    def _build_parser() -> argparse.ArgumentParser:
+        """Define all subcommands and options.
+
+        Returns:
+            The parser.
+        """
+        parser = argparse.ArgumentParser(
+            prog="mediatools",
+            description="Maintenance tools for large local media collections: "
+                        "shrink videos to HEVC, review short clips, build flat "
+                        "hard-link views and back up without losing hard links.")
+        parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+        sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+        cmd = sub.add_parser("shrink", help="re-encode videos to HEVC (libx265) in place")
+        cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
+        cmd.add_argument("--keep-copies", action="store_true",
+                         help="do not replace originals; keep shrunk copies in newShrinkedFiles/")
+        cmd.add_argument("--crf", type=int, default=28, help="libx265 CRF (default 28)")
+        cmd.add_argument("--threads", type=int, default=6, help="ffmpeg threads (default 6)")
+        cmd.add_argument("--ext", default="mp4", help="video extensions (default mp4)")
+        cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
+        cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+
+        cmd = sub.add_parser("progress", help="read-only report: which videos are shrunk")
+        cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
+        cmd.add_argument("--ext", default="mp4")
+
+        cmd = sub.add_parser("triage", help="review short videos; close a window to discard")
+        cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
+        cmd.add_argument("--max-seconds", type=float, default=60.0)
+        cmd.add_argument("--min-seconds", type=float, default=0.0)
+        cmd.add_argument("--batch", type=int, default=10)
+        cmd.add_argument("--ext", default="mp4,m4v,mov,mkv,webm")
+        cmd.add_argument("--player", default="vlc")
+        cmd.add_argument("--audio", action="store_true", help="play with sound")
+        cmd.add_argument("--delete", action="store_true", help="delete instead of trash")
+        cmd.add_argument("--include-kept", action="store_true")
+        cmd.add_argument("--dry-run", action="store_true", help="only list candidates")
+
+        cmd = sub.add_parser("flatten", help="hard links of all media of each unit in <unit>/_flat")
+        cmd.add_argument("path", nargs="?",
+                         help="master directory (default: [collection] root); "
+                              "its sub-directories are units")
+        cmd.add_argument("--ext", default=None, help="extensions (default: video, image, audio)")
+        cmd.add_argument("--no-abbrev", action="store_true", help="never abbreviate folder names")
+        cmd.add_argument("--prune", action="store_true",
+                         help="also remove links whose source is gone")
+        cmd.add_argument("--dry-run", action="store_true", help="analyse and save plan only")
+        cmd.add_argument("--undo", metavar="PLAN", help="remove the links created by a plan file")
+        cmd.add_argument("-y", "--yes", action="store_true")
+
+        cmd = sub.add_parser("sync", help="backup with hard links preserved, never deletes")
+        cmd.add_argument("source", nargs="?", help="default: [collection] root")
+        cmd.add_argument("target", nargs="?", help="omit to choose the disk interactively")
+        cmd.add_argument("--reverse", action="store_true", help="swap source and target")
+        cmd.add_argument("--no-report", action="store_true", help="skip target-only report")
+        cmd.add_argument("--find-duplicates", action="store_true",
+                         help="also list identical files in different inodes on the target")
+        cmd.add_argument("--report-only", action="store_true", help="no transfer, report only")
+        cmd.add_argument("-y", "--yes", action="store_true")
+        Cli._add_admin_parsers(sub)
+        return parser
+
+    @staticmethod
+    def _add_admin_parsers(sub) -> None:
+        """Define the subcommands rename-db, config and snapshot.
+
+        Args:
+            sub: Sub-parser collection of the main parser.
+        """
+        cmd = sub.add_parser("rename-db", help="rename shrink databases to [shrink] db_name")
+        cmd.add_argument("old", help="current database file name")
+        cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
+        cmd.add_argument("--dry-run", action="store_true", help="only list what would change")
+        cmd.add_argument("-y", "--yes", action="store_true")
+
+        cmd = sub.add_parser("config", help="show, create or locate the configuration file")
+        group = cmd.add_mutually_exclusive_group()
+        group.add_argument("--init", action="store_true", help="write a commented template")
+        group.add_argument("--path", action="store_true", help="print the file location only")
+
+        cmd = sub.add_parser("snapshot", help="versioned backups with rsnapshot")
+        cmd.add_argument("action", choices=["check", "adopt", "init", "run", "status",
+                                            "install-trigger"])
+        cmd.add_argument("existing", nargs="?", help="adopt: existing mirror on the disk")
+        cmd.add_argument("--no-stand0", action="store_true",
+                         help="adopt: do not keep a permanent copy of the first state")
+        cmd.add_argument("--dry-run", action="store_true", help="run: probe only")
+        cmd.add_argument("-y", "--yes", action="store_true",
+                         help="run: no questions; abort instead of asking")
+
+    # -- dispatch --------------------------------------------------------
+    def main(self, argv: list[str] | None = None) -> int:
+        """Parse arguments and run the selected subcommand.
+
+        Args:
+            argv: Arguments without the program name; ``sys.argv`` if None.
+
+        Returns:
+            Process exit code.
+        """
+        args = self.parser.parse_args(argv)
+        if not args.command:
+            self.parser.print_help()
+            return 1
+        return getattr(self, "cmd_" + args.command.replace("-", "_"))(args)
+
+    @staticmethod
+    def _dir(path: str) -> str:
+        """Validate a directory argument.
+
+        Args:
+            path: Directory given on the command line.
+
+        Returns:
+            Absolute path.
+
+        Raises:
+            SystemExit: If the path is not a directory.
+        """
+        if not os.path.isdir(path):
+            raise SystemExit(f"Error: not a directory: {path}")
+        return os.path.abspath(path)
+
+    @staticmethod
+    def _need(*tools: str) -> None:
+        """Ensure external programs are installed.
+
+        Args:
+            *tools: Executable names.
+
+        Raises:
+            SystemExit: If at least one tool is missing.
+        """
+        missing = [tool for tool in tools if shutil.which(tool) is None]
+        if missing:
+            raise SystemExit("Error: required tool(s) not found: " + ", ".join(missing))
+
+    # -- subcommands -----------------------------------------------------
+    def cmd_shrink(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools shrink``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of :meth:`Shrinker.run` (0 if the user declined).
+        """
+        config = Config()
+        root = self._dir(config.require_path("collection", "root", args.path))
+        self._need("ffmpeg", "ffprobe")
+        mode = "keep shrunk copies" if args.keep_copies else "REPLACE the originals"
+        if not Prompt(args.yes).yes_no(f"Shrink videos below {root} and {mode}?"):
+            return 0
+        run = RunLog("shrink", args.verbose)
+        encoder = HevcEncoder(args.crf, args.threads, MediaProbe(), run.logger)
+        shrinker = Shrinker(root, run.logger, args.keep_copies,
+                            MediaTypes.parse_extensions(args.ext), encoder,
+                            db_name=config.db_name())
+        shrinker.install_signal_handlers()
+        return shrinker.run()
+
+    def cmd_progress(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools progress``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of :meth:`ProgressReport.run`.
+        """
+        config = Config()
+        root = self._dir(config.require_path("collection", "root", args.path))
+        run = RunLog("progress")
+        return ProgressReport(root, run.logger, extensions=MediaTypes.parse_extensions(args.ext),
+                              db_name=config.db_name()).run()
+
+    def cmd_triage(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools triage``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of :meth:`Triage.run` (0 for a dry run).
+
+        Raises:
+            SystemExit: If the duration range is invalid.
+        """
+        root = self._dir(Config().require_path("collection", "root", args.path))
+        if args.min_seconds > args.max_seconds:
+            raise SystemExit("Error: --min-seconds is larger than --max-seconds")
+        self._need("ffprobe")
+        run = RunLog("triage")
+        kept = Triage.kept_list()
+        finder = CandidateFinder(root, MediaTypes.parse_extensions(args.ext), args.min_seconds,
+                                 args.max_seconds, None if args.include_kept else kept,
+                                 logger=run.logger)
+        if args.dry_run:
+            count = 0
+            for path, duration in finder:
+                count += 1
+                run.logger.info("  %6.1fs  %s", duration, path)
+            run.logger.info("%i matching videos (dry run)", count)
+            return 0
+        self._need(shlex.split(args.player)[0], *([] if args.delete else ["gio"]))
+        triage = Triage(root, run.logger, finder, PlayerSession(args.player, args.audio),
+                        FileRemover(args.delete, run.logger), kept, args.batch)
+        triage.install_signal_handlers()
+        return triage.run()
+
+    def cmd_flatten(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools flatten`` (analysis, plan, confirmation, apply).
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 on success or dry run, 1 if a link could not be created.
+
+        Raises:
+            SystemExit: If no path is given and none is configured.
+        """
+        run = RunLog("flatten")
+        if args.undo:
+            removed = Flattener(os.getcwd(), run.logger).undo(FlatPlan.load(args.undo))
+            run.logger.info("removed %i links of plan %s", removed, args.undo)
+            return 0
+        config = Config()
+        root = self._dir(config.require_path("collection", "root", args.path))
+        extensions = MediaTypes.parse_extensions(args.ext) if args.ext else MediaTypes.MEDIA
+        flattener = Flattener(root, run.logger, extensions, not args.no_abbrev, args.prune,
+                              config.abbreviations())
+        run.logger.info("master: %s  units: %i  name limit: %i bytes",
+                        root, len(flattener.units()), flattener.name_limit(root))
+        plan = flattener.analyse()
+        plan_path = DataDir().file("plans", "flatten", ".tsv")
+        plan.save(plan_path)
+        todo = self._log_plan(run.logger, plan, plan_path)
+        if args.dry_run or todo == 0:
+            return 0
+        if not Prompt(args.yes).yes_no(f"Apply {todo} change(s) inside the _flat directories?"):
+            return 0
+        done = flattener.apply(plan)
+        run.logger.info("done: %s  (undo: mediatools flatten --undo %s)", done, plan_path)
+        return 1 if done["error"] else 0
+
+    @staticmethod
+    def _log_plan(logger, plan: FlatPlan, plan_path: str) -> int:
+        """Log the summary of a flatten plan.
+
+        Args:
+            logger: :class:`logging.Logger`.
+            plan: Plan from :meth:`Flattener.analyse`.
+            plan_path: Where the plan was saved.
+
+        Returns:
+            Number of changes the plan would make.
+        """
+        counts, levels = plan.counts(), plan.level_counts()
+        logger.info("new links: %i | renewed: %i | already present: %i | prune: %i | "
+                    "not possible: %i", counts.get("link", 0), counts.get("relink", 0),
+                    counts.get("ok", 0), counts.get("prune", 0), counts.get("skip", 0))
+        logger.info("naming levels of new links: %s (0 full, 1 abbreviated, "
+                    "2 stem cut, 3 hashed dir)", dict(sorted(levels.items())))
+        shortened = [e for e in plan.entries if e.action in ("link", "relink") and e.level >= 2]
+        for entry in shortened[:10]:
+            logger.info("    shortened (level %i): %s", entry.level, os.path.basename(entry.link))
+        for entry in plan.by_action("skip")[:10]:
+            logger.info("    not possible: %s (%s)", entry.source, entry.note)
+        logger.info("plan: %s", plan_path)
+        return counts.get("link", 0) + counts.get("relink", 0) + counts.get("prune", 0)
+
+    def cmd_sync(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools sync``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of :meth:`Syncer.run`; 1 if no target was chosen.
+        """
+        prompt = Prompt(args.yes)
+        args.source = Config().require_path("collection", "root", args.source)
+        picked = args.target
+        if picked is None:
+            picked = TargetPicker(prompt).pick(args.source)
+            if not picked:
+                return 1
+        source, target = (picked, args.source) if args.reverse else (args.source, picked)
+        run = RunLog("sync")
+        syncer = Syncer(source, target, run.logger, prompt, report=not args.no_report,
+                        all_duplicates=args.find_duplicates)
+        if args.report_only:
+            syncer.write_report()
+            return 0
+        code = syncer.run()
+        if code == 0 and args.target is None:
+            TargetPicker(prompt).remember(args.source, picked)
+        return code
+
+    def cmd_rename_db(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools rename-db``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 on success or dry run, 1 if a file could not be renamed.
+        """
+        config = Config()
+        root = self._dir(config.require_path("collection", "root", args.path))
+        run = RunLog("rename-db")
+        renamer = DatabaseRenamer(root, args.old, config.db_name(), run.logger)
+        plan = renamer.plan()
+        conflicts = [src for src, _dst, status in plan if status == "conflict"]
+        run.logger.info("%i file(s) %r -> %r below %s, %i conflict(s)",
+                        len(plan) - len(conflicts), args.old, renamer.new, root, len(conflicts))
+        for path in conflicts[:10]:
+            run.logger.warning("    target name exists, left alone: %s", path)
+        if args.dry_run or not plan:
+            return 0
+        if not Prompt(args.yes).yes_no("Rename these database files?"):
+            return 0
+        counts = renamer.apply(plan)
+        run.logger.info("done: %s", counts)
+        return 1 if counts["error"] else 0
+
+    @staticmethod
+    def cmd_config(args: argparse.Namespace) -> int:
+        """Run ``mediatools config``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Always 0.
+        """
+        config = Config()
+        if args.path:
+            print(config.path)
+        elif args.init:
+            written = config.write_template()
+            print(("created " if written else "already exists, not changed: ") + config.path)
+        else:
+            state = "" if config.exists() else "   (file missing - defaults shown; " \
+                                               "create it with --init)"
+            print(f"# {config.path}{state}\n")
+            print(config.render())
+        return 0
+
+    def cmd_snapshot(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools snapshot <action>``.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of the action.
+
+        Raises:
+            SystemExit: If ``adopt`` is called without a directory.
+        """
+        settings = SnapshotSettings.from_config(Config())
+        run = RunLog("snapshot")
+        prompt = Prompt(args.yes)
+        snap = Snapshotter(settings, run.logger, prompt)
+        if args.action == "check":
+            ok = snap.check() and snap.probe_report()
+            return 0 if ok else 1
+        if args.action == "adopt":
+            if not args.existing:
+                raise SystemExit("Error: adopt needs the existing mirror on the disk, e.g.\n"
+                                 "  mediatools snapshot adopt /media/USER/BACKUP/collection")
+            return snap.adopt(args.existing, keep_stand0=not args.no_stand0)
+        if args.action == "init":
+            return snap.init()
+        if args.action == "run":
+            return snap.run(dry_run=args.dry_run)
+        if args.action == "status":
+            return snap.status()
+        return self._install_trigger(settings, run.logger)
+
+    @staticmethod
+    def _install_trigger(settings: SnapshotSettings, logger) -> int:
+        """Install the systemd user unit after checking the mount unit.
+
+        Args:
+            settings: Validated snapshot settings.
+            logger: :class:`logging.Logger`.
+
+        Returns:
+            0 on success, 1 if the disk's mount unit is not known.
+        """
+        launcher = shutil.which("mediatools") or os.path.abspath(sys.argv[0])
+        trigger = SystemdTrigger(settings.disk, launcher)
+        if not trigger.mount_unit_known():
+            logger.error("systemd does not report %s as active - attach and mount the disk "
+                         "first, then repeat", trigger.mount_unit())
+            return 1
+        path = trigger.install()
+        logger.info("written: %s\nactivate with (normal user):\n"
+                    "  systemctl --user daemon-reload\n"
+                    "  systemctl --user enable %s", path, trigger.NAME)
+        return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Console-script entry point.
+
+    Args:
+        argv: Arguments without the program name; ``sys.argv`` if None.
+
+    Returns:
+        Process exit code.
+    """
+    return Cli().main(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

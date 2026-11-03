@@ -1,0 +1,64 @@
+classDiagram
+  direction LR
+  class FlatIndex {
+    +path
+    +entries
+    +init(flat_dir)
+    +load()
+    +save()
+    +by_source()
+  }
+  class Flattener {
+    +root
+    +log
+    +extensions
+    +abbreviate
+    +prune
+    +abbreviations
+    +walker
+    +init(root, logger, extensions, abbreviate, prune, abbreviations)
+    +units()
+    +sources(unit)
+    +name_limit(path)
+    +analyse()
+    -_analyse_unit(unit, plan)
+    -_existing(flat)
+    +apply(plan)
+    +undo(plan)
+  }
+  class FlatNamer {
+    +limit
+    +abbrev
+    +init(limit, abbrev)
+    +nbytes(name)
+    +fits(name)
+    +compact(segment)
+    +short_hash(text, length)
+    -_cut_stem(prefix, filename)
+    +name(parts)
+    +disambiguate(name, relpath)
+  }
+  class FlatPlan {
+    +entries
+    +add(entry)
+    +by_action(action)
+    +counts()
+    +level_counts()
+    +save(path)
+    +load(path)
+    +init(entries)
+  }
+  class PlanEntry {
+    +action
+    +unit
+    +link
+    +source
+    +level
+    +note
+    +init(action, unit, link, source, level, note)
+  }
+  Flattener ..> FlatIndex
+  Flattener ..> FlatNamer
+  Flattener ..> FlatPlan
+  Flattener ..> PlanEntry
+  FlatPlan ..> PlanEntry

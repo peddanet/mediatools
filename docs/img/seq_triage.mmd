@@ -1,0 +1,27 @@
+sequenceDiagram
+  actor U as User
+  participant T as Triage
+  participant F as CandidateFinder
+  participant P as PlayerSession
+  participant V as VLC processes
+  participant L as FlatLinkResolver
+  participant R as FileRemover
+  participant K as KeptList
+  T->>F: iterate (lazy)
+  F-->>T: (path, duration) x batch
+  T->>P: open(paths)
+  P->>V: start one process per file
+  P->>P: wait start_window, flag early exits
+  U->>V: close unwanted windows
+  U->>T: Enter
+  T->>P: classify()
+  P-->>T: closed / open / errors
+  T->>L: flat_names(closed file)
+  L-->>T: _flat links (same inode)
+  T->>U: summary, confirm?
+  U-->>T: y
+  T->>P: close_all()
+  loop closed files
+    T->>R: remove(original), remove(_flat links)
+  end
+  T->>K: add(open files)

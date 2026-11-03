@@ -1,0 +1,77 @@
+classDiagram
+  direction LR
+  class ShrinkDatabase {
+    +name
+    +path
+    +log
+    +migrated_backup
+    +init(directory, logger, name)
+    +mtime_text(path)
+    -_connect()
+    +exists()
+    +ensure()
+    -_migrate()
+    +is_done(file_path)
+    +record(file_path)
+    +rows()
+  }
+  class DatabaseRenamer {
+    +root
+    +old
+    +new
+    +log
+    +walker
+    +init(root, old, new, logger)
+    +plan()
+    +apply(plan)
+  }
+  class HevcEncoder {
+    +crf
+    +threads
+    +probe
+    +log
+    +ffmpeg
+    +init(crf, threads, probe, logger, ffmpeg)
+    +command(src, dst)
+    +encode(src, dst)
+    +validate(src, dst)
+    -_info(args)
+    -_error(args)
+  }
+  class ProgressReport {
+    +root
+    +log
+    +datadir
+    +extensions
+    +db_name
+    +done
+    +todo
+    +init(root, logger, datadir, extensions, db_name)
+    +scan()
+    +write()
+    +run()
+  }
+  class Shrinker {
+    +root
+    +log
+    +keep_copies
+    +db_name
+    +extensions
+    +probe
+    +encoder
+    +walker
+    +stop_requested
+    +stats
+    +failed
+    +init(root, logger, keep_copies, extensions, encoder, probe, db_name)
+    +install_signal_handlers()
+    -_on_signal(signum, _frame)
+    +run()
+    -_process(database, dirpath, path)
+    -_remove_tmp(dirpath)
+    -_remove_quietly(path)
+    -_finish()
+  }
+  ProgressReport ..> ShrinkDatabase
+  Shrinker --> HevcEncoder
+  Shrinker ..> ShrinkDatabase

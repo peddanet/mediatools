@@ -1,0 +1,15 @@
+flowchart TD
+  A[sync SOURCE TARGET?] --> B{TARGET given?}
+  B -- no --> P[TargetPicker: list /media, /run/media, /mnt] --> C
+  B -- yes --> C{rsync installed?}
+  C -- no --> X[error]
+  C -- yes --> D{source and target nested?}
+  D -- yes --> X
+  D -- no --> E{fs type exFAT/FAT/NTFS?}
+  E -- yes --> X
+  E -- no --> H{hard-link test ok?}
+  H -- no --> X
+  H -- yes --> R[rsync --dry-run -i: summary]
+  R --> Q{changes and confirmed?}
+  Q -- no --> REP
+  Q -- yes --> T[rsync -aHu --no-inc-recursive] --> REP[TargetReport: target-only files]

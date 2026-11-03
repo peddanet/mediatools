@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mediatools"
+dynamic = ["version"]
+description = "Maintenance tools for large local media collections: HEVC shrinking, triage of short clips, flat hard-link views and hard-link preserving backups."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Peter Wein" }]
+keywords = ["ffmpeg", "hevc", "x265", "rsync", "hardlink", "media", "backup"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Environment :: Console",
+  "Topic :: Multimedia :: Video :: Conversion",
+  "Topic :: System :: Archiving :: Backup",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7", "pytest-cov>=4", "pylint>=3", "mypy>=1.8",
+  "pycodestyle>=2.11", "bandit[toml]>=1.7",
+]
+
+[project.scripts]
+mediatools = "mediatools.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "mediatools.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# resource leaks (unclosed files, DB connections) fail the test run
+filterwarnings = [
+  "error::ResourceWarning",
+  "error::pytest.PytestUnraisableExceptionWarning",
+]
+
+# --- pylint -----------------------------------------------------------------
+# Docstrings follow the Google style (Args/Returns/Yields/Raises) and are
+# enforced by the docparams extension.
+[tool.pylint.main]
+load-plugins = ["pylint.extensions.docparams", "pylint.extensions.docstyle"]
+py-version = "3.10"
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.parameter_documentation]
+default-docstring-type = "google"
+accept-no-param-doc = false
+accept-no-raise-doc = false
+accept-no-return-doc = false
+accept-no-yields-doc = false
+
+[tool.pylint.design]
+# collaborators are injected through the constructor (testability)
+max-args = 10
+max-positional-arguments = 10
+max-attributes = 12
+max-locals = 22
+min-public-methods = 1
+
+# --- quality gates (tools/check.sh, CI) -------------------------------------
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+
+[tool.coverage.run]
+source = ["mediatools"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = false
+skip_covered = true
+
+[tool.bandit]
+# B404/B603: subprocess is used deliberately with argument lists, never with
+# shell=True; every executable (ffmpeg, ffprobe, rsync, vlc, gio) is fixed.
+skips = ["B404", "B603"]

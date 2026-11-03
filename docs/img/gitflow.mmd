@@ -1,0 +1,19 @@
+%%{init: {'gitGraph': {'mainBranchName': 'main', 'showCommitLabel': true}} }%%
+gitGraph
+    commit id: "1.1.0" tag: "v1.1.0"
+    branch develop
+    checkout develop
+    branch feature/example-a
+    checkout feature/example-a
+    commit id: "change A"
+    commit id: "tests A"
+    checkout develop
+    merge feature/example-a id: "PR A"
+    branch feature/example-b
+    checkout feature/example-b
+    commit id: "change B"
+    checkout develop
+    merge feature/example-b id: "PR B"
+    commit id: "bump 1.2.0"
+    checkout main
+    merge develop id: "release" tag: "v1.2.0"

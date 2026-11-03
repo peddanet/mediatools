@@ -1,0 +1,21 @@
+classDiagram
+  direction LR
+  class Cli {
+    +parser
+    +init()
+    -_build_parser()
+    -_add_admin_parsers(sub)
+    +main(argv)
+    -_dir(path)
+    -_need(tools)
+    +cmd_shrink(args)
+    +cmd_progress(args)
+    +cmd_triage(args)
+    +cmd_flatten(args)
+    -_log_plan(logger, plan, plan_path)
+    +cmd_sync(args)
+    +cmd_rename_db(args)
+    +cmd_config(args)
+    +cmd_snapshot(args)
+    -_install_trigger(settings, logger)
+  }
