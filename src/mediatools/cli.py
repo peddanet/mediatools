@@ -18,7 +18,8 @@ from mediatools.flatten import FlatPlan, Flattener
 from mediatools.shrink import DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
-from mediatools.triage import CandidateFinder, FileRemover, PlayerSession, Triage
+from mediatools.triage import (CandidateFinder, DurationCache, FileRemover, PlayerSession,
+                               Triage)
 
 
 class Cli:
@@ -65,7 +66,8 @@ class Cli:
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
         cmd.add_argument("--ext", default="mp4")
 
-        cmd = sub.add_parser("triage", help="review short videos; close a window to discard")
+        cmd = sub.add_parser("triage", help="review short videos: close a window = remove, "
+                                            "leave it open = keep")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
         cmd.add_argument("--max-seconds", type=float, default=60.0)
         cmd.add_argument("--min-seconds", type=float, default=0.0)
@@ -74,8 +76,13 @@ class Cli:
         cmd.add_argument("--player", default="vlc")
         cmd.add_argument("--audio", action="store_true", help="play with sound")
         cmd.add_argument("--delete", action="store_true", help="delete instead of trash")
+        cmd.add_argument("--no-placeholder", action="store_true",
+                         help="do not leave an empty file under the name of a removed video")
         cmd.add_argument("--include-kept", action="store_true")
-        cmd.add_argument("--dry-run", action="store_true", help="only list candidates")
+        cmd.add_argument("--dry-run", action="store_true",
+                         help="only count and list candidates, estimate the review time")
+        cmd.add_argument("-y", "--yes", action="store_true",
+                         help="skip the start question (each batch is still confirmed)")
 
         cmd = sub.add_parser("flatten", help="hard links of all media of each unit in <unit>/_flat")
         cmd.add_argument("path", nargs="?",
@@ -111,6 +118,9 @@ class Cli:
         cmd = sub.add_parser("rename-db", help="rename shrink databases to [shrink] db_name")
         cmd.add_argument("old", help="current database file name")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
+        cmd.add_argument("--to", metavar="NAME",
+                         help="new name; also stored as [shrink] db_name "
+                              "(default: the current [shrink] db_name)")
         cmd.add_argument("--dry-run", action="store_true", help="only list what would change")
         cmd.add_argument("-y", "--yes", action="store_true")
 
@@ -139,7 +149,15 @@ class Cli:
         Returns:
             Process exit code.
         """
-        args = self.parser.parse_args(argv)
+        args, extra = self.parser.parse_known_args(argv)
+        # argparse cannot assign an optional positional that follows an
+        # option ("rename-db OLD --dry-run PATH"); accept exactly that case
+        for name in ("path", "source"):
+            if len(extra) == 1 and not extra[0].startswith("-") \
+                    and getattr(args, name, "") is None:
+                setattr(args, name, extra.pop())
+        if extra:
+            self.parser.error("unrecognized arguments: " + " ".join(extra))
         if not args.command:
             self.parser.print_help()
             return 1
@@ -233,19 +251,25 @@ class Cli:
         self._need("ffprobe")
         run = RunLog("triage")
         kept = Triage.kept_list()
+        cache = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
         finder = CandidateFinder(root, MediaTypes.parse_extensions(args.ext), args.min_seconds,
                                  args.max_seconds, None if args.include_kept else kept,
-                                 logger=run.logger)
+                                 logger=run.logger, cache=cache)
+        run.logger.info("counting matching videos (durations cached in %s) ...", cache.path)
+        candidates = finder.collect()
+        triage = Triage(root, run.logger, candidates, PlayerSession(args.player, args.audio),
+                        FileRemover(args.delete, run.logger), kept, args.batch,
+                        placeholder=not args.no_placeholder)
         if args.dry_run:
-            count = 0
-            for path, duration in finder:
-                count += 1
+            for path, duration in candidates:
                 run.logger.info("  %6.1fs  %s", duration, path)
-            run.logger.info("%i matching videos (dry run)", count)
+            triage.announce(candidates, finder.scanned, ask=False)
+            run.logger.info("dry run - nothing opened, nothing removed")
             return 0
         self._need(shlex.split(args.player)[0], *([] if args.delete else ["gio"]))
-        triage = Triage(root, run.logger, finder, PlayerSession(args.player, args.audio),
-                        FileRemover(args.delete, run.logger), kept, args.batch)
+        # -y only skips this start question; every batch is still confirmed
+        if not triage.announce(candidates, finder.scanned, ask=not args.yes):
+            return 0
         triage.install_signal_handlers()
         return triage.run()
 
@@ -351,9 +375,12 @@ class Cli:
         config = Config()
         root = self._dir(config.require_path("collection", "root", args.path))
         run = RunLog("rename-db")
-        renamer = DatabaseRenamer(root, args.old, config.db_name(), run.logger)
+        new_name = args.to or config.db_name()
+        renamer = DatabaseRenamer(root, args.old, new_name, run.logger)
         plan = renamer.plan()
         conflicts = [src for src, _dst, status in plan if status == "conflict"]
+        source = "--to" if args.to else f"[shrink] db_name in {config.path}"
+        run.logger.info("new name %r (from %s)", renamer.new, source)
         run.logger.info("%i file(s) %r -> %r below %s, %i conflict(s)",
                         len(plan) - len(conflicts), args.old, renamer.new, root, len(conflicts))
         for path in conflicts[:10]:
@@ -364,6 +391,9 @@ class Cli:
             return 0
         counts = renamer.apply(plan)
         run.logger.info("done: %s", counts)
+        if args.to and args.to != config.db_name():
+            config.set_value("shrink", "db_name", args.to)
+            run.logger.info("[shrink] db_name = %s stored in %s", args.to, config.path)
         return 1 if counts["error"] else 0
 
     @staticmethod
