@@ -37,6 +37,20 @@ for tool in pycodestyle pylint mypy bandit; do
     }
 done
 
+if (( FAST == 0 )); then
+    # integration tests are skipped when these programs are missing, which
+    # would lower the coverage; demand a complete test environment instead
+    missing=()
+    for tool in ffmpeg ffprobe rsync rsnapshot; do
+        command -v "$tool" >/dev/null || missing+=("$tool")
+    done
+    if (( ${#missing[@]} )); then
+        echo "missing programs for the integration tests: ${missing[*]}" >&2
+        echo "install with: sudo apt install ffmpeg rsync rsnapshot" >&2
+        exit 2
+    fi
+fi
+
 gate format   pycodestyle --max-line-length=100 src tests tools
 gate lint     pylint --fail-under=10 src tests tools
 gate types    mypy

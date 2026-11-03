@@ -208,7 +208,10 @@ Args:
     args: Parsed arguments.
 
 Returns:
-    Always 0.
+    0 on success.
+
+Raises:
+    SystemExit: If a ``--set`` item is not ``SECTION.KEY=VALUE``.
 ~~~
 
 **`cmd_snapshot`**
@@ -292,6 +295,23 @@ Write the commented template unless the file already exists.
 
 Returns:
     True if the file was written, False if it already existed.
+~~~
+
+**`set_value`**
+
+~~~text
+set_value(self, section: str, key: str, value: str) -> None
+
+Set one value in the INI file, keeping comments and layout.
+
+The file is created from the template if it does not exist. Only
+the line ``key = ...`` inside the section is replaced (or added at
+the end of the section).
+
+Args:
+    section: INI section.
+    key: Key inside the section.
+    value: New value.
 ~~~
 
 **`get`**
@@ -800,7 +820,8 @@ Args:
     extensions: Accepted lower-case extensions including the dot.
 
 Yields:
-    Absolute paths of matching regular files.
+    Absolute paths of matching regular files; empty files (0 bytes,
+    e.g. triage placeholders) are left out.
 ~~~
 
 ## `mediatools.shrink`
@@ -1323,10 +1344,12 @@ Remove all temporary directories below root and log the summary.
 ~~~text
 Yields videos whose duration lies in ``[min_s, max_s]``.
 
-The search is lazy (a generator), so the first batch can be shown before
-the whole tree has been probed. ``_flat`` and ``newShrinkedFiles`` are
-never entered, hence every video is offered once under its original
-name.
+Iterating is lazy (a generator); :meth:`collect` runs the whole search
+first so that the number of candidates is known before the review
+starts. ``_flat`` and ``newShrinkedFiles`` are never entered and empty
+placeholder files are skipped, hence every video is offered once under
+its original name. Durations are taken from a :class:`DurationCache`
+when one is given, so repeated scans are fast.
 
 Attributes:
     root: Start directory.
@@ -1336,6 +1359,7 @@ Attributes:
     kept: Kept list or None (then nothing is filtered).
     probe: Probe for the durations.
     log: Optional logger.
+    cache: Optional duration cache.
     scanned: Number of videos looked at so far.
 ~~~
 
@@ -1351,6 +1375,7 @@ __init__(
     kept: KeptList | None = None,
     probe: MediaProbe | None = None,
     logger=None,
+    cache: DurationCache | None = None,
 )
 
 Configure the search.
@@ -1363,6 +1388,7 @@ Args:
     kept: Files on this list are skipped; None disables the filter.
     probe: Probe; a new one if None.
     logger: Optional :class:`logging.Logger`.
+    cache: Duration cache; None probes every file.
 ~~~
 
 **`__iter__`**
@@ -1374,6 +1400,96 @@ Walk the tree and probe each video.
 
 Yields:
     ``(path, duration_seconds)`` of every matching video.
+~~~
+
+**`_duration`**
+
+~~~text
+_duration(self, path: str) -> float | None
+
+Return the duration, from the cache if possible.
+
+Args:
+    path: Video file.
+
+Returns:
+    Duration in seconds, or None if ffprobe cannot tell.
+~~~
+
+**`collect`**
+
+~~~text
+collect(self) -> list[tuple[str, float]]
+
+Run the complete search before the review starts.
+
+Returns:
+    All matching ``(path, duration)`` pairs in walk order; the cache
+    (if any) is saved afterwards.
+~~~
+
+### `DurationCache` (`mediatools.triage.durationcache`) {.unnumbered}
+
+~~~text
+Remembers ffprobe durations keyed by path, size and mtime.
+
+Probing every video costs one ffprobe process. The cache makes the
+candidate count of a second run almost instant: an entry is used only
+while size and modification time of the file are unchanged.
+
+Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>duration``.
+
+Attributes:
+    path: Location of the TSV file.
+    entries: Mapping path to ``(size, mtime_ns, duration)``.
+    hits: Number of lookups answered from the cache in this run.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str)
+
+Load the cache file if it exists.
+
+Args:
+    path: Location of the TSV file (created by :meth:`save`).
+~~~
+
+**`get`**
+
+~~~text
+get(self, file_path: str, st: os.stat_result) -> float | None
+
+Return the cached duration if the file is unchanged.
+
+Args:
+    file_path: Video file.
+    st: Its current ``os.stat`` result.
+
+Returns:
+    Duration in seconds, or None if unknown or outdated.
+~~~
+
+**`put`**
+
+~~~text
+put(self, file_path: str, st: os.stat_result, duration: float) -> None
+
+Store a duration.
+
+Args:
+    file_path: Video file.
+    st: Its ``os.stat`` result at probing time.
+    duration: Duration in seconds.
+~~~
+
+**`save`**
+
+~~~text
+save(self) -> None
+
+Write the cache atomically (temporary file, then rename).
 ~~~
 
 ### `KeptList` (`mediatools.triage.keptlist`) {.unnumbered}
@@ -1622,6 +1738,10 @@ can be listed with ``gio trash --list`` and restored with
 ``gio trash --restore <uri>``. Trashed files still occupy disk space
 until the trash is emptied.
 
+:meth:`discard` additionally leaves an empty placeholder under the
+original name, so a downloader that skips existing file names does not
+fetch the discarded video again.
+
 Attributes:
     permanent: Delete instead of trashing.
     log: Optional logger.
@@ -1666,19 +1786,47 @@ Returns:
     True on success, False if the removal failed (logged).
 ~~~
 
+**`discard`**
+
+~~~text
+discard(self, path: str, placeholder: bool = True) -> bool
+
+Remove a file and optionally leave a 0-byte placeholder.
+
+The placeholder is created exclusively (``open(..., "x")``) right
+after the removal, so an existing file is never overwritten. Its
+modification time is the current time; ``sync`` therefore neither
+copies it over the full file on a backup (``--min-size=1``) nor
+restores the old file over it (``-u``).
+
+Args:
+    path: File to remove.
+    placeholder: Create the empty file under the same name.
+
+Returns:
+    True if the file was removed (and, if requested, the placeholder
+    created); False otherwise (logged).
+~~~
+
 ### `Triage` (`mediatools.triage.triage`) {.unnumbered}
 
 ~~~text
 Interactive batch review: close a window to discard that video.
 
+Before the first batch, :meth:`announce` reports how many videos match
+and roughly how long the review will take, and asks whether to start.
+
 Workflow per batch:
 
 1. open ``batch`` candidates, one player process each
-2. the user closes the windows of unwanted videos and presses Enter
+2. the user **closes** the windows of the videos to **remove** and leaves
+   the windows of the videos to **keep** open, then presses Enter
 3. summary (remove / keep / player error) and confirmation
 4. removal of each discarded file **together with its ``_flat`` hard
-   links** (otherwise no space would be freed); kept files go to the
-   kept list; remaining players are closed
+   links** (otherwise no space would be freed); by default an empty
+   placeholder keeps the original name, so a downloader does not fetch
+   the video again; kept files go to the kept list; remaining players
+   are closed
 
 Attributes:
     root: Absolute start directory.
@@ -1691,6 +1839,8 @@ Attributes:
     prompt: Prompt for the questions.
     links: Resolver for ``_flat`` names.
     batch_no: Number of the current batch.
+    placeholder: Leave a 0-byte file under the name of a removed video.
+    discarded_log: TSV file that records every removed video.
 ~~~
 
 **`__init__`**
@@ -1706,6 +1856,8 @@ __init__(
     kept: KeptList,
     batch: int = 10,
     prompt: Prompt | None = None,
+    placeholder: bool = True,
+    discarded_log: str | None = None,
 )
 
 Wire the collaborators.
@@ -1719,6 +1871,9 @@ Args:
     kept: Kept list.
     batch: Videos per batch.
     prompt: Prompt; a default :class:`Prompt` if None.
+    placeholder: Leave an empty file under the name of a removed video.
+    discarded_log: TSV of removed videos; ``<data>/state/triage_discarded.tsv``
+        if None.
 ~~~
 
 **`install_signal_handlers`**
@@ -1739,6 +1894,30 @@ Close players and exit with code 130.
 Args:
     signum: Number of the received signal.
     _frame: Current stack frame (unused).
+~~~
+
+**`announce`**
+
+~~~text
+announce(
+    self,
+    candidates: list[tuple[str, float]],
+    scanned: int,
+    ask: bool = True,
+) -> bool
+
+Report size and estimated duration of the session and ask to start.
+
+The estimate assumes that each batch is watched once through its
+longest clip plus :attr:`SECONDS_PER_DECISION` for the decision.
+
+Args:
+    candidates: All matching ``(path, duration)`` pairs.
+    scanned: Number of videos examined in the search.
+    ask: Ask before starting; False only reports.
+
+Returns:
+    True if the review should start.
 ~~~
 
 **`run`**
@@ -1764,6 +1943,18 @@ Args:
 
 Returns:
     False if the user quits the session, otherwise True.
+~~~
+
+**`_discard`**
+
+~~~text
+_discard(self, path: str, flat_names: list[str]) -> None
+
+Remove the ``_flat`` links and the video, record the removal.
+
+Args:
+    path: Original video.
+    flat_names: Its ``_flat`` hard links.
 ~~~
 
 **`_summary`**
@@ -2476,6 +2667,8 @@ Options and why:
 ``-u``                 never overwrite a newer file on the receiving side
 ``--no-inc-recursive`` full file list first, so hard links are found before
                        data is copied (rsync manual recommendation)
+``--min-size=1``       empty files are not transferred: a triage placeholder
+                       never overwrites the full copy on the backup
 ``--exclude``          temporary shrink output and partial downloads
 
 ``--delete`` is deliberately **never** used: files that exist only in the

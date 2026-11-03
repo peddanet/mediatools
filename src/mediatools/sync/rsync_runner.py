@@ -17,6 +17,8 @@ class RsyncRunner:
     ``-u``                 never overwrite a newer file on the receiving side
     ``--no-inc-recursive`` full file list first, so hard links are found before
                            data is copied (rsync manual recommendation)
+    ``--min-size=1``       empty files are not transferred: a triage placeholder
+                           never overwrites the full copy on the backup
     ``--exclude``          temporary shrink output and partial downloads
 
     ``--delete`` is deliberately **never** used: files that exist only in the
@@ -30,7 +32,7 @@ class RsyncRunner:
 
     EXCLUDES = (f"{MediaTypes.SHRINK_TMP_DIR}/", "*.part", ".Trash-*/",
                 ".mediatools-hl-*")
-    BASE = ("-aHu", "--no-inc-recursive")
+    BASE = ("-aHu", "--no-inc-recursive", "--min-size=1")
 
     def __init__(self, source: str, target: str, rsync: str = "rsync"):
         """Store the directories.
