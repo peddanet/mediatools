@@ -1,0 +1,21 @@
+sequenceDiagram
+  actor U as User
+  participant S as Syncer
+  participant F as FsCheck
+  participant R as rsync
+  participant T as TargetReport
+  U->>S: mediatools sync SOURCE [TARGET]
+  opt no TARGET
+    S->>U: list mounted disks, ask
+    U-->>S: choice (remembered)
+  end
+  S->>F: nested? fs type? hard-link test
+  F-->>S: ok
+  S->>R: -aHu --no-inc-recursive --dry-run -i
+  R-->>S: itemized changes
+  S->>U: new / update / hard links - start?
+  U-->>S: y
+  S->>R: real run (progress, log file)
+  S->>T: files only in TARGET
+  T-->>S: unique / duplicate / hardlinked
+  S->>U: report path (nothing deleted)

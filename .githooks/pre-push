@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Git pre-push hook: run all quality gates before anything leaves the machine.
+#
+# Activate once per clone (normal user):
+#     git config core.hooksPath .githooks
+# Bypass in an emergency (CI still enforces the gates):
+#     git push --no-verify
+#
+# Pushing tags or deleting branches only does not run the gates.
+
+set -euo pipefail
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+# Decide on the REMOTE ref: for "git push origin HEAD:x" the local ref is
+# the literal "HEAD". A local sha of only zeros means "delete remote ref".
+run=0
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+    [[ "$local_sha" =~ ^0+$ ]] && continue
+    [[ "$remote_ref" == refs/heads/* ]] && run=1
+done
+
+if (( run )); then
+    exec "$(git rev-parse --show-toplevel)/tools/check.sh"
+fi

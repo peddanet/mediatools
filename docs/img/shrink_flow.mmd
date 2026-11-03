@@ -1,0 +1,11 @@
+flowchart TD
+  A[next video in directory] --> B{row in shrink database<br/>path + size + mtime?}
+  B -- yes --> S[skip - database has precedence]
+  B -- no --> C{first video stream<br/>already HEVC?}
+  C -- yes --> R1[record in DB, no re-encode]
+  C -- no --> E[ffmpeg libx265 -> newShrinkedFiles/]
+  E --> V{exit 0, video stream,<br/>duration matches?}
+  V -- no --> F[log FAILED, original kept, continue]
+  V -- yes --> K{--keep-copies?}
+  K -- yes --> KC[keep copy, record nothing]
+  K -- no --> W[copy into original inode + record<br/>no interruption in between]

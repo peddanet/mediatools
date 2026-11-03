@@ -1,0 +1,74 @@
+classDiagram
+  direction LR
+  class CandidateFinder {
+    +root
+    +extensions
+    +min_s
+    +max_s
+    +kept
+    +probe
+    +log
+    +scanned
+    +init(root, extensions, min_s, max_s, kept, probe, logger)
+    +iter()
+  }
+  class KeptList {
+    +path
+    +init(path)
+    +key(file_path)
+    +load()
+    +contains(file_path)
+    +add(paths)
+  }
+  class FlatLinkResolver {
+    +root
+    +init(root)
+    -_flat_index(flat_dir)
+    +flat_names(path)
+    +forget(path)
+  }
+  class PlayerSession {
+    +argv
+    +start_window
+    +stagger
+    +items
+    +init(player, audio, start_window, stagger)
+    +build_argv(player, audio)
+    +open(paths)
+    +classify()
+    +close_all(grace)
+  }
+  class FileRemover {
+    +permanent
+    +log
+    +gio
+    +init(permanent, logger, gio)
+    +verb()
+    +remove(path)
+  }
+  class Triage {
+    +root
+    +log
+    +finder
+    +player
+    +remover
+    +kept
+    +batch
+    +prompt
+    +links
+    +batch_no
+    +init(root, logger, finder, player, remover, kept, batch, prompt)
+    +install_signal_handlers()
+    -_on_signal(signum, _frame)
+    +run()
+    +review(batch)
+    -_summary(plan, still_open, errors)
+    -_other_links(path, flat)
+    +kept_list(datadir)
+  }
+  CandidateFinder --> KeptList
+  Triage --> CandidateFinder
+  Triage --> FileRemover
+  Triage --> FlatLinkResolver
+  Triage --> KeptList
+  Triage --> PlayerSession

@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> Unlinked: new media file
+  Unlinked --> Linked: link
+  Linked --> Linked: re-run (ok, same inode)
+  Linked --> Stale: source replaced (new inode)
+  Stale --> Linked: relink (atomic)
+  Linked --> Orphan: source deleted
+  Orphan --> [*]: prune (only with --prune)
+  Linked --> [*]: undo PLAN

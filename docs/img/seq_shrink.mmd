@@ -1,0 +1,39 @@
+sequenceDiagram
+  actor U as User
+  participant C as Cli
+  participant S as Shrinker
+  participant W as TreeWalker
+  participant D as ShrinkDatabase
+  participant P as MediaProbe
+  participant E as HevcEncoder
+  participant F as ffmpeg
+  U->>C: mediatools shrink PATH
+  C->>U: confirm replace originals?
+  U-->>C: y
+  C->>S: run()
+  loop every directory
+    S->>W: walk(root) (skips _flat, newShrinkedFiles)
+    S->>D: ensure() (create / migrate)
+    loop every video
+      S->>D: is_done(path)?
+      alt recorded
+        D-->>S: yes -> skip
+      else not recorded
+        S->>P: video_codec(path)
+        alt hevc
+          S->>D: record(path)
+        else other codec
+          S->>E: encode(path, tmp)
+          E->>F: ffmpeg -vcodec libx265 -crf 28
+          F-->>E: exit code
+          E->>P: has_video / duration (validate)
+          E-->>S: ok?
+          opt ok and not keep_copies
+            S->>S: copyfile(tmp, path) same inode
+            S->>D: record(path)
+          end
+        end
+      end
+    end
+  end
+  S-->>C: exit code 0 / 1 / 2

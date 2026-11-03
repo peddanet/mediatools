@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Started: Popen
+  Started --> EarlyExit: ended within start_window
+  Started --> Running: alive after start_window
+  Running --> Closed: user closes window (exit 0)
+  Running --> Crashed: exit code != 0
+  Running --> Terminated: close_all() (SIGTERM / SIGKILL)
+  EarlyExit --> [*]: classified ERROR -> keep
+  Crashed --> [*]: classified ERROR -> keep
+  Closed --> [*]: classified CLOSED -> remove after confirmation
+  Terminated --> [*]: classified OPEN -> keep, add to kept list

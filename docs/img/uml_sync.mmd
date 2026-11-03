@@ -1,0 +1,64 @@
+classDiagram
+  direction LR
+  class FsCheck {
+    +mounts_file
+    +init(mounts_file)
+    +mounts()
+    +mount_of(path)
+    +fs_type(path)
+    +can_hardlink(directory)
+    +free_bytes(path)
+    +nested(first, second)
+  }
+  class RsyncRunner {
+    +source
+    +target
+    +rsync
+    +init(source, target, rsync)
+    +command(dry_run, log_file)
+    +dry_run()
+    +parse(itemized)
+    +run(log_file)
+  }
+  class Syncer {
+    +source
+    +target
+    +log
+    +prompt
+    +datadir
+    +report
+    +all_duplicates
+    +fs
+    +init(source, target, logger, prompt, datadir, report, all_duplicates, fs)
+    +check()
+    +run()
+    +write_report()
+  }
+  class TargetPicker {
+    +prompt
+    +fs
+    +state
+    +init(prompt, fs, datadir)
+    +candidates()
+    -_load()
+    +remember(source, target)
+    +pick(source)
+  }
+  class TargetReport {
+    +source
+    +target
+    +log
+    +init(source, target, logger)
+    -_inventory(root)
+    +quick_hash(path)
+    +full_hash(path)
+    +same_content(first, second)
+    +analyse(all_duplicates)
+    -_duplicate_of(rel, st, dst, by_size)
+    -_dup_groups(dst, by_size)
+    +write(result, path)
+  }
+  Syncer --> FsCheck
+  Syncer ..> RsyncRunner
+  Syncer ..> TargetReport
+  TargetPicker --> FsCheck
