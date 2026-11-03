@@ -374,6 +374,9 @@ database rename never overwrites              test_renamer_renames_and_respects_
 All gates live in one script, `tools/check.sh`. The pre-push hook and the CI
 workflow call the same script, so a green local run predicts a green
 pipeline. Everything runs as normal user; no root privileges are needed.
+A full run requires ffmpeg, ffprobe, rsync and rsnapshot: without them the
+integration tests would be skipped and the coverage would drop, so the
+script stops with an installation hint instead.
 
 ~~~bash
 pip install -e '.[dev]'                 # tools: pytest, pytest-cov, pylint,

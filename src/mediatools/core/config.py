@@ -30,8 +30,15 @@ class Config:
 
 [collection]
 # Master directory of the media collection; its sub-directories are units.
-# Used whenever a command is called without a path.
+# Used whenever a command is called without a path. A path given on the
+# command line always wins. Change it with:
+#   mediatools config --set collection.root=~/other/collection
 root =
+
+[sync]
+# Default source of "mediatools sync" (e.g. your home directory);
+# empty = [collection] root.
+source =
 
 [shrink]
 # File name of the per-directory database of shrunk videos.

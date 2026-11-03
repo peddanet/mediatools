@@ -115,19 +115,20 @@ class Cli:
         Args:
             sub: Sub-parser collection of the main parser.
         """
-        cmd = sub.add_parser("rename-db", help="rename shrink databases to [shrink] db_name")
+        cmd = sub.add_parser("rename-db", help="rename shrink databases OLD -> NEW "
+                                               "(NEW is stored as [shrink] db_name)")
         cmd.add_argument("old", help="current database file name")
+        cmd.add_argument("new", help="new database file name")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
-        cmd.add_argument("--to", metavar="NAME",
-                         help="new name; also stored as [shrink] db_name "
-                              "(default: the current [shrink] db_name)")
         cmd.add_argument("--dry-run", action="store_true", help="only list what would change")
-        cmd.add_argument("-y", "--yes", action="store_true")
 
         cmd = sub.add_parser("config", help="show, create or locate the configuration file")
         group = cmd.add_mutually_exclusive_group()
         group.add_argument("--init", action="store_true", help="write a commented template")
         group.add_argument("--path", action="store_true", help="print the file location only")
+        group.add_argument("--set", metavar="SECTION.KEY=VALUE", action="append",
+                           help="change a value, e.g. --set collection.root=~/Videos "
+                                "(repeatable)")
 
         cmd = sub.add_parser("snapshot", help="versioned backups with rsnapshot")
         cmd.add_argument("action", choices=["check", "adopt", "init", "run", "status",
@@ -345,7 +346,10 @@ class Cli:
             Exit code of :meth:`Syncer.run`; 1 if no target was chosen.
         """
         prompt = Prompt(args.yes)
-        args.source = Config().require_path("collection", "root", args.source)
+        config = Config()
+        if not args.source and config.path_value("sync", "source"):
+            args.source = config.path_value("sync", "source")
+        args.source = config.require_path("collection", "root", args.source)
         picked = args.target
         if picked is None:
             picked = TargetPicker(prompt).pick(args.source)
@@ -375,25 +379,21 @@ class Cli:
         config = Config()
         root = self._dir(config.require_path("collection", "root", args.path))
         run = RunLog("rename-db")
-        new_name = args.to or config.db_name()
-        renamer = DatabaseRenamer(root, args.old, new_name, run.logger)
+        renamer = DatabaseRenamer(root, args.old, args.new, run.logger)
         plan = renamer.plan()
         conflicts = [src for src, _dst, status in plan if status == "conflict"]
-        source = "--to" if args.to else f"[shrink] db_name in {config.path}"
-        run.logger.info("new name %r (from %s)", renamer.new, source)
         run.logger.info("%i file(s) %r -> %r below %s, %i conflict(s)",
                         len(plan) - len(conflicts), args.old, renamer.new, root, len(conflicts))
         for path in conflicts[:10]:
             run.logger.warning("    target name exists, left alone: %s", path)
-        if args.dry_run or not plan:
-            return 0
-        if not Prompt(args.yes).yes_no("Rename these database files?"):
+        if args.dry_run:
+            run.logger.info("dry run - nothing renamed, configuration unchanged")
             return 0
         counts = renamer.apply(plan)
         run.logger.info("done: %s", counts)
-        if args.to and args.to != config.db_name():
-            config.set_value("shrink", "db_name", args.to)
-            run.logger.info("[shrink] db_name = %s stored in %s", args.to, config.path)
+        if args.new != config.db_name():
+            config.set_value("shrink", "db_name", args.new)
+            run.logger.info("[shrink] db_name = %s stored in %s", args.new, config.path)
         return 1 if counts["error"] else 0
 
     @staticmethod
@@ -404,7 +404,10 @@ class Cli:
             args: Parsed arguments.
 
         Returns:
-            Always 0.
+            0 on success.
+
+        Raises:
+            SystemExit: If a ``--set`` item is not ``SECTION.KEY=VALUE``.
         """
         config = Config()
         if args.path:
@@ -412,6 +415,14 @@ class Cli:
         elif args.init:
             written = config.write_template()
             print(("created " if written else "already exists, not changed: ") + config.path)
+        elif args.set:
+            for item in args.set:
+                target, sep, value = item.partition("=")
+                section, dot, key = target.strip().partition(".")
+                if not sep or not dot or not section or not key:
+                    raise SystemExit(f"Error: --set expects SECTION.KEY=VALUE, got {item!r}")
+                config.set_value(section, key.strip(), value.strip())
+                print(f"[{section}] {key.strip()} = {value.strip()}   ({config.path})")
         else:
             state = "" if config.exists() else "   (file missing - defaults shown; " \
                                                "create it with --init)"

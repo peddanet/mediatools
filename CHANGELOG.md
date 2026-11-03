@@ -14,10 +14,16 @@ All notable changes are documented here. Versions follow
   under its original name, so downloaders that skip existing names do not
   fetch it again (`--no-placeholder` to disable); removals are recorded in
   `state/triage_discarded.tsv`.
-- `rename-db --to NAME`: new name on the command line, stored as
-  `[shrink] db_name`.
+- `config --set SECTION.KEY=VALUE`: change defaults without an editor;
+  comments in the file are kept.
+- `[sync] source`: own default source for `sync` (e.g. the home
+  directory), independent of `[collection] root`.
 
 ### Changed
+- `rename-db OLD NEW [PATH]`: both names on the command line, no
+  confirmation question; NEW is stored as `[shrink] db_name`.
+- `tools/check.sh` stops with an installation hint if ffmpeg, rsync or
+  rsnapshot are missing instead of skipping integration tests.
 - Wording of the triage instructions: close a window = remove, leave it
   open = keep.
 - 0-byte files are ignored by `shrink`, `progress`, `flatten` and `triage`.

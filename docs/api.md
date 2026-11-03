@@ -208,7 +208,10 @@ Args:
     args: Parsed arguments.
 
 Returns:
-    Always 0.
+    0 on success.
+
+Raises:
+    SystemExit: If a ``--set`` item is not ``SECTION.KEY=VALUE``.
 ~~~
 
 **`cmd_snapshot`**
