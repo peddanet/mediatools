@@ -54,7 +54,7 @@ class ProgressReport:
                 if MediaTypes.extension(name) not in self.extensions:
                     continue
                 path = os.path.join(dirpath, name)
-                if os.path.islink(path):
+                if os.path.islink(path) or os.path.getsize(path) == 0:
                     continue
                 (self.done if database.is_done(path) else self.todo).append(path)
 

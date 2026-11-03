@@ -109,6 +109,9 @@ class Shrinker:
                 path = os.path.join(dirpath, name)
                 if os.path.islink(path) or not os.path.isfile(path):
                     continue
+                if os.path.getsize(path) == 0:
+                    self.log.debug("placeholder (0 bytes), skipped: %s", path)
+                    continue
                 if not self._process(database, dirpath, path):
                     self._finish()
                     return 1
