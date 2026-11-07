@@ -5,7 +5,21 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Changed
+- `install.sh` installs a release tag from GitHub (newest `vX.Y.Z`, or the
+  tag given; `--list` shows all) into its own virtual environment
+  `$MEDIATOOLS_HOME/venv` and links `~/scripts/mediatools` to it. The
+  launcher of 1.1.0, which ran the working files of a clone, is replaced.
+- `mediatools --version` names a source checkout ("source checkout PATH,
+  not an installed release") instead of showing a bare version number.
+- CI runs on pull requests, on pushes to `main` and `develop` and on tags;
+  the extra push trigger for work branches (every gate ran twice) is gone.
+- Coverage gate raised from 80 % to 90 % (new tests for the disk choice,
+  CLI errors and failure paths of sync, removal and encoding).
+
 ### Documentation
+- Branch protection for `main` and `develop` and a release procedure that
+  goes through pull requests (`docs/developer.md`).
 - README and handbook: purpose in one minute (problem table, why file
   names are never taken away), warning that `shrink` is lossy, two
   installation options (pipx from GitHub, clone and launcher into

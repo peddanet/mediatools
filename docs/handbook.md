@@ -96,7 +96,7 @@ Everything except the system packages runs as a **normal user**.
 ## Prerequisites
 
 ~~~bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot pipx
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
 ffmpeg -hide_banner -encoders | grep libx265
 ~~~
 
@@ -106,45 +106,73 @@ the packages of the subcommands in use are needed (README, table
 "System packages"). The second command runs as normal user and must print a
 line containing `libx265`.
 
-## Option A: pipx (recommended for users)
+## Option A: installer (recommended)
+
+mediatools is installed from a **release tag** (`vX.Y.Z`) on GitHub, never
+from the working files of a clone, so `mediatools --version` always shows
+the installed release:
+
+~~~bash
+curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+bash install.sh
+mediatools --version
+~~~
+
+* `curl -fsSLO URL` -- download the installer into the current directory
+  (`-f` fail on HTTP errors, `-sS` quiet but show errors, `-L` follow
+  redirects, `-O` keep the remote file name). A clone contains the same
+  script; running it from there makes no difference, because it installs
+  from GitHub, not from the clone.
+* `bash install.sh` -- reads the release tags with `git ls-remote`, picks
+  the newest `vX.Y.Z` (or the tag given as argument), installs it with pip
+  into `~/scripts/mediatools.d/venv`, checks that the program reports the
+  tag's version and links `~/scripts/mediatools` to it. It replaces only a
+  link it created itself or the launcher of version 1.1.0 and refuses any
+  other file.
+* `bash install.sh --list` -- list the releases; `bash install.sh v1.2.0`
+  -- install a given release, also an older one.
+* `BIN_DIR=~/.local/bin bash install.sh` -- link the command elsewhere.
+
+Everything runs as normal user; the installer writes only below
+`$MEDIATOOLS_HOME` and `BIN_DIR`. It needs `git` and the venv module
+(`sudo apt install git python3-venv`).
+
+Update: run `bash install.sh` again. Remove:
+`rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`.
+
+## Option B: pipx
 
 ~~~bash
 pipx ensurepath
-pipx install git+https://github.com/peddanet/mediatools.git
-mediatools --version
+pipx install git+https://github.com/peddanet/mediatools.git@v1.2.0
 ~~~
 
 * `pipx ensurepath` -- adds `~/.local/bin` to `PATH` (once; open a new
   terminal afterwards).
-* `pipx install git+URL` -- builds the package from the default branch
-  `main` (the current release) into a virtual environment of its own and
-  places the `mediatools` command in `~/.local/bin`.
-* Update: `pipx reinstall mediatools`; remove: `pipx uninstall mediatools`.
-
-## Option B: clone and launcher (to read or change the code)
-
-~~~bash
-mkdir -p ~/Projects
-git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
-cd ~/Projects/mediatools
-BIN_DIR=~/.local/bin ./install.sh
-mediatools --version
-~~~
-
-* `git clone URL DIR` -- copy the repository into `DIR`.
-* `install.sh` writes only one launcher script into `BIN_DIR` (default
-  `~/scripts`, which must then be in `PATH`); it refuses to overwrite a file
-  it did not create. On Ubuntu, `~/.profile` adds `~/.local/bin` to `PATH`
-  once the directory exists (log in again after the first install).
-* Update: `git pull` in the clone; remove: `rm ~/.local/bin/mediatools`.
+* `pipx install git+URL@TAG` -- builds the given release into a virtual
+  environment of its own; replace `v1.2.0` with the newest tag. Update with
+  `pipx install --force git+URL@NEWTAG`, remove with
+  `pipx uninstall mediatools`.
 
 Ubuntu 24.04 and later block `pip install --user` for the system Python
-(PEP 668); use option A or B.
+(PEP 668); both options use a virtual environment instead.
+
+## Development checkout
+
+Code imported from a clone (development venv with `pip install -e`) is
+marked by `--version`:
+
+~~~text
+mediatools 1.2.0 (source checkout /home/USER/Projects/mediatools, not an installed release)
+~~~
+
+The installed release is not affected by anything in the clone.
 
 ## Data directory
 
-Configuration, logs, state and reports are kept in `$MEDIATOOLS_HOME`,
-default `~/scripts/mediatools.d`. Another location is set in `~/.profile`:
+Configuration, logs, state, reports and the installed release (`venv/`)
+are kept in `$MEDIATOOLS_HOME`, default `~/scripts/mediatools.d`. Another
+location is set in `~/.profile` before installing:
 
 ~~~bash
 echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
@@ -927,14 +955,25 @@ environment of its own, as a normal user. [pipx](https://pipx.pypa.io/stable/)
 a discarded clip, so a download tool that skips existing names does not
 fetch it again.
 
+**Release tag** -- annotated git tag `vX.Y.Z` on `main` that marks a
+released state; the installer installs only such tags.
+[git-tag(1)](https://git-scm.com/docs/git-tag)
+
 **rsnapshot** -- snapshot tool based on rsync and hard links.
 [rsnapshot](https://rsnapshot.org/)
 
 **Snapshot level** -- rsnapshot retention class (`alpha`, `beta`, …); each
 level keeps a fixed number of snapshots.
 
+**Source checkout** -- code run directly from a clone (launcher or
+`pip install -e`) instead of an installed release; `--version` names it.
+
 **systemd user unit** -- service managed by the user's own systemd
 instance, without root.
+
+**Virtual environment (venv)** -- self-contained Python installation
+directory with its own packages, created by `python3 -m venv`.
+[venv documentation](https://docs.python.org/3/library/venv.html)
 
 **Unit** -- direct sub-directory of the master directory (e.g. one project).
 
@@ -962,4 +1001,5 @@ Link check of 2026-11-03. "verified" = page content retrieved on that date.
 | [rsnapshot(1), FreeBSD manual pages](https://man.freebsd.org/cgi/man.cgi?manpath=FreeBSD+Ports+15.1.quarterly&query=rsnapshot&sektion=1) | found via search; running as a normal user with an own configuration file |
 | [pipx documentation](https://pipx.pypa.io/stable/) | found via search; `pipx install git+URL` and `pipx reinstall` checked locally with pipx 1.4.3 |
 | [PEP 668](https://peps.python.org/pep-0668/) | found via search |
+| [git-tag(1)](https://git-scm.com/docs/git-tag), [venv documentation](https://docs.python.org/3/library/venv.html) | standard references, not retrieved in this session; `install.sh` behaviour checked by automated tests and an end-to-end installation from a local repository |
 | rsnapshot 1.4.5 behaviour (adopt, rotation, link sharing) | checked end to end on ext4 and by automated tests |

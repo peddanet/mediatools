@@ -7,14 +7,17 @@
 | `main`        | releases only; every commit is tagged     | -            | -           | integrator  |
 | `develop`     | integration of finished features          | `main`       | `main`      | integrator  |
 | `feature/<x>` | one feature or fix, short-lived           | `develop`    | `develop`   | via PR      |
+| `release/<x>` | version, CHANGELOG, PDFs of a release     | `develop`    | `main` (PR) | integrator  |
 | `hotfix/<x>`  | urgent fix of a release                   | `main`       | `main` + `develop` | integrator |
 
 Rules:
 
 1. Nobody commits directly to `main` or `develop`; changes arrive by pull
    request (feature -> develop) or release merge (develop -> main).
-2. Every push to a branch runs the quality gates locally (pre-push hook)
-   and in CI. A pull request can only be merged with green CI.
+2. Every push to a branch runs the quality gates locally (pre-push hook);
+   CI runs them for every pull request and for every merge into `develop`
+   and `main`. A pull request can only be merged with green CI (branch
+   protection).
 3. A release is an annotated tag `vX.Y.Z` on `main`; CI verifies that the
    tag is on `main` and equals `__version__`.
 
@@ -40,7 +43,7 @@ tools/check.sh --fast                   # without tests, while editing
 | lint     | pylint      | 10.00/10 incl. Google-style docstring checks    |
 | types    | mypy        | no error (`check_untyped_defs`)                 |
 | security | bandit      | no finding (B404/B603 justified in pyproject)   |
-| tests    | pytest      | all pass, no resource leak, branch coverage >= 80 % |
+| tests    | pytest      | all pass, no resource leak, branch coverage >= 90 % |
 
 ## Coding rules
 

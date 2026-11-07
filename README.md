@@ -131,10 +131,11 @@ Everything except the system packages in step 1 runs as a **normal user**.
 | gio (trash) | triage | `libglib2.0-bin` |
 | rsync ≥ 3.0 | sync, snapshot | `rsync` |
 | rsnapshot ≥ 1.4 | snapshot | `rsnapshot` |
-| pipx | installation option A | `pipx` |
+| git, Python venv module | installation option A | `git`, `python3-venv` |
+| pipx | installation option B | `pipx` |
 
 ```bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot pipx
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
 ffmpeg -hide_banner -encoders | grep libx265      # must print a libx265 line
 ```
 
@@ -144,50 +145,60 @@ only need the packages of the subcommands you use.
 Hard links require a Linux file system such as ext4, btrfs or XFS on both
 sides of a `sync`. exFAT, FAT and NTFS cannot store hard links.
 
-### 2. Install mediatools - choose one option
+### 2. Install a release
 
-**Option A - pipx (recommended for users)**
+mediatools is always installed from a **release tag** (`vX.Y.Z`) on GitHub,
+never from the working files of a clone. `mediatools --version` therefore
+shows exactly the release you installed.
+
+**Option A - installer (recommended)**
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+bash install.sh                  # newest release; bash install.sh --list shows all
+mediatools --version             # e.g. "mediatools 1.2.0"
+```
+
+The installer needs `git` and the Python venv module
+(`sudo apt install git python3-venv`). It
+
+1. reads the release tags from GitHub and picks the newest one (or the one
+   given: `bash install.sh v1.2.0`),
+2. installs that release into a virtual environment of its own,
+   `~/scripts/mediatools.d/venv`,
+3. links the command to `~/scripts/mediatools` (`BIN_DIR=~/.local/bin bash
+   install.sh` for another place; the directory must be in `PATH`),
+4. checks that the installed program reports the version of the tag.
+
+**Update** to the newest release: run `bash install.sh` again.
+**Remove**: `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`
+(configuration and logs in `~/scripts/mediatools.d` stay).
+
+**Option B - pipx**
 
 ```bash
 pipx ensurepath                  # once: puts ~/.local/bin into PATH, then open a new terminal
-pipx install git+https://github.com/peddanet/mediatools.git
-mediatools --version
+pipx install git+https://github.com/peddanet/mediatools.git@v1.2.0
 ```
 
-pipx installs the current release (branch `main`) into a virtual environment
-of its own and places the `mediatools` command in `~/.local/bin`. Update with
-`pipx reinstall mediatools`, remove with `pipx uninstall mediatools`.
-
-**Option B - clone and launcher (to read or change the code)**
-
-```bash
-git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
-cd ~/Projects/mediatools
-BIN_DIR=~/.local/bin ./install.sh
-mediatools --version
-```
-
-`install.sh` writes one small launcher script into `BIN_DIR` that runs the
-code of the clone; nothing else is installed. Update with `git pull` in the
-clone, remove with `rm ~/.local/bin/mediatools`. Without `BIN_DIR` the
-launcher goes to `~/scripts`, which must then be in `PATH`. On Ubuntu,
-`~/.local/bin` is added to `PATH` by `~/.profile` once the directory exists
-(log in again after the first install).
+Replace `v1.2.0` with the newest tag from the
+[releases](https://github.com/peddanet/mediatools/tags). Update by
+installing the new tag with `pipx install --force ...@vX.Y.Z`; remove with
+`pipx uninstall mediatools`.
 
 Ubuntu 24.04 and later block `pip install --user` for the system Python
-(PEP 668); use option A or B.
+(PEP 668); both options use a virtual environment instead.
 
 ### 3. Where mediatools keeps its files
 
-Configuration, logs, state and reports are stored in one directory, default
-`~/scripts/mediatools.d` (see [Data directory](#data-directory)). To use
-another place, set `MEDIATOOLS_HOME`, for example in `~/.profile`:
+Configuration, logs, state, reports and (option A) the installed release are
+stored in one directory, default `~/scripts/mediatools.d` (see
+[Data directory](#data-directory)). To use another place, set
+`MEDIATOOLS_HOME` **before** installing, for example in `~/.profile`:
 
 ```bash
 echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
 ```
-
-Nothing is ever written into the program directory or the clone.
 
 ## First steps
 
@@ -480,6 +491,7 @@ All logs and state live in `$MEDIATOOLS_HOME` (default
 
 ```text
 mediatools.ini   configuration
+venv/      installed release (install.sh)
 logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
 state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
            shrink_throughput.json, sync_targets.json, snapshot_levels.json
@@ -524,6 +536,11 @@ tools/check.sh                           # privacy, format, lint, types, securit
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```
 
+Inside the development venv `mediatools` runs the code of the clone, and
+`mediatools --version` says so: `mediatools 1.2.0 (source checkout
+~/Projects/mediatools, not an installed release)`. The installed release
+(`~/scripts/mediatools`) is not affected by anything in the clone.
+
 Branching: `main` holds releases only (tag `vX.Y.Z`), `develop` integrates,
 work happens on `feature/*` branches with pull requests into `develop`.
 Details in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -536,7 +553,8 @@ without a shell.
 ```text
 src/mediatools/
 ├── cli.py                  Cli               argument parsing and dispatch
-├── core/                   Config, DataDir, RunLog, MediaTypes, MediaProbe, TreeWalker, Prompt
+├── core/                   Config, DataDir, RunLog, MediaTypes, MediaProbe, TreeWalker, Prompt,
+│                           VersionInfo
 ├── shrink/                 ShrinkDatabase, DatabaseRenamer, HevcEncoder, Shrinker, ProgressReport
 ├── triage/                 CandidateFinder, PlayerSession, FlatLinkResolver,
 │                           FileRemover, KeptList, Triage
