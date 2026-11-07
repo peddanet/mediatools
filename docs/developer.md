@@ -56,7 +56,7 @@ mediatools/
   CONTRIBUTING.md           rules for contributions
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
-  install.sh                launcher without pip (~/scripts/mediatools)
+  install.sh                installs a release tag into a venv (~/scripts/mediatools)
   .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
@@ -457,22 +457,51 @@ emergency; CI still enforces all gates.
 | `main`        | released states only, each one tagged | -         | -                  |
 | `develop`     | integration of finished features      | `main`    | `main`             |
 | `feature/<x>` | one feature or fix                    | `develop` | `develop` (PR)     |
+| `release/<x>` | version, CHANGELOG and PDFs           | `develop` | `main` (PR)        |
 | `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` |
 
 Roles: developers work on `feature/*` and open pull requests into
 `develop`. The **integrator** reviews and merges them, checks `develop` as
 a whole and decides when a release is cut.
 
-CI (`.github/workflows/tests.yml`) runs the gates on pushes to `main`,
-`develop`, `feature/**`, `fix/**`, `release/**`, `hotfix/**`, on tags `v*`,
-and on pull requests into `main` and `develop`. For a tag, the extra job
+CI (`.github/workflows/tests.yml`) runs the gates on pull requests into
+`main` and `develop`, on pushes to `main` and `develop` (the merges) and on
+tags `v*`. Work branches are checked through their pull request only; a
+push trigger for them as well would run every gate twice. A branch without
+a pull request can be checked on demand:
+`gh workflow run quality-gates --ref BRANCH`. For a tag, the extra job
 `release-check` verifies that the tagged commit lies on `main` and that the
 tag equals `v` + `__version__`.
 
-Recommended GitHub branch protection (Settings > Branches > Add rule), for
-`main` and `develop`: *Require a pull request before merging*, *Require
-status checks to pass* (all `gates` jobs), *Do not allow bypassing*, no
-force pushes, no deletion.
+## Branch protection
+
+`main` and `develop` are protected on GitHub: changes only by pull request,
+merge only with all three `gates` jobs green and the branch up to date, the
+rule applies to administrators too, no force push, no deletion. Set once
+per branch by the repository owner (normal user; `gh` acts with the owner's
+token):
+
+~~~bash
+for branch in develop main; do
+gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+EOF
+done
+~~~
+
+`required_approving_review_count: 0` demands a pull request but no second
+person's approval (single maintainer). Tags are not affected by branch
+protection; the integrator pushes release tags directly.
 
 ## Feature cycle
 
@@ -511,26 +540,48 @@ pandoc handbook.md -o handbook.pdf --pdf-engine=xelatex --highlight-style=tango 
 
 # Release procedure
 
-Performed by the integrator on a clean, up-to-date `develop`:
+Performed by the integrator. Because `main` and `develop` are protected,
+every step that changes a branch goes through a pull request.
 
-1. Update `__version__` in `src/mediatools/__init__.py` (Semantic
-   Versioning) and add the section to `CHANGELOG.md`.
-2. Run `tools/check.sh`, rebuild diagrams and PDFs, commit on `develop`
-   ("mediatools X.Y.Z") and push; wait for green CI.
-3. Merge into `main` without fast-forward, tag and push:
+1. Release branch from an up-to-date `develop`; set `__version__` in
+   `src/mediatools/__init__.py` (Semantic Versioning), turn the
+   `[Unreleased]` section of `CHANGELOG.md` into `[X.Y.Z] - date`, rebuild
+   diagrams and PDFs, run `tools/check.sh`, commit "mediatools X.Y.Z":
+
+~~~bash
+git switch develop && git pull --ff-only
+git switch -c release/X.Y.Z
+# ... version, CHANGELOG, PDFs ...
+git commit -am "mediatools X.Y.Z"
+git push -u origin release/X.Y.Z
+gh pr create --base main --title "Release X.Y.Z" --fill
+gh pr checks --watch && gh pr merge --merge --delete-branch
+~~~
+
+2. Tag the merge commit on `main` and push the tag; CI runs
+   `release-check` for it:
 
 ~~~bash
 git switch main && git pull --ff-only
-git merge --no-ff develop -m "Release X.Y.Z"
 git tag -a vX.Y.Z -m "mediatools X.Y.Z"
-git push origin main vX.Y.Z
-git switch develop
+git push origin vX.Y.Z
 ~~~
 
-`--no-ff` keeps one merge commit per release on `main`, so
-`git log --first-parent main` lists exactly the releases. A hotfix branches
-from `main`, is merged back into `main` (tag `vX.Y.Z+1`) and into
-`develop`.
+3. Bring the release back into `develop` (pull request from `main`):
+
+~~~bash
+gh pr create --base develop --head main --title "Merge release X.Y.Z into develop" \
+  --body "Back-merge of release X.Y.Z."
+gh pr checks --watch && gh pr merge --merge
+git switch develop && git pull --ff-only
+~~~
+
+4. Install the release on the own machine: `./install.sh` (newest tag).
+
+Merge commits (no squash, no rebase) keep every commit; `git log
+--first-parent main` lists exactly the releases. A hotfix branches from
+`main`, goes into `main` by pull request (tag `vX.Y.Z+1`) and back into
+`develop` as in step 3.
 
 # Adding a subcommand
 
