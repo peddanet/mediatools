@@ -15,15 +15,6 @@ classDiagram
     -_duration(path)
     +collect()
   }
-  class DurationCache {
-    +path
-    +entries
-    +hits
-    +init(path)
-    +get(file_path, st)
-    +put(file_path, st, duration)
-    +save()
-  }
   class KeptList {
     +path
     +init(path)
@@ -83,7 +74,6 @@ classDiagram
     -_other_links(path, flat)
     +kept_list(datadir)
   }
-  CandidateFinder --> DurationCache
   CandidateFinder --> KeptList
   Triage --> CandidateFinder
   Triage --> FileRemover

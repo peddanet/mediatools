@@ -10,16 +10,17 @@ import sys
 from mediatools import __version__
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
+from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.prompt import Prompt
 from mediatools.core.runlog import RunLog
 from mediatools.flatten import FlatPlan, Flattener
-from mediatools.shrink import DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker
+from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
+                               ShrinkOptions)
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
-from mediatools.triage import (CandidateFinder, DurationCache, FileRemover, PlayerSession,
-                               Triage)
+from mediatools.triage import CandidateFinder, FileRemover, PlayerSession, Triage
 
 
 class Cli:
@@ -59,6 +60,10 @@ class Cli:
         cmd.add_argument("--crf", type=int, default=28, help="libx265 CRF (default 28)")
         cmd.add_argument("--threads", type=int, default=6, help="ffmpeg threads (default 6)")
         cmd.add_argument("--ext", default="mp4", help="video extensions (default mp4)")
+        cmd.add_argument("--order", choices=ShrinkOptions.ORDERS, default="largest",
+                         help="processing order (default: largest files first)")
+        cmd.add_argument("--min-seconds", type=float, default=0.0,
+                         help="leave out videos shorter than this (e.g. 60 before a triage)")
         cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
         cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
 
@@ -209,15 +214,16 @@ class Cli:
         root = self._dir(config.require_path("collection", "root", args.path))
         self._need("ffmpeg", "ffprobe")
         mode = "keep shrunk copies" if args.keep_copies else "REPLACE the originals"
-        if not Prompt(args.yes).yes_no(f"Shrink videos below {root} and {mode}?"):
-            return 0
         run = RunLog("shrink", args.verbose)
-        encoder = HevcEncoder(args.crf, args.threads, MediaProbe(), run.logger)
-        shrinker = Shrinker(root, run.logger, args.keep_copies,
-                            MediaTypes.parse_extensions(args.ext), encoder,
-                            db_name=config.db_name())
+        probe = MediaProbe()
+        encoder = HevcEncoder(args.crf, args.threads, probe, run.logger)
+        durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
+        opts = ShrinkOptions(args.keep_copies, MediaTypes.parse_extensions(args.ext),
+                             config.db_name(), args.order, args.min_seconds)
+        shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations)
         shrinker.install_signal_handlers()
-        return shrinker.run()
+        prompt = Prompt(args.yes)
+        return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
 
     def cmd_progress(self, args: argparse.Namespace) -> int:
         """Run ``mediatools progress``.
