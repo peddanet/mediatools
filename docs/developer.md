@@ -403,7 +403,7 @@ tools/check.sh --fast                   # gates 1-4 only
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
 | 3   | types    | mypy        | no error; `check_untyped_defs`, `warn_unreachable` |
 | 4   | security | bandit      | no finding                                         |
-| 5   | tests    | pytest      | all pass, branch coverage >= 80 %                  |
+| 5   | tests    | pytest      | all pass, branch coverage >= 90 %                  |
 
 **Privacy gate.** `tools/privacy_scan.py` searches all tracked files (PDFs
 via `pdftotext`), file paths and commit messages for terms that would allow

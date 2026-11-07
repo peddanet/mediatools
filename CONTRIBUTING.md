@@ -40,7 +40,7 @@ tools/check.sh --fast                   # without tests, while editing
 | lint     | pylint      | 10.00/10 incl. Google-style docstring checks    |
 | types    | mypy        | no error (`check_untyped_defs`)                 |
 | security | bandit      | no finding (B404/B603 justified in pyproject)   |
-| tests    | pytest      | all pass, no resource leak, branch coverage >= 80 % |
+| tests    | pytest      | all pass, no resource leak, branch coverage >= 90 % |
 
 ## Coding rules
 
