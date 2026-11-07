@@ -955,6 +955,57 @@ close(self) -> None
 Flush and close all handlers (important in tests).
 ~~~
 
+### `VersionInfo` (`mediatools.core.versioninfo`) {.unnumbered}
+
+~~~text
+Describes which mediatools is running.
+
+An installed release lives in a ``site-packages`` directory. Code that is
+imported straight from a clone - through ``PYTHONPATH`` or an editable
+``pip install -e`` - lives in ``<clone>/src/mediatools`` next to the
+clone's ``pyproject.toml``. ``--version`` names the checkout in that case,
+so a development state is never mistaken for a release.
+
+Attributes:
+    package_dir: Directory of the imported ``mediatools`` package.
+    version: Version number of the imported code.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, package_dir: str | None = None, version: str = '1.2.0')
+
+Locate the imported package.
+
+Args:
+    package_dir: Package directory; the imported one if None.
+    version: Version number; the imported one by default.
+~~~
+
+**`checkout`**
+
+~~~text
+checkout(self) -> str | None
+
+Return the clone the code is imported from, if any.
+
+Returns:
+    Path of the source checkout, or None for an installed package.
+~~~
+
+**`describe`**
+
+~~~text
+describe(self) -> str
+
+Return the text printed by ``mediatools --version``.
+
+Returns:
+    ``"1.2.0"`` for an installed release, otherwise the version with
+    the path of the source checkout.
+~~~
+
 ### `TreeWalker` (`mediatools.core.walker`) {.unnumbered}
 
 ~~~text
