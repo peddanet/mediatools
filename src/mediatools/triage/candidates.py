@@ -6,7 +6,7 @@ from typing import Iterator
 
 from mediatools.core.probe import MediaProbe
 from mediatools.core.walker import TreeWalker
-from mediatools.triage.durationcache import DurationCache
+from mediatools.core.durationcache import DurationCache
 from mediatools.triage.keptlist import KeptList
 
 

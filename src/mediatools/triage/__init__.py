@@ -1,6 +1,6 @@
 """Interactive review of short videos."""
 from mediatools.triage.candidates import CandidateFinder
-from mediatools.triage.durationcache import DurationCache
+from mediatools.core.durationcache import DurationCache
 from mediatools.triage.keptlist import KeptList
 from mediatools.triage.linkresolver import FlatLinkResolver
 from mediatools.triage.player import PlayerSession

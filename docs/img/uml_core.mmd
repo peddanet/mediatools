@@ -22,6 +22,15 @@ classDiagram
     +file(sub, prefix, suffix)
     +stamp()
   }
+  class DurationCache {
+    +path
+    +entries
+    +hits
+    +init(path)
+    +get(file_path, st)
+    +put(file_path, st, duration)
+    +save()
+  }
   class MediaTypes {
     +FLAT_DIR
     +SHRINK_TMP_DIR
@@ -43,6 +52,24 @@ classDiagram
     +duration(path)
     +video_codec(path)
     +has_video(path)
+  }
+  class ProgressBar {
+    +total_bytes
+    +total_files
+    +done_bytes
+    +done_files
+    +initial_rate
+    +stream
+    +started
+    +enabled
+    +init(total_bytes, total_files, initial_rate, stream)
+    +rate(current_bytes)
+    +remaining_seconds(current_bytes)
+    +line(name, file_fraction, file_bytes)
+    +show(name, file_fraction, file_bytes)
+    +file_done(size)
+    +clear()
+    +duration_text(seconds)
   }
   class Prompt {
     +assume_yes

@@ -1,0 +1,5 @@
+log file: /tmp/sr3/mth/logs/shrink_2026-11-07_20-03-51.log
+shrink root: /tmp/sr3/c  mode: replace originals  order: largest
+already processed (database): 2 | shorter than 10 s: 1 | to encode: 0 files, 0.0 GiB
+======================================================================
+shrunk and recorded: 0 | already HEVC: 0 | processed before (DB): 2 | too short: 1 | copies kept: 0 | recovered: 0 | failed: 0

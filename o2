@@ -1,0 +1,12 @@
+log file: /tmp/sr3/mth/logs/shrink_2026-11-07_20-03-48.log
+shrink root: /tmp/sr3/c  mode: replace originals  order: largest
+already processed (database): 1 | shorter than 0 s: 0 | to encode: 2 files, 0.0 GiB, about 0 min at the measured 0.0 MB/s
+Start encoding and REPLACE the originals? [auto: yes]
+shrinking (0 MB): /tmp/sr3/c/u1/v2.mp4
+ffmpeg: ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 -threads 2 -i /tmp/sr3/c/u1/v2.mp4 -vcodec libx265 -crf 28 /tmp/sr3/c/u1/newShrinkedFiles/v2.mp4
+stopping after the current file (press Ctrl+C again to abort it)
+output validated (in=16.00s, out=16.00s)
+DB record: /tmp/sr3/c/u1/v2.mp4 (size=78569, modified=2026-11-07 20:03:51)
+======================================================================
+shrunk and recorded: 1 | already HEVC: 0 | processed before (DB): 1 | too short: 0 | copies kept: 0 | recovered: 0 | failed: 0
+stopped by the user - the next run continues with the files left

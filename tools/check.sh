@@ -5,6 +5,7 @@
 # run predicts a green pipeline. Every gate must pass; the script stops at
 # the first failure and returns its exit code.
 #
+#   0. privacy  no locally listed term in files, paths or commit messages
 #   1. format   pycodestyle, max line length 100
 #   2. lint     pylint incl. Google-style docstring checks, score 10.00/10
 #   3. types    mypy (config in pyproject.toml)
@@ -51,6 +52,7 @@ if (( FAST == 0 )); then
     fi
 fi
 
+gate privacy  python3 tools/privacy_scan.py
 gate format   pycodestyle --max-line-length=100 src tests tools
 gate lint     pylint --fail-under=10 src tests tools
 gate types    mypy
