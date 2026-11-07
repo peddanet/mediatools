@@ -166,6 +166,8 @@ directory, configuration -- lives in `core`.
 | `DataDir` | `$MEDIATOOLS_HOME` layout: logs, state, plans, reports |
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
+| `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
+| `ProgressBar` | one-line terminal display: percentage by bytes, files, remaining time |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
 | `Prompt` | yes/no and text questions, `--yes` support |
 
@@ -175,11 +177,13 @@ directory, configuration -- lives in `core`.
 
 | Class | Responsibility |
 |---|---|
-| `ShrinkDatabase` | database per directory (name configurable), schema migration, lookup, UPSERT |
+| `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
-| `HevcEncoder` | ffmpeg call, validation of exit code, stream and duration |
-| `Shrinker` | per-file decision, in-place copy-back, signal handling, summary |
-| `ProgressReport` | read-only done/todo lists |
+| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, stream and duration |
+| `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, summary |
+| `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
+| `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
+| `ThroughputLog` | measured encoding speed for estimates |
 
 ## Package `triage`
 
@@ -188,7 +192,6 @@ directory, configuration -- lives in `core`.
 | Class | Responsibility |
 |---|---|
 | `CandidateFinder` | search of videos within a duration range; `collect()` counts first |
-| `DurationCache` | ffprobe durations keyed by path, size and mtime |
 | `PlayerSession` | one player process per video, classification |
 | `FlatLinkResolver` | `_flat` names of a file by inode |
 | `FileRemover` | `gio trash` or permanent deletion; `discard()` leaves a 0-byte placeholder |
@@ -304,6 +307,8 @@ Invariants:
 <data>/state/triage_durations.tsv     DurationCache    path TAB size TAB mtime_ns TAB seconds
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
+<data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
+<dir>/newShrinkedFiles/<n>.replace    Shrinker         journal marker during copy-back
 <data>/reports/sync_target_only_*.tsv TargetReport     status size path same_as
 <data>/logs/<command>_<ts>.log        RunLog           timestamp level message
 <data>/snapshot/rsnapshot.conf        RsnapshotConf    generated, tab separated
@@ -356,6 +361,11 @@ progress is read-only                         test_progress_is_read_only
 early player exit never deletes               test_player_early_exit_is_error
 _flat link removed with the original          test_triage_removes_original_and_flat_link
 no removal without confirmation               test_triage_not_confirmed_removes_nothing
+database rows of a moved collection count     test_database_matches_by_name_after_move
+1st Ctrl+C finishes, 2nd keeps the original   test_first_ctrl_c_finishes_current_file,
+                                              test_second_ctrl_c_aborts_without_touching_original
+interrupted copy-back is completed            test_interrupted_replacement_is_completed
+private terms never reach a push              test_finds_terms_in_files_paths_and_messages
 placeholder left, never overwrites a file     test_triage_removes_original_and_flat_link,
                                               test_placeholder_never_overwrites
 placeholder never replaces a backup copy      test_sync_placeholder_keeps_backup_copy
@@ -388,11 +398,26 @@ tools/check.sh --fast                   # gates 1-4 only
 
 | No. | Gate     | Tool        | Pass criterion                                     |
 |-----|----------|-------------|----------------------------------------------------|
+| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits   |
 | 1   | format   | pycodestyle | PEP 8 layout, max line length 100                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
 | 3   | types    | mypy        | no error; `check_untyped_defs`, `warn_unreachable` |
 | 4   | security | bandit      | no finding                                         |
 | 5   | tests    | pytest      | all pass, branch coverage >= 80 %                  |
+
+**Privacy gate.** `tools/privacy_scan.py` searches all tracked files (PDFs
+via `pdftotext`), file paths and commit messages for terms that would allow
+conclusions about the processed data. The terms are never in the
+repository; they come from `$MEDIATOOLS_HOME/privacy_denylist.txt` (one term
+per line) and from the unit directory names below `[collection] root`.
+Matching ignores case and whole words only (`cat` does not match `concatenate`);
+terms shorter than three characters are ignored. Without local terms the
+gate is skipped, which keeps CI neutral.
+
+~~~bash
+"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_denylist.txt
+python3 tools/privacy_scan.py
+~~~
 
 Notes on the configuration (`pyproject.toml`):
 

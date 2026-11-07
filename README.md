@@ -149,26 +149,43 @@ name**, so download tools that skip existing names do not fetch the large
 original again.
 
 ```bash
-mediatools shrink [PATH] [--keep-copies] [--crf 28] [--threads 6] [--ext mp4] [-y] [-v]
+mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
+                  [--keep-copies] [--crf 28] [--threads 6] [--ext mp4] [-y] [-v]
 ```
 
-Per file, in this order:
+1. **Plan.** All videos are checked against the database of their
+   directory. *The database always has precedence:* a recorded file counts
+   as processed, whatever its codec. Matching is by **file name within the
+   directory**, so databases written before the collection was moved stay
+   valid. Then the run reports files, volume and the estimated time and
+   asks once.
+2. **Order.** Largest files first by default (most space saved early);
+   `--min-seconds 60` leaves short clips for a `triage` session first.
+3. **Per file:** already HEVC → recorded only; otherwise encode into
+   `newShrinkedFiles/`, validate, copy over the original *in place* (same
+   inode, so `_flat` links see the new content), record.
 
-1. **Database** - the directory's `shrink.db` (name configurable) has a row with the same
-   path, size and mtime → skipped. *The database always has precedence.*
-2. **Codec** - already HEVC → recorded, not re-encoded.
-3. **Encode** into `newShrinkedFiles/`, validate, copy over the original
-   *in place* (same inode, so `_flat` links see the new content), record.
+A progress line shows percentage by volume, files, GiB and the remaining
+time (measured speed of this and earlier runs).
+
+| Key | Effect |
+|---|---|
+| Ctrl+C once | finish the current file, record it, stop |
+| Ctrl+C twice | abort the current file at once - its original stays untouched |
+
+The next run continues with the files left. Overwriting an original is
+protected by a marker file: if the machine fails during the copy, the next
+run repeats the copy from the validated output before anything else. A file
+that ffmpeg cannot encode is logged and skipped (exit code 2).
 
 | Option | Meaning |
 |---|---|
+| `--order` | `largest` (default), `smallest` or `path` (directory order) |
+| `--min-seconds S` | leave out videos shorter than S seconds (durations cached) |
 | `--keep-copies` | leave originals untouched, keep shrunk copies for review, record nothing |
 | `--crf N` | libx265 constant rate factor, default 28 |
 | `--ext LIST` | extensions to process, default `mp4` |
 | `-y` | skip the confirmation question |
-
-Ctrl+C is honoured after the current file. A file that ffmpeg cannot
-encode is logged and skipped; the run continues and ends with exit code 2.
 
 ### progress
 
@@ -176,8 +193,11 @@ encode is logged and skipped; the run continues and ends with exit code 2.
 mediatools progress [PATH] [--ext mp4]
 ```
 
-Read-only. Writes `progress_done_<ts>.txt` and `progress_todo_<ts>.txt` to
-the [data directory](#data-directory) and prints the counts.
+Read-only. Counts processed videos (recorded in the database of their
+directory), those recorded with a different size since, and those still to
+do with their volume; estimates the encoding time from the speed measured by
+earlier `shrink` runs; reports database rows without a matching file. The
+three lists go to the [data directory](#data-directory).
 
 ### triage
 
@@ -379,7 +399,7 @@ All logs and state live in `$MEDIATOOLS_HOME` (default
 mediatools.ini   configuration
 logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
 state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
-           sync_targets.json, snapshot_levels.json
+           shrink_throughput.json, sync_targets.json, snapshot_levels.json
 plans/     flatten_<ts>.tsv  (input for --undo)
 reports/   progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
 snapshot/  rsnapshot.conf (generated), rsnapshot.log
@@ -416,7 +436,7 @@ and all paths come from the configuration file; the defaults are generic.
 ```bash
 pip install -e '.[dev]'                  # pytest, pylint, mypy, pycodestyle, bandit
 git config core.hooksPath .githooks      # pre-push hook runs the gates
-tools/check.sh                           # format, lint, types, security, tests
+tools/check.sh                           # privacy, format, lint, types, security, tests
                                          # (needs ffmpeg, rsync, rsnapshot installed)
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```

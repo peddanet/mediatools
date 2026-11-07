@@ -11,6 +11,8 @@ classDiagram
     +exists()
     +ensure()
     -_migrate()
+    +index()
+    +status(file_path)
     +is_done(file_path)
     +record(file_path)
     +rows()
@@ -31,12 +33,24 @@ classDiagram
     +probe
     +log
     +ffmpeg
+    +process
+    +aborted
     +init(crf, threads, probe, logger, ffmpeg)
     +command(src, dst)
-    +encode(src, dst)
+    +encode(src, dst, on_progress)
+    +abort()
+    -_log_tail(log_path, lines)
     +validate(src, dst)
     -_info(args)
     -_error(args)
+  }
+  class ShrinkOptions {
+    +keep_copies
+    +extensions
+    +db_name
+    +order
+    +min_seconds
+    +init(keep_copies, extensions, db_name, order, min_seconds)
   }
   class ProgressReport {
     +root
@@ -44,9 +58,12 @@ classDiagram
     +datadir
     +extensions
     +db_name
-    +done
-    +todo
-    +init(root, logger, datadir, extensions, db_name)
+    +throughput
+    +lists
+    +todo_bytes
+    +databases
+    +orphan_rows
+    +init(root, logger, datadir, extensions, db_name, throughput)
     +scan()
     +write()
     +run()
@@ -54,24 +71,47 @@ classDiagram
   class Shrinker {
     +root
     +log
-    +keep_copies
-    +db_name
-    +extensions
+    +opts
     +probe
     +encoder
-    +walker
-    +stop_requested
+    +durations
+    +throughput
+    +databases
+    +flags
+    +display
     +stats
     +failed
-    +init(root, logger, keep_copies, extensions, encoder, probe, db_name)
+    +init(root, logger, opts, encoder, probe, durations, throughput, display)
     +install_signal_handlers()
-    -_on_signal(signum, _frame)
-    +run()
-    -_process(database, dirpath, path)
+    +on_signal(signum, _frame)
+    +database(dirpath)
+    +plan()
+    -_drop_short(todo)
+    -_duration(path)
+    +run(confirm)
+    -_attach_bar_filter()
+    -_process(path, size)
+    -_encode_and_replace(path, size, out, database)
+    -_show(name, fraction, size)
+    -_replace(out, path, database)
+    -_recover(dirpath)
     -_remove_tmp(dirpath)
     -_remove_quietly(path)
     -_finish()
   }
+  class ThroughputLog {
+    +path
+    +bytes
+    +seconds
+    +init(path)
+    +rate()
+    +add(size, seconds)
+    +duration_text(seconds)
+  }
+  ShrinkOptions ..> Shrinker
   ProgressReport ..> ShrinkDatabase
+  ProgressReport --> ThroughputLog
   Shrinker --> HevcEncoder
-  Shrinker ..> ShrinkDatabase
+  Shrinker --> ShrinkDatabase
+  Shrinker --> ShrinkOptions
+  Shrinker --> ThroughputLog
