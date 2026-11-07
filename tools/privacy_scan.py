@@ -11,6 +11,11 @@ reveal what it protects. They come from two local sources:
   and the components of that path below the home directory (standard
   folders such as ``Pictures`` excepted).
 
+Allowed phrases come from ``$MEDIATOOLS_HOME/privacy_allowlist.txt`` (same
+format). They are blanked out before the search, so a listed term stays
+forbidden everywhere except inside an allowed phrase - e.g. the term
+``level`` with the allowed phrase ``sea level``.
+
 Scanned are the contents of all tracked files (PDFs via ``pdftotext`` if
 installed), the tracked file paths and all commit messages. Matching
 ignores case; a term must not be part of a longer word (``cat`` does not
@@ -39,15 +44,18 @@ class PrivacyScan:
         repo: Repository root.
         terms: Terms to search for (lower case).
         pattern: Compiled alternation of all terms, or None.
+        allowed: Compiled alternation of the allowed phrases, or None.
+        allowed_count: Number of allowed phrases.
         findings: ``(location, term)`` pairs.
     """
 
-    def __init__(self, repo: str, terms: list[str]):
+    def __init__(self, repo: str, terms: list[str], allowed: list[str] | None = None):
         """Prepare the search.
 
         Args:
             repo: Repository root.
             terms: Terms to search for.
+            allowed: Phrases in which a term is permitted.
         """
         self.repo = repo
         self.terms = sorted({t.strip().lower() for t in terms if len(t.strip()) >= MIN_LENGTH},
@@ -55,7 +63,47 @@ class PrivacyScan:
         self.pattern = re.compile(
             r"(?<![a-z0-9])(" + "|".join(re.escape(t) for t in self.terms) + r")(?![a-z0-9])",
             re.IGNORECASE) if self.terms else None
+        phrases = sorted({a.strip() for a in allowed or [] if a.strip()}, key=len, reverse=True)
+        self.allowed = re.compile("|".join(self._phrase(a) for a in phrases),
+                                  re.IGNORECASE) if phrases else None
+        self.allowed_count = len(phrases)
         self.findings: list[tuple[str, str]] = []
+
+    @staticmethod
+    def _phrase(text: str) -> str:
+        """Build the regular expression of one allowed phrase.
+
+        Word boundaries are required only where the phrase begins or ends
+        with a letter or digit, so ``top-level`` does not cover ``stop-level``
+        while ``key=`` may be followed by anything.
+
+        Args:
+            text: Allowed phrase.
+
+        Returns:
+            Regular expression.
+        """
+        start = r"(?<![a-z0-9])" if text[0].isalnum() else ""
+        end = r"(?![a-z0-9])" if text[-1].isalnum() else ""
+        return start + re.escape(text) + end
+
+    @staticmethod
+    def read_list(name: str) -> list[str]:
+        """Read a local list from the data directory.
+
+        Args:
+            name: File name, e.g. ``privacy_denylist.txt``.
+
+        Returns:
+            Entries without comments and empty lines; empty if the file is missing.
+        """
+        home = os.environ.get("MEDIATOOLS_HOME", os.path.expanduser("~/scripts/mediatools.d"))
+        try:
+            with open(os.path.join(home, name), encoding="utf-8") as handle:
+                return [entry for entry in (line.split("#", 1)[0].strip() for line in handle)
+                        if entry]
+        except FileNotFoundError:
+            return []
 
     @staticmethod
     def local_terms() -> list[str]:
@@ -64,13 +112,7 @@ class PrivacyScan:
         Returns:
             All local terms (unfiltered).
         """
-        home = os.environ.get("MEDIATOOLS_HOME", os.path.expanduser("~/scripts/mediatools.d"))
-        terms: list[str] = []
-        try:
-            with open(os.path.join(home, "privacy_denylist.txt"), encoding="utf-8") as handle:
-                terms += [line.split("#", 1)[0].strip() for line in handle]
-        except FileNotFoundError:
-            pass
+        terms = PrivacyScan.read_list("privacy_denylist.txt")
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
         from mediatools.core.config import Config  # pylint: disable=import-outside-toplevel
         root = Config().path_value("collection", "root")
@@ -128,6 +170,8 @@ class PrivacyScan:
         if self.pattern is None:
             return
         for number, line in enumerate(text.splitlines(), 1):
+            if self.allowed is not None:
+                line = self.allowed.sub(lambda m: " " * len(m.group(0)), line)
             for match in self.pattern.finditer(line):
                 self.findings.append((f"{location}:{number}", match.group(1)))
 
@@ -152,7 +196,8 @@ class PrivacyScan:
         self._search("commit messages", log)
         for location, term in self.findings:
             print(f"{location}: {term}")
-        print(f"privacy scan: {len(self.terms)} term(s), {len(self.findings)} finding(s)")
+        print(f"privacy scan: {len(self.terms)} term(s), {self.allowed_count} allowed phrase(s), "
+              f"{len(self.findings)} finding(s)")
         return 1 if self.findings else 0
 
 
@@ -163,7 +208,8 @@ def main() -> int:
         Exit code.
     """
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return PrivacyScan(repo, PrivacyScan.local_terms()).run()
+    return PrivacyScan(repo, PrivacyScan.local_terms(),
+                       PrivacyScan.read_list("privacy_allowlist.txt")).run()
 
 
 if __name__ == "__main__":

@@ -414,8 +414,15 @@ Matching ignores case and whole words only (`cat` does not match `concatenate`);
 terms shorter than three characters are ignored. Without local terms the
 gate is skipped, which keeps CI neutral.
 
+Ordinary words can be on the deny list and still be needed in technical
+text. Instead of rewording, such uses are permitted by **allowed phrases**
+in `$MEDIATOOLS_HOME/privacy_allowlist.txt` (same format, one phrase per
+line). They are blanked out before the search: the term stays forbidden
+everywhere else. Both lists stay outside the repository.
+
 ~~~bash
 "${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_denylist.txt
+"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_allowlist.txt
 python3 tools/privacy_scan.py
 ~~~
 

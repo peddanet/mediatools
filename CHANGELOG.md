@@ -24,7 +24,8 @@ All notable changes are documented here. Versions follow
 - `progress`: "size changed since" category, database rows without a
   matching file, time estimate.
 - Privacy gate `tools/privacy_scan.py` in `tools/check.sh`: refuses
-  tracked files, paths or commit messages containing locally listed terms.
+  tracked files, paths or commit messages containing locally listed terms;
+  locally listed allowed phrases are exempt.
 
 ### Added
 - `triage`: counts the matching videos first and reports batches, total

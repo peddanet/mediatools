@@ -83,3 +83,31 @@ def test_local_terms_from_denylist_and_collection(datadir: Path, tmp_path: Path)
                                             encoding="utf-8")
     terms = privacy_scan.PrivacyScan.local_terms()
     assert {"alpha", "beta", "UnitOne"} <= set(terms)
+
+
+@needs_git
+def test_allowed_phrases_are_blanked(tmp_path: Path) -> None:
+    """A term inside an allowed phrase passes; elsewhere it is still found.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    make_file(tmp_path / "a.md", b"the sea level rises\nraise the level\nlevel=3\n")
+    git_repo(tmp_path, "initial")
+    scan = privacy_scan.PrivacyScan(str(tmp_path), ["level"], ["Sea Level", "level="])
+    assert scan.run() == 1
+    assert [location for location, _term in scan.findings] == ["a.md:2"]
+    assert scan.allowed_count == 2
+
+
+def test_read_list_ignores_comments(datadir: Path) -> None:
+    """Comments and empty lines are skipped; a missing file is empty.
+
+    Args:
+        datadir: Test data directory (fixture, ``MEDIATOOLS_HOME``).
+    """
+    os.makedirs(datadir, exist_ok=True)
+    (datadir / "privacy_allowlist.txt").write_text("# allowed\nsea level  # why\n\n",
+                                                   encoding="utf-8")
+    assert privacy_scan.PrivacyScan.read_list("privacy_allowlist.txt") == ["sea level"]
+    assert privacy_scan.PrivacyScan.read_list("missing.txt") == []
