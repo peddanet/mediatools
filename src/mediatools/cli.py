@@ -7,7 +7,6 @@ import shlex
 import shutil
 import sys
 
-from mediatools import __version__
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
 from mediatools.core.durationcache import DurationCache
@@ -15,6 +14,7 @@ from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.prompt import Prompt
 from mediatools.core.runlog import RunLog
+from mediatools.core.versioninfo import VersionInfo
 from mediatools.flatten import FlatPlan, Flattener
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
                                ShrinkOptions)
@@ -50,7 +50,8 @@ class Cli:
             description="Maintenance tools for large local media collections: "
                         "shrink videos to HEVC, review short clips, build flat "
                         "hard-link views and back up without losing hard links.")
-        parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+        parser.add_argument("--version", action="store_true",
+                            help="show the version and whether it is an installed release")
         sub = parser.add_subparsers(dest="command", metavar="<command>")
 
         cmd = sub.add_parser("shrink", help="re-encode videos to HEVC (libx265) in place")
@@ -164,6 +165,10 @@ class Cli:
                 setattr(args, name, extra.pop())
         if extra:
             self.parser.error("unrecognized arguments: " + " ".join(extra))
+        if args.version:
+            # printed directly: argparse would wrap a long checkout path
+            print(f"mediatools {VersionInfo().describe()}")
+            return 0
         if not args.command:
             self.parser.print_help()
             return 1
