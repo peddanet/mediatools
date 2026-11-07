@@ -5,6 +5,28 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+- Shrink databases are matched by file name within their directory
+  instead of the stored absolute path. Databases written before the
+  collection was moved were not recognised: `progress` reported every
+  video as todo, and `shrink` would have encoded processed files again.
+
+### Added
+- `shrink`: plan first (report files, volume, estimated time; ask once),
+  `--order largest|smallest|path` (default: largest first),
+  `--min-seconds S` to leave out short clips, progress line with
+  remaining time, measured speed kept in `state/shrink_throughput.json`.
+- `shrink`: first Ctrl+C finishes the current file and stops, second
+  Ctrl+C aborts it without touching the original; ffmpeg runs in its own
+  process group.
+- `shrink`: journal marker around the copy-back; an interrupted
+  replacement (power failure) is completed by the next run.
+- `progress`: "size changed since" category, database rows without a
+  matching file, time estimate.
+- Privacy gate `tools/privacy_scan.py` in `tools/check.sh`: refuses
+  tracked files, paths or commit messages containing locally listed terms;
+  locally listed allowed phrases are exempt.
+
 ### Added
 - `triage`: counts the matching videos first and reports batches, total
   length and an estimated review time before asking to start; durations

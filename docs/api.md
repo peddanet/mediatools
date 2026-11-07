@@ -495,6 +495,70 @@ Returns:
     Timestamp ``YYYY-MM-DD_hh-mm-ss``.
 ~~~
 
+### `DurationCache` (`mediatools.core.durationcache`) {.unnumbered}
+
+~~~text
+Remembers ffprobe durations keyed by path, size and mtime.
+
+Probing every video costs one ffprobe process. The cache makes the
+candidate count of a second run almost instant: an entry is used only
+while size and modification time of the file are unchanged.
+
+Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>duration``.
+
+Attributes:
+    path: Location of the TSV file.
+    entries: Mapping path to ``(size, mtime_ns, duration)``.
+    hits: Number of lookups answered from the cache in this run.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str)
+
+Load the cache file if it exists.
+
+Args:
+    path: Location of the TSV file (created by :meth:`save`).
+~~~
+
+**`get`**
+
+~~~text
+get(self, file_path: str, st: os.stat_result) -> float | None
+
+Return the cached duration if the file is unchanged.
+
+Args:
+    file_path: Video file.
+    st: Its current ``os.stat`` result.
+
+Returns:
+    Duration in seconds, or None if unknown or outdated.
+~~~
+
+**`put`**
+
+~~~text
+put(self, file_path: str, st: os.stat_result, duration: float) -> None
+
+Store a duration.
+
+Args:
+    file_path: Video file.
+    st: Its ``os.stat`` result at probing time.
+    duration: Duration in seconds.
+~~~
+
+**`save`**
+
+~~~text
+save(self) -> None
+
+Write the cache atomically (temporary file, then rename).
+~~~
+
 ### `MediaTypes` (`mediatools.core.mediatypes`) {.unnumbered}
 
 ~~~text
@@ -660,6 +724,141 @@ Args:
 
 Returns:
     True if ffprobe reports a codec for stream ``v:0``.
+~~~
+
+### `ProgressBar` (`mediatools.core.progressbar`) {.unnumbered}
+
+~~~text
+Shows overall progress by bytes, files and estimated remaining time.
+
+Progress is measured in source bytes, because encoding time grows with
+file size far more than with file count. The remaining time is
+``remaining bytes / speed``; the speed comes from this run once two
+files are done or 30 s have passed, before that from earlier runs
+(``initial_rate``).
+
+On a terminal the line is redrawn in place (``\r``); otherwise (output
+redirected to a file) nothing is drawn and only the log is written.
+
+Attributes:
+    total_bytes: Bytes of all files of the run.
+    total_files: Number of files of the run.
+    done_bytes: Bytes of finished files.
+    done_files: Number of finished files.
+    initial_rate: Bytes per second from earlier runs, or None.
+    stream: Output stream.
+    started: Start time (monotonic seconds).
+    enabled: True if the stream is a terminal.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    total_bytes: int,
+    total_files: int,
+    initial_rate: float | None = None,
+    stream: TextIO | None = None,
+)
+
+Start the display.
+
+Args:
+    total_bytes: Bytes of all files of the run.
+    total_files: Number of files of the run.
+    initial_rate: Bytes per second from earlier runs, or None.
+    stream: Output stream; ``sys.stderr`` if None.
+~~~
+
+**`rate`**
+
+~~~text
+rate(self, current_bytes: float = 0.0) -> float | None
+
+Return the speed used for the estimate.
+
+Args:
+    current_bytes: Bytes of the current file already encoded.
+
+Returns:
+    Bytes per second, or None if unknown.
+~~~
+
+**`remaining_seconds`**
+
+~~~text
+remaining_seconds(self, current_bytes: float = 0.0) -> float | None
+
+Estimate the remaining time.
+
+Args:
+    current_bytes: Bytes of the current file already encoded.
+
+Returns:
+    Seconds, or None if no speed is known.
+~~~
+
+**`line`**
+
+~~~text
+line(self, name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> str
+
+Build the status line.
+
+Args:
+    name: Name of the current file.
+    file_fraction: Encoded fraction of the current file (0..1).
+    file_bytes: Size of the current file.
+
+Returns:
+    Text without line break.
+~~~
+
+**`show`**
+
+~~~text
+show(self, name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> None
+
+Redraw the status line on a terminal.
+
+Args:
+    name: Name of the current file.
+    file_fraction: Encoded fraction of the current file (0..1).
+    file_bytes: Size of the current file.
+~~~
+
+**`file_done`**
+
+~~~text
+file_done(self, size: int) -> None
+
+Count a finished (or skipped) file.
+
+Args:
+    size: Its source size in bytes.
+~~~
+
+**`clear`**
+
+~~~text
+clear(self) -> None
+
+Remove the status line before a log message is printed.
+~~~
+
+**`duration_text`**
+
+~~~text
+duration_text(seconds: float) -> str
+
+Format a duration compactly.
+
+Args:
+    seconds: Duration in seconds.
+
+Returns:
+    Text such as ``2d03h``, ``5h12m`` or ``42m``.
 ~~~
 
 ### `Prompt` (`mediatools.core.prompt`) {.unnumbered}
@@ -832,9 +1031,16 @@ Yields:
 The shrink database file of one directory.
 
 One database exists per directory that contains videos. A row means
-"this file has been processed": either shrunk by ``mediatools shrink`` or
-found to be HEVC already. A file is skipped when path, size and mtime
-all match a row.
+"this file has been processed" - shrunk by ``mediatools shrink`` or an
+earlier tool, or found to be HEVC already - regardless of the codec.
+
+**Matching is by file name within the directory**, not by the stored
+absolute path: the database describes the files of its own directory,
+and the collection may have been moved or renamed since the row was
+written (the stored path then still points to the old location). The
+stored size is compared only to report rows whose file has changed
+since (:meth:`status` returns ``changed``); such files still count as
+processed, so nothing is encoded twice.
 
 The file name is configurable (``[shrink] db_name``, default
 ``shrink.db``); ``mediatools rename-db`` renames databases created under
@@ -924,18 +1130,45 @@ Duplicate paths keep the most recently inserted row; rows without a
 path are dropped.
 ~~~
 
+**`index`**
+
+~~~text
+index(self) -> dict[str, set[int]]
+
+Return the recorded file names with their sizes (cached).
+
+Returns:
+    Mapping file name (last path component of the stored path) to
+    the set of recorded sizes; empty if no database exists.
+~~~
+
+**`status`**
+
+~~~text
+status(self, file_path: str) -> str
+
+Classify a file against the database.
+
+Args:
+    file_path: Absolute path of a video in this directory.
+
+Returns:
+    ``done`` (name and size recorded), ``changed`` (name recorded
+    with another size; still counts as processed) or ``todo``.
+~~~
+
 **`is_done`**
 
 ~~~text
 is_done(self, file_path: str) -> bool
 
-Tell whether a file is recorded with its current size and mtime.
+Tell whether a file counts as processed.
 
 Args:
     file_path: Absolute path of the video.
 
 Returns:
-    True if a row with identical path, size and mtime exists.
+    True if its name is recorded (see :meth:`status`).
 ~~~
 
 **`record`**
@@ -1031,12 +1264,20 @@ The output is accepted only if ffmpeg exits with 0, the file is not
 empty, it contains a video stream and its duration matches the input
 within ``max(TOL_ABS, duration * TOL_REL)`` seconds.
 
+ffmpeg runs in its own session (process group): a Ctrl+C in the
+terminal reaches only mediatools, which decides whether the current
+encode finishes or is stopped with :meth:`abort`. Progress is read from
+``-progress pipe:1``; ffmpeg's messages go to ``<dst>.ffmpeg.log`` and
+are logged on failure.
+
 Attributes:
     crf: libx265 constant rate factor.
     threads: ffmpeg ``-threads`` value.
     probe: :class:`MediaProbe` used for validation.
     log: Optional logger.
     ffmpeg: Name or path of the ffmpeg executable.
+    process: Running ffmpeg process, if any.
+    aborted: True after :meth:`abort` during the current encode.
 ~~~
 
 **`__init__`**
@@ -1079,16 +1320,42 @@ Returns:
 **`encode`**
 
 ~~~text
-encode(self, src: str, dst: str) -> bool
+encode(
+    self,
+    src: str,
+    dst: str,
+    on_progress: Callable[[float], None] | None = None,
+) -> bool
 
 Encode a video and validate the result.
 
 Args:
     src: Input video.
     dst: Output file (overwritten).
+    on_progress: Called with the encoded fraction (0..1) of the file.
 
 Returns:
-    True only for a validated result.
+    True only for a validated result; False on error or abort.
+~~~
+
+**`abort`**
+
+~~~text
+abort(self) -> None
+
+Stop a running encode (SIGTERM to ffmpeg's process group).
+~~~
+
+**`_log_tail`**
+
+~~~text
+_log_tail(self, log_path: str, lines: int = 8) -> None
+
+Log the last lines of ffmpeg's message file.
+
+Args:
+    log_path: ffmpeg message file.
+    lines: Number of lines to log.
 ~~~
 
 **`validate`**
@@ -1129,15 +1396,105 @@ Args:
     *args: Format string and arguments for :meth:`logging.Logger.error`.
 ~~~
 
+### `ShrinkOptions` (`mediatools.shrink.options`) {.unnumbered}
+
+~~~text
+What a :class:`Shrinker` run processes and how.
+
+Attributes:
+    keep_copies: Do not replace originals and record nothing; the shrunk
+        copies stay in ``newShrinkedFiles/`` for review.
+    extensions: Extensions to process (lower case, with dot).
+    db_name: Database file name; None uses the default name.
+    order: ``largest`` (default), ``smallest`` or ``path``.
+    min_seconds: Leave out videos shorter than this; 0 processes all.
+~~~
+
+**`__post_init__`**
+
+~~~text
+__post_init__(self) -> None
+
+Validate the values.
+
+Raises:
+    ValueError: If ``order`` is unknown or ``min_seconds`` negative.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    keep_copies: bool = False,
+    extensions: frozenset = <factory>,
+    db_name: str | None = None,
+    order: str = 'largest',
+    min_seconds: float = 0.0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+**`__setattr__`**
+
+~~~text
+__setattr__(self, name, value)
+
+Implement setattr(self, name, value).
+~~~
+
+**`__delattr__`**
+
+~~~text
+__delattr__(self, name)
+
+Implement delattr(self, name).
+~~~
+
 ### `ProgressReport` (`mediatools.shrink.progress`) {.unnumbered}
 
 ~~~text
-Lists which videos are recorded in their shrink database and which not.
+Reports which videos are recorded in their shrink database and which not.
 
-Strictly read-only: no database is created and nothing is deleted
-(it never creates or deletes anything). Two lists are
-written to ``<data>/reports/``: ``progress_done_<ts>.txt`` and
-``progress_todo_<ts>.txt``.
+Strictly read-only: no database is created and nothing is changed.
+Matching follows :meth:`ShrinkDatabase.status` (file name within the
+directory), so databases written at an earlier location of the
+collection are evaluated correctly. Three lists are written to
+``<data>/reports/``: ``progress_done``, ``progress_changed`` (recorded,
+size differs - counts as processed) and ``progress_todo``.
 
 Attributes:
     root: Absolute start directory.
@@ -1145,8 +1502,11 @@ Attributes:
     datadir: Data directory for the reports.
     extensions: Extensions that are counted.
     db_name: Database file name (None: default name).
-    done: Recorded videos.
-    todo: Videos not recorded yet.
+    throughput: Measured encoding speed for the time estimate.
+    lists: Paths per status ``done``, ``changed``, ``todo``.
+    todo_bytes: Total size of the videos still to do.
+    databases: Number of databases found.
+    orphan_rows: Database rows without a matching file.
 ~~~
 
 **`__init__`**
@@ -1159,6 +1519,7 @@ __init__(
     datadir: DataDir | None = None,
     extensions: frozenset = frozenset(...),
     db_name: str | None = None,
+    throughput: ThroughputLog | None = None,
 )
 
 Configure the report.
@@ -1169,6 +1530,7 @@ Args:
     datadir: Data directory; the default one if None.
     extensions: Extensions that are counted.
     db_name: Database file name; the default name if None.
+    throughput: Speed measurements; loaded from the data directory if None.
 ~~~
 
 **`scan`**
@@ -1176,18 +1538,18 @@ Args:
 ~~~text
 scan(self) -> None
 
-Fill :attr:`done` and :attr:`todo` by walking the tree.
+Fill :attr:`lists` by walking the tree.
 ~~~
 
 **`write`**
 
 ~~~text
-write(self) -> tuple[str, str]
+write(self) -> dict[str, str]
 
-Write both lists to the reports directory.
+Write the three lists to the reports directory.
 
 Returns:
-    Paths of the done list and the todo list.
+    Report path per status.
 ~~~
 
 **`run`**
@@ -1195,7 +1557,7 @@ Returns:
 ~~~text
 run(self) -> int
 
-Scan, write the lists and log a summary.
+Scan, write the lists and log a summary with a time estimate.
 
 Returns:
     Always 0.
@@ -1204,18 +1566,31 @@ Returns:
 ### `Shrinker` (`mediatools.shrink.shrinker`) {.unnumbered}
 
 ~~~text
-Shrinks all videos below a directory and keeps their file names.
+Shrinks the videos below a directory and keeps their file names.
 
-Decision per file, in this order:
+A run has two phases:
 
-1. **Database** - path, size and mtime match a row: skip. The database
-   always has precedence.
-2. **Codec** - the first video stream is already HEVC: not re-encoded,
-   recorded as done.
-3. **Encode** - :class:`HevcEncoder` writes to ``newShrinkedFiles/``;
-   only a validated result is copied over the original (in place, the
-   inode is kept, so hard links such as ``_flat`` entries see the new
-   content) and recorded.
+1. **Plan** - walk the tree, finish replacements interrupted by a crash
+   (journal, see below), and collect every video that is not yet
+   recorded in its directory's database. The database always has
+   precedence: a recorded file counts as processed, whatever its codec.
+   Optionally drop videos shorter than ``min_seconds`` and sort the rest
+   (``largest`` first, ``smallest`` first or walk order ``path``).
+2. **Encode** - per file: already HEVC -> record only; otherwise
+   :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
+   result replaces the original (in place, the inode is kept, so
+   ``_flat`` hard links see the new content) and is recorded.
+
+**Stopping.** The first Ctrl+C (or Ctrl+Z) lets the current file finish
+and then stops; the second Ctrl+C (or SIGTERM) aborts the current
+encode at once - its partial output is deleted, the original is
+untouched. Signals never interrupt the replacement itself.
+
+**Crash safety.** Before an original is overwritten, a marker
+``newShrinkedFiles/<name>.replace`` is written; it is removed after the
+copy has been flushed to disk and recorded. If the machine fails in
+between, the next run finds the marker next to the validated output and
+repeats the copy before anything else.
 
 With ``keep_copies=True`` the originals are not touched and nothing is
 recorded; the shrunk copies stay in ``newShrinkedFiles/`` for review.
@@ -1223,14 +1598,17 @@ recorded; the shrunk copies stay in ``newShrinkedFiles/`` for review.
 Attributes:
     root: Absolute start directory.
     log: Logger.
-    keep_copies: Review mode, see above.
-    db_name: Database file name (None: default name).
-    extensions: Extensions that are processed.
-    probe: Probe for the codec check.
+    opts: What is processed and how (:class:`ShrinkOptions`).
+    probe: Probe for codec and duration checks.
     encoder: Encoder for new files.
-    walker: Tree walker with the shared skip rules.
-    stop_requested: Set by the signal handler.
-    stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``failed``, ``copies``.
+    durations: Duration cache for ``min_seconds``.
+    throughput: Speed measurements for the time estimate.
+    databases: Open databases per directory.
+    flags: ``stop`` (finish the current file, then stop) and ``abort``
+        (stop the current file at once).
+    display: Progress display of the encode phase.
+    stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
+        ``failed``, ``copies``, ``recovered``.
     failed: Paths that could not be encoded.
 ~~~
 
@@ -1241,11 +1619,12 @@ __init__(
     self,
     root: str,
     logger,
-    keep_copies: bool = False,
-    extensions: frozenset = frozenset(...),
+    opts: ShrinkOptions | None = None,
     encoder: HevcEncoder | None = None,
     probe: MediaProbe | None = None,
-    db_name: str | None = None,
+    durations: DurationCache | None = None,
+    throughput: ThroughputLog | None = None,
+    display: ProgressBar | None = None,
 )
 
 Configure a run.
@@ -1253,11 +1632,12 @@ Configure a run.
 Args:
     root: Start directory, processed recursively.
     logger: :class:`logging.Logger` for progress and results.
-    keep_copies: Do not replace originals, record nothing.
-    extensions: Extensions to process.
+    opts: Run settings; defaults if None.
     encoder: Encoder; a default :class:`HevcEncoder` if None.
     probe: Probe; a new :class:`MediaProbe` if None.
-    db_name: Database file name; the default name if None.
+    durations: Duration cache; None probes without caching.
+    throughput: Speed measurements; a default one if None.
+    display: Progress display; created for the encode phase if None.
 ~~~
 
 **`install_signal_handlers`**
@@ -1265,46 +1645,172 @@ Args:
 ~~~text
 install_signal_handlers(self) -> None
 
-Defer SIGINT, SIGTERM and SIGTSTP until the current file is done.
+Route SIGINT, SIGTERM and SIGTSTP to :meth:`on_signal`.
 ~~~
 
-**`_on_signal`**
+**`on_signal`**
 
 ~~~text
-_on_signal(self, signum, _frame) -> None
+on_signal(self, signum: int, _frame: object = None) -> None
 
-Remember that the user wants to stop.
+First Ctrl+C: stop after this file; second Ctrl+C or SIGTERM: abort now.
+
+Only flags are set and ffmpeg is told to stop; no exception is
+raised, so a running replacement always completes.
 
 Args:
     signum: Number of the received signal.
-    _frame: Current stack frame (unused).
+~~~
+
+**`database`**
+
+~~~text
+database(self, dirpath: str) -> ShrinkDatabase
+
+Return the (cached) database of a directory.
+
+Args:
+    dirpath: Directory.
+
+Returns:
+    Its :class:`ShrinkDatabase`.
+~~~
+
+**`plan`**
+
+~~~text
+plan(self) -> list[tuple[str, int]]
+
+Recover interrupted replacements and list the videos to encode.
+
+Returns:
+    ``(path, size)`` pairs in processing order.
+~~~
+
+**`_drop_short`**
+
+~~~text
+_drop_short(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
+
+Remove videos shorter than :attr:`min_seconds`.
+
+Args:
+    todo: Candidates.
+
+Returns:
+    Candidates with a known duration of at least ``min_seconds``
+    (unknown durations are kept).
+~~~
+
+**`_duration`**
+
+~~~text
+_duration(self, path: str) -> float | None
+
+Return a video's duration, from the cache if possible.
+
+Args:
+    path: Video file.
+
+Returns:
+    Seconds, or None if unknown.
 ~~~
 
 **`run`**
 
 ~~~text
-run(self) -> int
+run(self, confirm: Callable[[], bool] | None = None) -> int
 
-Process the whole tree.
+Plan, report, ask and encode.
+
+Args:
+    confirm: Called after the plan summary; encoding starts only if
+        it returns True. None starts without asking.
 
 Returns:
-    0 on success, 1 if interrupted, 2 if at least one file failed.
+    0 on success or if declined, 1 if stopped by the user, 2 if a
+    file failed.
+~~~
+
+**`_attach_bar_filter`**
+
+~~~text
+_attach_bar_filter(self) -> None
+
+Clear the progress line before each console log message.
 ~~~
 
 **`_process`**
 
 ~~~text
-_process(self, database: ShrinkDatabase, dirpath: str, path: str) -> bool
+_process(self, path: str, size: int) -> None
 
-Handle one video.
+Handle one planned video.
 
 Args:
-    database: Database of the video's directory.
-    dirpath: Directory of the video.
     path: Absolute path of the video.
+    size: Its size when planned.
+~~~
 
-Returns:
-    False if the run must stop (signal received), otherwise True.
+**`_encode_and_replace`**
+
+~~~text
+_encode_and_replace(
+    self,
+    path: str,
+    size: int,
+    out: str,
+    database: ShrinkDatabase,
+) -> None
+
+Encode one video and, if valid, replace the original.
+
+Args:
+    path: Original video.
+    size: Its size.
+    out: Output path in ``newShrinkedFiles/``.
+    database: Database of its directory.
+~~~
+
+**`_show`**
+
+~~~text
+_show(self, name: str, fraction: float, size: int) -> None
+
+Forward encoder progress to the display.
+
+Args:
+    name: Current file name.
+    fraction: Encoded fraction of the file.
+    size: Its size in bytes.
+~~~
+
+**`_replace`**
+
+~~~text
+_replace(self, out: str, path: str, database: ShrinkDatabase) -> None
+
+Copy a validated output over the original and record it.
+
+Order: marker, copy into the existing inode, flush to disk, record,
+delete output, delete marker. A crash at any point leaves either the
+untouched original or the marker plus the validated output.
+
+Args:
+    out: Validated output in ``newShrinkedFiles/``.
+    path: Original video.
+    database: Database of its directory.
+~~~
+
+**`_recover`**
+
+~~~text
+_recover(self, dirpath: str) -> None
+
+Repeat replacements that a crash interrupted.
+
+Args:
+    dirpath: Directory whose ``newShrinkedFiles`` is checked.
 ~~~
 
 **`_remove_tmp`**
@@ -1334,7 +1840,71 @@ Args:
 ~~~text
 _finish(self) -> None
 
-Remove all temporary directories below root and log the summary.
+Log the summary.
+~~~
+
+### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}
+
+~~~text
+Accumulates how many source bytes were encoded in how many seconds.
+
+The ratio (source bytes per second of encoding) depends on CPU, codec
+settings and material; measured on the user's own machine it is the
+best basis for estimating the remaining time. Stored as JSON
+``{"bytes": int, "seconds": float}`` in ``<data>/state/``.
+
+Attributes:
+    path: Location of the JSON file.
+    bytes: Accumulated source bytes.
+    seconds: Accumulated encoding seconds.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str | None = None)
+
+Load the accumulated values.
+
+Args:
+    path: JSON file; ``<data>/state/shrink_throughput.json`` if None.
+~~~
+
+**`rate`**
+
+~~~text
+rate(self) -> float | None
+
+Return the measured speed.
+
+Returns:
+    Source bytes per second, or None without measurements.
+~~~
+
+**`add`**
+
+~~~text
+add(self, size: int, seconds: float) -> None
+
+Add one encoded file and save.
+
+Args:
+    size: Source size in bytes.
+    seconds: Encoding time in seconds.
+~~~
+
+**`duration_text`**
+
+~~~text
+duration_text(seconds: float) -> str
+
+Format a duration for humans.
+
+Args:
+    seconds: Duration in seconds.
+
+Returns:
+    Text such as ``3 d 4 h``, ``5 h 12 min`` or ``42 min``.
 ~~~
 
 ## `mediatools.triage`
@@ -1426,70 +1996,6 @@ Run the complete search before the review starts.
 Returns:
     All matching ``(path, duration)`` pairs in walk order; the cache
     (if any) is saved afterwards.
-~~~
-
-### `DurationCache` (`mediatools.triage.durationcache`) {.unnumbered}
-
-~~~text
-Remembers ffprobe durations keyed by path, size and mtime.
-
-Probing every video costs one ffprobe process. The cache makes the
-candidate count of a second run almost instant: an entry is used only
-while size and modification time of the file are unchanged.
-
-Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>duration``.
-
-Attributes:
-    path: Location of the TSV file.
-    entries: Mapping path to ``(size, mtime_ns, duration)``.
-    hits: Number of lookups answered from the cache in this run.
-~~~
-
-**`__init__`**
-
-~~~text
-__init__(self, path: str)
-
-Load the cache file if it exists.
-
-Args:
-    path: Location of the TSV file (created by :meth:`save`).
-~~~
-
-**`get`**
-
-~~~text
-get(self, file_path: str, st: os.stat_result) -> float | None
-
-Return the cached duration if the file is unchanged.
-
-Args:
-    file_path: Video file.
-    st: Its current ``os.stat`` result.
-
-Returns:
-    Duration in seconds, or None if unknown or outdated.
-~~~
-
-**`put`**
-
-~~~text
-put(self, file_path: str, st: os.stat_result, duration: float) -> None
-
-Store a duration.
-
-Args:
-    file_path: Video file.
-    st: Its ``os.stat`` result at probing time.
-    duration: Duration in seconds.
-~~~
-
-**`save`**
-
-~~~text
-save(self) -> None
-
-Write the cache atomically (temporary file, then rename).
 ~~~
 
 ### `KeptList` (`mediatools.triage.keptlist`) {.unnumbered}

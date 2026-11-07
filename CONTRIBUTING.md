@@ -35,6 +35,7 @@ tools/check.sh --fast                   # without tests, while editing
 
 | Gate     | Tool        | Pass criterion                                  |
 |----------|-------------|-------------------------------------------------|
+| privacy  | privacy_scan | no locally listed term in files, paths, commit messages |
 | format   | pycodestyle | no finding, max line length 100                 |
 | lint     | pylint      | 10.00/10 incl. Google-style docstring checks    |
 | types    | mypy        | no error (`check_untyped_defs`)                 |

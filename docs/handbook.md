@@ -240,13 +240,16 @@ Design principles:
 ## Invocation
 
 ~~~bash
-mediatools shrink ~/Pictures/collection
-mediatools shrink ~/Pictures/collection --keep-copies
+mediatools shrink ~/Pictures/collection                       # largest first
+mediatools shrink ~/Pictures/collection --min-seconds 60      # skip short clips
+mediatools shrink ~/Pictures/collection --order path --keep-copies
 mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 ~~~
 
 | Option | Default | Meaning |
 |---|---|---|
+| `--order` | `largest` | `largest`, `smallest` or `path` (directory order) |
+| `--min-seconds S` | 0 | leave out videos shorter than S seconds |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
 | `--threads N` | 6 | ffmpeg threads |
@@ -254,28 +257,68 @@ mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 | `-y` | off | no confirmation question |
 | `-v` | off | debug logging |
 
+## Plan
+
+Before anything is encoded, the whole tree is walked once:
+
+1. Interrupted replacements are completed (see *Interruption*).
+2. Every video is checked against the database of its directory; recorded
+   files are counted as processed and left out. 0-byte placeholders are
+   ignored.
+3. With `--min-seconds`, the durations of the remaining videos are read
+   (cached in `state/triage_durations.tsv`, shared with `triage`) and short
+   ones are left out.
+4. The rest is sorted (`--order`), and the run reports, for example (numbers illustrative):
+
+~~~text
+already processed (database): 12000 | shorter than 60 s: 1500 | to encode: 6500 files,
+560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+Start encoding and REPLACE the originals? [y/N]
+~~~
+
+The estimate uses `state/shrink_throughput.json` (source bytes and encoding
+seconds of all earlier runs); during the run the measured speed of the run
+itself takes over.
+
 ## Decision per file
 
 ![Decision logic of Shrinker](img/shrink_flow.png){width=70%}
 
-1. **Database first.** A row with identical path, size and mtime means
-   "already processed"; the file is skipped without probing.
+1. **Database first.** A recorded file name means "already processed",
+   regardless of the codec it was processed with; the file is skipped
+   without probing.
 2. **Codec.** If the first video stream is already HEVC, the file is
    recorded but not re-encoded (re-encoding HEVC costs quality for little
    gain).
 3. **Encode and validate.** `HevcEncoder` runs
 
    ~~~text
-   ffmpeg -nostdin -y -threads 6 -i SRC -vcodec libx265 -crf 28 TMP
+   ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 -threads 6 \
+          -i SRC -vcodec libx265 -crf 28 TMP
    ~~~
 
-   and accepts the result only if the exit code is 0, the output is not
-   empty, has a video stream, and its duration equals the input within
-   `max(1 s, 2 %)`.
+   in its own process group and accepts the result only if the exit code
+   is 0, the output is not empty, has a video stream, and its duration
+   equals the input within `max(1 s, 2 %)`. ffmpeg's messages go to
+   `TMP.ffmpeg.log`; on failure its last lines are logged.
 4. **Copy back in place.** `shutil.copyfile` writes into the existing
    inode. All hard links of the file -- `_flat` entries, deduplication
    links -- therefore show the shrunk content immediately, and no second
    encode happens via another name.
+
+## Progress display
+
+(numbers illustrative; on screen this is one line)
+
+~~~text
+[#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB |
+ETA 2d21h |  63 % clip.mp4
+~~~
+
+Percentage, volume and remaining time are measured in source bytes,
+because the encoding time grows with the file size, not with the number of
+files. The line is drawn only on a terminal; the log file receives the
+normal messages.
 
 ## Database
 
@@ -286,7 +329,14 @@ CREATE TABLE files (path text NOT NULL PRIMARY KEY,
 
 * One database per directory with videos; file name `[shrink] db_name`
   (default `shrink.db`).
-* `modified` is the mtime after shrinking, format `YYYY-MM-DD HH:MM:SS`.
+* **Matching uses the file name**, not the stored absolute path: a database
+  describes the files of its own directory, and the stored path still
+  points to wherever the collection was when the row was written. A row
+  whose size differs from the file today is reported by `progress` as
+  "size changed since" and still counts as processed -- nothing is encoded
+  twice.
+* `path` and `modified` (mtime after shrinking, `YYYY-MM-DD HH:MM:SS`) are
+  still written for compatibility and traceability.
 * Databases of the first script generation (no `PRIMARY KEY`) are backed up
   next to the original (suffix `.bak_` plus timestamp) and migrated in one
   transaction.
@@ -300,11 +350,27 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 
 ## Interruption and failures
 
-Ctrl+C, Ctrl+Z and SIGTERM set a flag; the running ffmpeg receives the
-terminal's SIGINT too and stops; the original stays untouched and the
-temporary output is removed. Copy-back and database entry are executed as
-one unit and are never separated by an interruption. A file that cannot be
-encoded is logged as `FAILED`; the run continues and ends with exit code 2.
+| Event | Behaviour |
+|---|---|
+| Ctrl+C (or Ctrl+Z) once | the current file is finished, validated, copied and recorded; then the run stops |
+| Ctrl+C a second time, SIGTERM | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
+| power failure, kill -9 | see the replacement journal below |
+| ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
+
+Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
+reaches only mediatools, which decides what happens. The signal handler only
+sets flags and never raises an exception, so a replacement in progress
+always completes.
+
+**Replacement journal.** Overwriting an original is the only moment in
+which data could be lost. The sequence is: write the marker
+`newShrinkedFiles/<name>.replace`, copy the validated output into the
+original, flush it to disk (`fsync`), record it, delete the output, delete
+the marker. If the machine fails anywhere in between, the next run finds the
+marker next to the validated output and repeats the copy before it plans
+anything else. Without a marker, the original was never touched.
+
+Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed.
 
 # progress
 
@@ -312,8 +378,24 @@ encoded is logged as `FAILED`; the run continues and ends with exit code 2.
 mediatools progress ~/Pictures/collection
 ~~~
 
-Writes `reports/progress_done_<ts>.txt` and `reports/progress_todo_<ts>.txt`
-and prints the counts. It creates no database and deletes nothing.
+(numbers illustrative)
+
+~~~text
+videos: 20000 | processed: 12000 (of which size changed since: 12) |
+todo: 8000 (640.0 GiB)
+databases: 900 | rows without a matching file: 40
+estimated encoding time at the measured 1.5 MB/s: about 5 d 7 h
+~~~
+
+* **processed** -- the file name is recorded in the database of its
+  directory; **size changed since** -- recorded, but the file has another
+  size today (still counted as processed);
+* **todo** -- not recorded, with the total volume;
+* **rows without a matching file** -- the file was deleted or renamed
+  after it was recorded.
+
+The three lists go to `reports/progress_{done,changed,todo}_<ts>.txt`. The
+command creates no database and changes nothing.
 
 # triage
 
