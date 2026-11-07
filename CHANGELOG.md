@@ -5,6 +5,13 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Documentation
+- README and handbook: purpose in one minute (problem table, why file
+  names are never taken away), warning that `shrink` is lossy, two
+  installation options (pipx from GitHub, clone and launcher into
+  `~/.local/bin`) with update and removal, `MEDIATOOLS_HOME`, and a
+  "First steps" sequence that looks before it changes anything.
+
 ### Fixed
 - Three stray test log files (`o1`, `o2`, `o3`) committed by mistake are
   removed.

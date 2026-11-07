@@ -26,11 +26,11 @@ mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 
 ## Contents
 
-- [Why](#why)
+- [In one minute](#in-one-minute)
+- [Typical folder layout](#typical-folder-layout)
 - [Safety model](#safety-model)
-- [Requirements](#requirements)
 - [Installation](#installation)
-- [Quick start](#quick-start)
+- [First steps](#first-steps)
 - [Subcommands](#subcommands)
   - [shrink](#shrink) · [progress](#progress) · [triage](#triage) · [flatten](#flatten) · [sync](#sync) · [snapshot](#snapshot)
 - [Configuration](#configuration)
@@ -43,30 +43,62 @@ mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 
 ---
 
-## Why
+## In one minute
 
-Archives of creator platforms - one folder per campaign,
-posts with numbered folders, attachments, image galleries - quickly grow into
-trees like this (illustrative example):
+You keep a local copy of videos and pictures that a download tool fetches
+folder by folder - for example an archiver for a creator platform. After some months the collection has the usual problems:
+
+| Problem | Command | Result |
+|---|---|---|
+| The disk is full of large H.264 videos | `shrink` | HEVC re-encode, often half the size or less, same file name |
+| How much is still left to shrink? | `progress` | read-only report with a time estimate |
+| Many short clips you never wanted | `triage` | watch them in batches, close a window to discard the clip |
+| Every file is buried four or five folder levels deep | `flatten` | one flat folder of hard links per project, no extra space |
+| The backup turns hard links into full copies, or deletes too much | `sync`, `snapshot` | rsync backup that keeps hard links; versioned snapshots |
+
+**The key idea:** the download tool decides by *file name* whether it already
+has a file. mediatools therefore never takes a name away. A shrunk video keeps
+its name, a discarded clip leaves an empty placeholder under its name, a flat
+view consists of additional names (hard links), and `sync` never deletes. The
+next download run fetches only what is really new - not the large originals
+again, not the clips you discarded.
+
+> **Before you start:** `shrink` re-encodes *lossy* and then replaces the
+> original. There is no undo except a backup. Make a backup first (`sync` or
+> `snapshot`) and try `shrink --keep-copies` on a test folder to judge the
+> quality - see [First steps](#first-steps).
 
 ```text
-collection/
-└── projectA/
-    ├── posts/members/987654321 2024-05-01 10-00-00/Videos/making_of_part1.mp4
-    ├── posts/public/Images/cover_2024.jpg
-    └── attachments/...
+mediatools shrink    re-encode videos to HEVC in place, tracked per directory
+mediatools progress  read-only report: which videos are already shrunk
+mediatools triage    open short clips in batches, close a window to discard it
+mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
+mediatools sync      rsync backup that keeps hard links and never deletes
+mediatools snapshot  versioned backups with rsnapshot on a removable disk
+mediatools config    one local file for paths and names (kept outside the repo)
+mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 ```
 
-Three things become painful at a few hundred thousand files:
+## Typical folder layout
 
-1. **Disk space** - source videos are H.264 at high bit rates.
-2. **Browsing** - every image or clip is buried four or five levels deep.
-3. **Backups** - hard links (from deduplication or flat views) silently turn
-   into full copies when the backup tool does not preserve them.
+mediatools makes no assumption about a particular platform. It works on a
+**collection root** whose direct sub-directories are called **units** (one per
+project, campaign or channel); everything below a unit may be nested
+arbitrarily (illustrative example):
 
-`mediatools` addresses each point with one subcommand and shares one set of
-rules between them (which directories are never entered, how files are
-identified, where logs go).
+```text
+collection/                      <- collection root ([collection] root)
+└── projectA/                    <- unit
+    ├── posts/members/987654321 2024-05-01 10-00-00/Videos/making_of_part1.mp4
+    ├── posts/public/Images/cover_2024.jpg
+    ├── attachments/...
+    └── _flat/                   <- created by flatten: hard links of all media
+```
+
+At a few hundred thousand files the three pain points of the table above add
+up: disk space, browsing and backups. `mediatools` addresses each with one
+subcommand, and all subcommands share one set of rules (which directories are
+never entered, how files are identified, where logs go).
 
 ## Safety model
 
@@ -85,7 +117,11 @@ identified, where logs go).
 | `snapshot` refuses to adopt or sync a directory that is not a copy of the source (dry-run probe) | `snapshot` |
 | `snapshot` aborts if a run would remove more files than `max_deletions` from the newest snapshot | `snapshot` |
 
-## Requirements
+## Installation
+
+Everything except the system packages in step 1 runs as a **normal user**.
+
+### 1. System packages
 
 | Tool | Needed by | Debian/Ubuntu package |
 |---|---|---|
@@ -95,47 +131,94 @@ identified, where logs go).
 | gio (trash) | triage | `libglib2.0-bin` |
 | rsync ≥ 3.0 | sync, snapshot | `rsync` |
 | rsnapshot ≥ 1.4 | snapshot | `rsnapshot` |
+| pipx | installation option A | `pipx` |
 
 ```bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot pipx
 ffmpeg -hide_banner -encoders | grep libx265      # must print a libx265 line
 ```
+
+`sudo` is needed because apt writes to `/usr` and the package database. You
+only need the packages of the subcommands you use.
 
 Hard links require a Linux file system such as ext4, btrfs or XFS on both
 sides of a `sync`. exFAT, FAT and NTFS cannot store hard links.
 
-## Installation
+### 2. Install mediatools - choose one option
 
-**Option A - no installation, launcher script (recommended for personal use)**
+**Option A - pipx (recommended for users)**
+
+```bash
+pipx ensurepath                  # once: puts ~/.local/bin into PATH, then open a new terminal
+pipx install git+https://github.com/peddanet/mediatools.git
+mediatools --version
+```
+
+pipx installs the current release (branch `main`) into a virtual environment
+of its own and places the `mediatools` command in `~/.local/bin`. Update with
+`pipx reinstall mediatools`, remove with `pipx uninstall mediatools`.
+
+**Option B - clone and launcher (to read or change the code)**
 
 ```bash
 git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
 cd ~/Projects/mediatools
-./install.sh                     # creates ~/scripts/mediatools (or BIN_DIR=...)
+BIN_DIR=~/.local/bin ./install.sh
 mediatools --version
 ```
 
-**Option B - pipx**
-
-```bash
-pipx install ~/Projects/mediatools
-```
+`install.sh` writes one small launcher script into `BIN_DIR` that runs the
+code of the clone; nothing else is installed. Update with `git pull` in the
+clone, remove with `rm ~/.local/bin/mediatools`. Without `BIN_DIR` the
+launcher goes to `~/scripts`, which must then be in `PATH`. On Ubuntu,
+`~/.local/bin` is added to `PATH` by `~/.profile` once the directory exists
+(log in again after the first install).
 
 Ubuntu 24.04 and later block `pip install --user` for the system Python
-(PEP 668); use option A or pipx.
+(PEP 668); use option A or B.
 
-## Quick start
+### 3. Where mediatools keeps its files
+
+Configuration, logs, state and reports are stored in one directory, default
+`~/scripts/mediatools.d` (see [Data directory](#data-directory)). To use
+another place, set `MEDIATOOLS_HOME`, for example in `~/.profile`:
 
 ```bash
-mediatools config --init                 # writes ~/scripts/mediatools.d/mediatools.ini
-"${EDITOR:-nano}" "$(mediatools config --path)"   # set [collection] root
+echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+```
 
-mediatools progress                      # how much is still H.264?
-mediatools shrink                        # shrink, asks once for confirmation
-mediatools triage --max-seconds 30       # review clips up to 30 s
-mediatools flatten --dry-run             # what would _flat contain?
-mediatools flatten                       # create the hard links
-mediatools sync                          # back up; asks where the disk is
+Nothing is ever written into the program directory or the clone.
+
+## First steps
+
+Nothing below changes a file until you confirm a question.
+
+```bash
+mediatools config --set collection.root=~/Videos/collection   # your collection root
+mediatools config                                             # check the effective values
+mediatools progress                                           # how much is still H.264?
+mediatools triage --dry-run --max-seconds 30                  # how many short clips, how long?
+mediatools flatten --dry-run                                  # what would _flat contain?
+```
+
+Judge the shrink quality on a copy before touching the collection:
+
+```bash
+mkdir -p ~/shrinktest && cp ~/Videos/collection/projectA/some/video.mp4 ~/shrinktest/
+mediatools shrink --keep-copies ~/shrinktest                  # result in ~/shrinktest/newShrinkedFiles/
+```
+
+`--keep-copies` leaves the originals untouched and records nothing. Compare
+both files in a player; if the quality is too low, use a smaller `--crf`
+(for example 24).
+
+Then make a backup and start the real work:
+
+```bash
+mediatools sync                          # back up; asks for the disk, shows a dry run first
+mediatools triage --max-seconds 30       # discard unwanted short clips first
+mediatools shrink                        # largest files first; Ctrl+C stops cleanly
+mediatools flatten                       # create the flat hard-link views
 ```
 
 Every command also accepts an explicit path instead of `[collection] root`.
