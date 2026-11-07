@@ -4,13 +4,18 @@ name: quality-gates
 #   feature/*  -> pull request into develop
 #   develop    -> integration; release merge into main
 #   main       -> releases only, every release is an annotated tag vX.Y.Z
+#
+# Work branches (feature/*, release/*, ...) are checked through their pull
+# request; a push trigger for them would run every gate twice. Pushes to
+# develop and main (the merges) and release tags are checked as well.
+# A branch without a pull request: gh workflow run quality-gates --ref BRANCH
 on:
   push:
-    branches: [main, develop, "feature/**", "fix/**", "release/**", "hotfix/**"]
+    branches: [main, develop]
     tags: ["v*"]
   pull_request:
     branches: [main, develop]
-  workflow_dispatch:       # manual start: gh workflow run quality-gates --ref develop
+  workflow_dispatch:
 
 jobs:
   gates:

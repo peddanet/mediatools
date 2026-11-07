@@ -7,14 +7,17 @@
 | `main`        | releases only; every commit is tagged     | -            | -           | integrator  |
 | `develop`     | integration of finished features          | `main`       | `main`      | integrator  |
 | `feature/<x>` | one feature or fix, short-lived           | `develop`    | `develop`   | via PR      |
+| `release/<x>` | version, CHANGELOG, PDFs of a release     | `develop`    | `main` (PR) | integrator  |
 | `hotfix/<x>`  | urgent fix of a release                   | `main`       | `main` + `develop` | integrator |
 
 Rules:
 
 1. Nobody commits directly to `main` or `develop`; changes arrive by pull
    request (feature -> develop) or release merge (develop -> main).
-2. Every push to a branch runs the quality gates locally (pre-push hook)
-   and in CI. A pull request can only be merged with green CI.
+2. Every push to a branch runs the quality gates locally (pre-push hook);
+   CI runs them for every pull request and for every merge into `develop`
+   and `main`. A pull request can only be merged with green CI (branch
+   protection).
 3. A release is an annotated tag `vX.Y.Z` on `main`; CI verifies that the
    tag is on `main` and equals `__version__`.
 
