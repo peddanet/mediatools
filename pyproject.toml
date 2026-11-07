@@ -83,7 +83,7 @@ source = ["mediatools"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 90
 precision = 2
 show_missing = false
 skip_covered = true

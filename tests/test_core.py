@@ -1,9 +1,11 @@
 """Unit tests for mediatools.core."""
+import io
 import os
 from pathlib import Path
 
 from conftest import make_file
 from mediatools.core import DataDir, MediaTypes, Prompt, TreeWalker
+from mediatools.core.progressbar import ProgressBar
 
 
 def test_media_types() -> None:
@@ -45,3 +47,51 @@ def test_prompt_answers() -> None:
     assert Prompt(input_func=lambda _q: next(answers)).yes_no("?") is True
     assert Prompt(input_func=lambda _q: "").yes_no("?", default=False) is False
     assert Prompt(assume_yes=True).yes_no("?") is True
+
+
+def test_prompt_repeats_invalid_answer_and_handles_eof() -> None:
+    """An invalid answer is asked again; end of input gives the default."""
+    answers = ["maybe", "j"]
+    assert Prompt(input_func=lambda _q: answers.pop(0)).yes_no("Go?")
+
+    def closed(question: str) -> str:
+        """Simulate a closed terminal.
+
+        Args:
+            question: Ignored.
+
+        Raises:
+            EOFError: Always.
+        """
+        raise EOFError(question)
+
+    assert Prompt(input_func=closed).text("Where?", "/srv") == "/srv"
+    assert Prompt(input_func=closed).yes_no("Go?", default=True)
+
+
+def test_progress_bar_texts() -> None:
+    """Remaining time, long names and duration formats of the progress line."""
+    class Tty(io.StringIO):
+        """Text stream that claims to be a terminal."""
+
+        def isatty(self) -> bool:
+            """Claim a terminal.
+
+            Returns:
+                True.
+            """
+            return True
+
+    pbar = ProgressBar(total_bytes=1000, total_files=3, stream=Tty())
+    assert pbar.remaining_seconds() is None
+    assert "?" in pbar.line("x" * 50)
+    pbar.file_done(500)
+    pbar.file_done(250)
+    assert pbar.remaining_seconds() is not None
+    assert "..." in pbar.line("y" * 50, 0.5, 100)
+    assert ProgressBar.duration_text(90061) == "1d01h"
+    assert ProgressBar.duration_text(3700) == "1h01m"
+    assert ProgressBar.duration_text(120) == "2m"
+    pbar.show("z")
+    pbar.clear()
+    assert "\r" in pbar.stream.getvalue()

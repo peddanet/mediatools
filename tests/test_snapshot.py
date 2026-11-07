@@ -12,6 +12,7 @@ from mediatools.cli import main
 from mediatools.core import Config, Prompt
 from mediatools.snapshot import (LevelSchedule, RsnapshotConf, SnapshotSettings, Snapshotter,
                                  SyncProbe, SystemdTrigger)
+from mediatools.snapshot import trigger as trigger_module
 from mediatools.sync.fscheck import FsCheck
 
 LOG = logging.getLogger("test")
@@ -304,3 +305,17 @@ def test_cli_snapshot_unmounted_disk(datadir: Path, tmp_path: Path,
     assert main(["config"]) == 0
     assert "[snapshot]" in capsys.readouterr().out
     assert main(["config", "--path"]) == 0
+
+
+def test_trigger_without_systemctl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without systemctl the mount unit counts as unknown.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Patcher (fixture).
+    """
+    monkeypatch.setattr(trigger_module.shutil, "which", lambda tool: None)
+    trigger = SystemdTrigger(str(tmp_path), "/usr/bin/mediatools")
+    assert not trigger.mount_unit_known()
+    with pytest.raises(SystemExit, match="systemd-escape"):
+        trigger.mount_unit()
