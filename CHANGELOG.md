@@ -6,6 +6,8 @@ All notable changes are documented here. Versions follow
 ## [Unreleased]
 
 ### Fixed
+- Three stray test log files (`o1`, `o2`, `o3`) committed by mistake are
+  removed.
 - Shrink databases are matched by file name within their directory
   instead of the stored absolute path. Databases written before the
   collection was moved were not recognised: `progress` reported every
@@ -26,6 +28,7 @@ All notable changes are documented here. Versions follow
 - Privacy gate `tools/privacy_scan.py` in `tools/check.sh`: refuses
   tracked files, paths or commit messages containing locally listed terms;
   locally listed allowed phrases are exempt.
+- CI workflow can be started manually (`workflow_dispatch`).
 
 ### Added
 - `triage`: counts the matching videos first and reports batches, total
