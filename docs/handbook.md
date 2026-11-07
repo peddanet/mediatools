@@ -46,6 +46,28 @@ header-includes: |
 
 # Overview
 
+## Purpose
+
+mediatools maintains a local copy of videos and pictures that a download
+tool fetches folder by folder, for example an archiver for a creator
+platform. Such collections grow into deeply nested trees with large H.264
+videos, many unwanted short clips and backups that silently turn hard links
+into full copies.
+
+The central design rule follows from how download tools work: they decide
+by **file name** whether a file is already present. mediatools therefore
+never takes a name away -- a shrunk video keeps its name, a discarded clip
+leaves an empty placeholder, a flat view consists of additional names (hard
+links), and `sync` never deletes. The next download run fetches only what
+is really new.
+
+`shrink` re-encodes lossy and replaces the original; the only undo is a
+backup. The recommended order for a new user is therefore: configure, look
+(`progress`, `--dry-run`), judge the quality with `shrink --keep-copies` on
+a test folder, back up, then work (section "First steps").
+
+## Subcommands
+
 | Subcommand | Purpose | Writes to |
 |---|---|---|
 | `shrink` | HEVC re-encode in place, name kept | original files (same inode), `shrink.db` |
@@ -69,34 +91,93 @@ Shared rules, implemented once in `mediatools.core`:
 
 # Installation
 
+Everything except the system packages runs as a **normal user**.
+
 ## Prerequisites
 
 ~~~bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot pipx
 ffmpeg -hide_banner -encoders | grep libx265
 ~~~
 
 `sudo` is needed because apt writes to `/usr` and the package database;
-from the user context it is sufficient, a root shell is not required. The
-second command runs as normal user and must print a line containing
-`libx265`.
+from the user context it is sufficient, a root shell is not required. Only
+the packages of the subcommands in use are needed (README, table
+"System packages"). The second command runs as normal user and must print a
+line containing `libx265`.
 
-## Clone and launcher
+## Option A: pipx (recommended for users)
 
-The project lives in `~/Projects/mediatools`; the launcher is a small shell
-script in `~/scripts`, which is in `PATH`. Everything runs as normal user:
+~~~bash
+pipx ensurepath
+pipx install git+https://github.com/peddanet/mediatools.git
+mediatools --version
+~~~
+
+* `pipx ensurepath` -- adds `~/.local/bin` to `PATH` (once; open a new
+  terminal afterwards).
+* `pipx install git+URL` -- builds the package from the default branch
+  `main` (the current release) into a virtual environment of its own and
+  places the `mediatools` command in `~/.local/bin`.
+* Update: `pipx reinstall mediatools`; remove: `pipx uninstall mediatools`.
+
+## Option B: clone and launcher (to read or change the code)
 
 ~~~bash
 mkdir -p ~/Projects
 git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
 cd ~/Projects/mediatools
-./install.sh
+BIN_DIR=~/.local/bin ./install.sh
 mediatools --version
 ~~~
 
 * `git clone URL DIR` -- copy the repository into `DIR`.
-* `install.sh` writes only `~/scripts/mediatools`; it refuses to overwrite a
-  file it did not create.
+* `install.sh` writes only one launcher script into `BIN_DIR` (default
+  `~/scripts`, which must then be in `PATH`); it refuses to overwrite a file
+  it did not create. On Ubuntu, `~/.profile` adds `~/.local/bin` to `PATH`
+  once the directory exists (log in again after the first install).
+* Update: `git pull` in the clone; remove: `rm ~/.local/bin/mediatools`.
+
+Ubuntu 24.04 and later block `pip install --user` for the system Python
+(PEP 668); use option A or B.
+
+## Data directory
+
+Configuration, logs, state and reports are kept in `$MEDIATOOLS_HOME`,
+default `~/scripts/mediatools.d`. Another location is set in `~/.profile`:
+
+~~~bash
+echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+~~~
+
+## First steps
+
+Nothing in the first block changes a file:
+
+~~~bash
+mediatools config --set collection.root=~/Videos/collection
+mediatools config
+mediatools progress
+mediatools triage --dry-run --max-seconds 30
+mediatools flatten --dry-run
+~~~
+
+Judge the shrink quality on a copy (`--keep-copies` leaves the originals
+untouched and records nothing; a smaller `--crf` means higher quality):
+
+~~~bash
+mkdir -p ~/shrinktest && cp ~/Videos/collection/projectA/some/video.mp4 ~/shrinktest/
+mediatools shrink --keep-copies ~/shrinktest
+~~~
+
+Then back up and work; every step asks before it changes anything:
+
+~~~bash
+mediatools sync
+mediatools triage --max-seconds 30
+mediatools shrink
+mediatools flatten
+~~~
 
 ## Running the tests on the target machine
 
@@ -107,7 +188,8 @@ python3 -m pytest -q
 ~~~
 
 Expected: all tests pass. Tests that need ffmpeg, rsync or rsnapshot are
-skipped when the tool is missing.
+skipped when the tool is missing. `sudo` is needed only for the apt
+installation; the tests run as normal user.
 
 # Configuration
 
@@ -834,6 +916,17 @@ including the maximum name length.
 **UPSERT** -- `INSERT … ON CONFLICT … DO UPDATE` in SQLite; needs a unique
 key. [SQLite UPSERT](https://sqlite.org/lang_upsert.html)
 
+**PEP 668** -- marks the system Python of a distribution as "externally
+managed", so `pip install --user` is refused there.
+[PEP 668](https://peps.python.org/pep-0668/)
+
+**pipx** -- installs Python command-line applications, each into a virtual
+environment of its own, as a normal user. [pipx](https://pipx.pypa.io/stable/)
+
+**Placeholder** -- empty file (0 bytes) left by `triage` under the name of
+a discarded clip, so a download tool that skips existing names does not
+fetch it again.
+
 **rsnapshot** -- snapshot tool based on rsync and hard links.
 [rsnapshot](https://rsnapshot.org/)
 
@@ -867,4 +960,6 @@ Link check of 2026-11-03. "verified" = page content retrieved on that date.
 | [rsnapshot manual page (mankier.com)](https://www.mankier.com/1/rsnapshot) | found via search; `sync_first`, `link_dest`, retain levels |
 | [rsnapshot](https://rsnapshot.org/) | project home page, not retrieved in this session |
 | [rsnapshot(1), FreeBSD manual pages](https://man.freebsd.org/cgi/man.cgi?manpath=FreeBSD+Ports+15.1.quarterly&query=rsnapshot&sektion=1) | found via search; running as a normal user with an own configuration file |
+| [pipx documentation](https://pipx.pypa.io/stable/) | found via search; `pipx install git+URL` and `pipx reinstall` checked locally with pipx 1.4.3 |
+| [PEP 668](https://peps.python.org/pep-0668/) | found via search |
 | rsnapshot 1.4.5 behaviour (adopt, rotation, link sharing) | checked end to end on ext4 and by automated tests |
