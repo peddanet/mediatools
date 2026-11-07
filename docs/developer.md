@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.1.0 -- Developer Documentation"
+title: "mediatools 1.2.0 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
-date: "2026-11-03"
+date: "2026-11-08"
 lang: en-GB
 abstract: |
   This document is written for developers who maintain or extend
@@ -450,7 +450,7 @@ emergency; CI still enforces all gates.
 
 # Branching model
 
-![Branching model (illustrative): feature branches merge into develop, releases are tagged merges into main](img/gitflow.png){width=95%}
+![Branching model (illustrative): feature branches merge into develop; a release branch goes into main by pull request, is tagged there and merged back into develop](img/gitflow.png){width=95%}
 
 | Branch        | Purpose                               | From      | Into               |
 |---------------|---------------------------------------|-----------|--------------------|

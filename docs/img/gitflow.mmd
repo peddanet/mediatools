@@ -14,6 +14,10 @@ gitGraph
     commit id: "change B"
     checkout develop
     merge feature/example-b id: "PR B"
-    commit id: "bump 1.2.0"
+    branch release/1.2.0
+    checkout release/1.2.0
+    commit id: "mediatools 1.2.0"
     checkout main
-    merge develop id: "release" tag: "v1.2.0"
+    merge release/1.2.0 id: "Release PR" tag: "v1.2.0"
+    checkout develop
+    merge main id: "back-merge"
