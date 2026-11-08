@@ -13,9 +13,16 @@ class ShrinkDatabase:
     """The shrink database file of one directory.
 
     One database exists per directory that contains videos. A row means
-    "this file has been processed": either shrunk by ``mediatools shrink`` or
-    found to be HEVC already. A file is skipped when path, size and mtime
-    all match a row.
+    "this file has been processed" - shrunk by ``mediatools shrink`` or an
+    earlier tool, or found to be HEVC already - regardless of the codec.
+
+    **Matching is by file name within the directory**, not by the stored
+    absolute path: the database describes the files of its own directory,
+    and the collection may have been moved or renamed since the row was
+    written (the stored path then still points to the old location). The
+    stored size is compared only to report rows whose file has changed
+    since (:meth:`status` returns ``changed``); such files still count as
+    processed, so nothing is encoded twice.
 
     The file name is configurable (``[shrink] db_name``, default
     ``shrink.db``); ``mediatools rename-db`` renames databases created under
@@ -50,6 +57,7 @@ class ShrinkDatabase:
         self.path = os.path.join(directory, self.name)
         self.log = logger
         self.migrated_backup: str | None = None
+        self._index: dict[str, set[int]] | None = None
 
     # -- helpers ---------------------------------------------------------
     @staticmethod
@@ -131,23 +139,45 @@ class ShrinkDatabase:
             self.log.warning("migrated old schema of %s (backup %s)", self.path, backup)
 
     # -- queries ---------------------------------------------------------
+    def index(self) -> dict[str, set[int]]:
+        """Return the recorded file names with their sizes (cached).
+
+        Returns:
+            Mapping file name (last path component of the stored path) to
+            the set of recorded sizes; empty if no database exists.
+        """
+        if self._index is None:
+            self._index = {}
+            for row_path, size, _modified in self.rows():
+                name = os.path.basename(row_path)
+                self._index.setdefault(name, set()).add(int(size or 0))
+        return self._index
+
+    def status(self, file_path: str) -> str:
+        """Classify a file against the database.
+
+        Args:
+            file_path: Absolute path of a video in this directory.
+
+        Returns:
+            ``done`` (name and size recorded), ``changed`` (name recorded
+            with another size; still counts as processed) or ``todo``.
+        """
+        sizes = self.index().get(os.path.basename(file_path))
+        if sizes is None:
+            return "todo"
+        return "done" if os.path.getsize(file_path) in sizes else "changed"
+
     def is_done(self, file_path: str) -> bool:
-        """Tell whether a file is recorded with its current size and mtime.
+        """Tell whether a file counts as processed.
 
         Args:
             file_path: Absolute path of the video.
 
         Returns:
-            True if a row with identical path, size and mtime exists.
+            True if its name is recorded (see :meth:`status`).
         """
-        if not self.exists():
-            return False
-        size = os.path.getsize(file_path)
-        mtime = self.mtime_text(file_path)
-        with self._connect() as conn:
-            row = conn.execute("SELECT 1 FROM files WHERE path=? AND size=? AND modified=?",
-                               (file_path, size, mtime)).fetchone()
-        return row is not None
+        return self.status(file_path) != "todo"
 
     def record(self, file_path: str) -> None:
         """Insert or update the row of a file with its current size and mtime.
@@ -161,6 +191,8 @@ class ShrinkDatabase:
             conn.execute("INSERT INTO files (path, size, modified) VALUES (?, ?, ?) "
                          "ON CONFLICT(path) DO UPDATE SET size=excluded.size, "
                          "modified=excluded.modified", (file_path, size, mtime))
+        if self._index is not None:
+            self._index.setdefault(os.path.basename(file_path), set()).add(size)
         if self.log:
             self.log.info("DB record: %s (size=%i, modified=%s)", file_path, size, mtime)
 

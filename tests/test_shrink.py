@@ -6,14 +6,15 @@ from pathlib import Path
 
 from conftest import make_file, make_video, needs_ffmpeg, read
 from mediatools.core.probe import MediaProbe
-from mediatools.shrink import HevcEncoder, ProgressReport, ShrinkDatabase, Shrinker
+from mediatools.shrink import (HevcEncoder, ProgressReport, ShrinkDatabase, Shrinker,
+                               ShrinkOptions, ThroughputLog)
 
 LOG = logging.getLogger("test")
 
 
 # -- ShrinkDatabase ------------------------------------------------------
 def test_database_record_and_lookup(tmp_path: Path) -> None:
-    """A recorded file is done until its size changes.
+    """A recorded name stays processed; a size change is reported as changed.
 
     Args:
         tmp_path: Temporary directory (fixture).
@@ -25,7 +26,26 @@ def test_database_record_and_lookup(tmp_path: Path) -> None:
     database.record(path)
     assert database.is_done(path)
     make_file(tmp_path / "a.mp4", b"changed size")
-    assert not database.is_done(path)
+    assert database.status(path) == "changed" and database.is_done(path)
+
+
+def test_database_matches_by_name_after_move(tmp_path: Path) -> None:
+    """Rows written at an earlier location of the collection still count.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    path = make_file(tmp_path / "new/place/a.mp4", b"abc")
+    make_file(tmp_path / "new/place/b.mp4", b"xyz")
+    conn = sqlite3.connect(tmp_path / "new/place" / ShrinkDatabase.NAME)
+    conn.execute(ShrinkDatabase.SCHEMA)
+    conn.execute("INSERT INTO files VALUES (?, ?, ?)",
+                 ("/home/u/Desktop/old/place/a.mp4", 3, "2026-01-01 00:00:00"))
+    conn.commit()
+    conn.close()
+    database = ShrinkDatabase(str(tmp_path / "new/place"))
+    assert database.status(path) == "done"
+    assert database.status(str(tmp_path / "new/place/b.mp4")) == "todo"
 
 
 def test_database_migrates_old_schema(tmp_path: Path) -> None:
@@ -62,7 +82,7 @@ def test_shrinker_full_cycle(tmp_path: Path) -> None:
     inode = os.stat(avc).st_ino
     hevc_before = read(hevc)
 
-    shrinker = Shrinker(str(tmp_path), LOG)
+    shrinker = Shrinker(str(tmp_path), LOG, ShrinkOptions(order="path"))
     assert shrinker.run() == 2                  # broken file, run continues
     probe = MediaProbe()
     assert probe.video_codec(avc) == "hevc"
@@ -88,7 +108,7 @@ def test_shrinker_keep_copies(tmp_path: Path) -> None:
     """
     video = make_video(tmp_path / "a.mp4", 2)
     before = read(video)
-    assert Shrinker(str(tmp_path), LOG, keep_copies=True).run() == 0
+    assert Shrinker(str(tmp_path), LOG, ShrinkOptions(keep_copies=True)).run() == 0
     assert read(video) == before
     assert os.path.exists(tmp_path / "newShrinkedFiles/a.mp4")
     assert not ShrinkDatabase(str(tmp_path)).rows()
@@ -127,8 +147,25 @@ def test_progress_is_read_only(tmp_path: Path) -> None:
     database = ShrinkDatabase(str(tmp_path / "d"))
     database.ensure()
     database.record(first)
-    report = ProgressReport(str(tmp_path), LOG)
+    throughput = ThroughputLog(str(tmp_path / "speed.json"))
+    throughput.add(10_000_000, 2.0)
+    report = ProgressReport(str(tmp_path), LOG, throughput=throughput)
     assert report.run() == 0
-    assert report.done == [first] and len(report.todo) == 2
+    assert report.lists["done"] == [first] and len(report.lists["todo"]) == 2
+    assert report.todo_bytes == 2 and report.databases == 1 and report.orphan_rows == 0
     assert os.path.exists(tmp_path / "d/newShrinkedFiles/keep.mp4")
     assert not os.path.exists(tmp_path / "e" / ShrinkDatabase.NAME)
+
+
+@needs_ffmpeg
+def test_encoder_reports_progress(tmp_path: Path) -> None:
+    """ffmpeg's progress output reaches the callback; its log is removed.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    video = make_video(tmp_path / "a.mp4", 3)
+    seen: list[float] = []
+    assert HevcEncoder(logger=LOG).encode(video, str(tmp_path / "out.mp4"), seen.append)
+    assert seen and max(seen) <= 1.0
+    assert not os.path.exists(tmp_path / "out.mp4.ffmpeg.log")

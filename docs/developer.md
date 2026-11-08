@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.1.0 -- Developer Documentation"
+title: "mediatools 1.2.0 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
-date: "2026-11-03"
+date: "2026-11-08"
 lang: en-GB
 abstract: |
   This document is written for developers who maintain or extend
@@ -56,7 +56,7 @@ mediatools/
   CONTRIBUTING.md           rules for contributions
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
-  install.sh                launcher without pip (~/scripts/mediatools)
+  install.sh                installs a release tag into a venv (~/scripts/mediatools)
   .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
@@ -166,6 +166,8 @@ directory, configuration -- lives in `core`.
 | `DataDir` | `$MEDIATOOLS_HOME` layout: logs, state, plans, reports |
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
+| `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
+| `ProgressBar` | one-line terminal display: percentage by bytes, files, remaining time |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
 | `Prompt` | yes/no and text questions, `--yes` support |
 
@@ -175,11 +177,13 @@ directory, configuration -- lives in `core`.
 
 | Class | Responsibility |
 |---|---|
-| `ShrinkDatabase` | database per directory (name configurable), schema migration, lookup, UPSERT |
+| `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
-| `HevcEncoder` | ffmpeg call, validation of exit code, stream and duration |
-| `Shrinker` | per-file decision, in-place copy-back, signal handling, summary |
-| `ProgressReport` | read-only done/todo lists |
+| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, stream and duration |
+| `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, summary |
+| `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
+| `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
+| `ThroughputLog` | measured encoding speed for estimates |
 
 ## Package `triage`
 
@@ -187,10 +191,10 @@ directory, configuration -- lives in `core`.
 
 | Class | Responsibility |
 |---|---|
-| `CandidateFinder` | lazy search of videos within a duration range |
+| `CandidateFinder` | search of videos within a duration range; `collect()` counts first |
 | `PlayerSession` | one player process per video, classification |
 | `FlatLinkResolver` | `_flat` names of a file by inode |
-| `FileRemover` | `gio trash` or permanent deletion |
+| `FileRemover` | `gio trash` or permanent deletion; `discard()` leaves a 0-byte placeholder |
 | `KeptList` | decisions across sessions |
 | `Triage` | batch workflow |
 
@@ -299,8 +303,12 @@ Invariants:
 <unit>/_flat/_index.tsv               FlatIndex        link name TAB relative source path
 <data>/plans/flatten_<ts>.tsv         FlatPlan         action unit link source level note
 <data>/state/triage_kept.tsv          KeptList         path TAB size TAB mtime
+<data>/state/triage_discarded.tsv     Triage           time TAB size TAB path
+<data>/state/triage_durations.tsv     DurationCache    path TAB size TAB mtime_ns TAB seconds
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
+<data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
+<dir>/newShrinkedFiles/<n>.replace    Shrinker         journal marker during copy-back
 <data>/reports/sync_target_only_*.tsv TargetReport     status size path same_as
 <data>/logs/<command>_<ts>.log        RunLog           timestamp level message
 <data>/snapshot/rsnapshot.conf        RsnapshotConf    generated, tab separated
@@ -353,6 +361,14 @@ progress is read-only                         test_progress_is_read_only
 early player exit never deletes               test_player_early_exit_is_error
 _flat link removed with the original          test_triage_removes_original_and_flat_link
 no removal without confirmation               test_triage_not_confirmed_removes_nothing
+database rows of a moved collection count     test_database_matches_by_name_after_move
+1st Ctrl+C finishes, 2nd keeps the original   test_first_ctrl_c_finishes_current_file,
+                                              test_second_ctrl_c_aborts_without_touching_original
+interrupted copy-back is completed            test_interrupted_replacement_is_completed
+private terms never reach a push              test_finds_terms_in_files_paths_and_messages
+placeholder left, never overwrites a file     test_triage_removes_original_and_flat_link,
+                                              test_placeholder_never_overwrites
+placeholder never replaces a backup copy      test_sync_placeholder_keeps_backup_copy
 originals untouched by flatten                test_flatten_never_touches_originals
 hard links preserved, nothing deleted         test_sync_preserves_hardlinks_and_never_deletes
 newer receiver file kept (rsync -u)           test_sync_update_does_not_overwrite_newer_target
@@ -368,6 +384,9 @@ database rename never overwrites              test_renamer_renames_and_respects_
 All gates live in one script, `tools/check.sh`. The pre-push hook and the CI
 workflow call the same script, so a green local run predicts a green
 pipeline. Everything runs as normal user; no root privileges are needed.
+A full run requires ffmpeg, ffprobe, rsync and rsnapshot: without them the
+integration tests would be skipped and the coverage would drop, so the
+script stops with an installation hint instead.
 
 ~~~bash
 pip install -e '.[dev]'                 # tools: pytest, pytest-cov, pylint,
@@ -379,11 +398,33 @@ tools/check.sh --fast                   # gates 1-4 only
 
 | No. | Gate     | Tool        | Pass criterion                                     |
 |-----|----------|-------------|----------------------------------------------------|
+| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits   |
 | 1   | format   | pycodestyle | PEP 8 layout, max line length 100                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
 | 3   | types    | mypy        | no error; `check_untyped_defs`, `warn_unreachable` |
 | 4   | security | bandit      | no finding                                         |
-| 5   | tests    | pytest      | all pass, branch coverage >= 80 %                  |
+| 5   | tests    | pytest      | all pass, branch coverage >= 90 %                  |
+
+**Privacy gate.** `tools/privacy_scan.py` searches all tracked files (PDFs
+via `pdftotext`), file paths and commit messages for terms that would allow
+conclusions about the processed data. The terms are never in the
+repository; they come from `$MEDIATOOLS_HOME/privacy_denylist.txt` (one term
+per line) and from the unit directory names below `[collection] root`.
+Matching ignores case and whole words only (`cat` does not match `concatenate`);
+terms shorter than three characters are ignored. Without local terms the
+gate is skipped, which keeps CI neutral.
+
+Ordinary words can be on the deny list and still be needed in technical
+text. Instead of rewording, such uses are permitted by **allowed phrases**
+in `$MEDIATOOLS_HOME/privacy_allowlist.txt` (same format, one phrase per
+line). They are blanked out before the search: the term stays forbidden
+everywhere else. Both lists stay outside the repository.
+
+~~~bash
+"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_denylist.txt
+"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_allowlist.txt
+python3 tools/privacy_scan.py
+~~~
 
 Notes on the configuration (`pyproject.toml`):
 
@@ -409,29 +450,58 @@ emergency; CI still enforces all gates.
 
 # Branching model
 
-![Branching model (illustrative): feature branches merge into develop, releases are tagged merges into main](img/gitflow.png){width=95%}
+![Branching model (illustrative): feature branches merge into develop; a release branch goes into main by pull request, is tagged there and merged back into develop](img/gitflow.png){width=95%}
 
 | Branch        | Purpose                               | From      | Into               |
 |---------------|---------------------------------------|-----------|--------------------|
 | `main`        | released states only, each one tagged | -         | -                  |
 | `develop`     | integration of finished features      | `main`    | `main`             |
 | `feature/<x>` | one feature or fix                    | `develop` | `develop` (PR)     |
+| `release/<x>` | version, CHANGELOG and PDFs           | `develop` | `main` (PR)        |
 | `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` |
 
 Roles: developers work on `feature/*` and open pull requests into
 `develop`. The **integrator** reviews and merges them, checks `develop` as
 a whole and decides when a release is cut.
 
-CI (`.github/workflows/tests.yml`) runs the gates on pushes to `main`,
-`develop`, `feature/**`, `fix/**`, `release/**`, `hotfix/**`, on tags `v*`,
-and on pull requests into `main` and `develop`. For a tag, the extra job
+CI (`.github/workflows/tests.yml`) runs the gates on pull requests into
+`main` and `develop`, on pushes to `main` and `develop` (the merges) and on
+tags `v*`. Work branches are checked through their pull request only; a
+push trigger for them as well would run every gate twice. A branch without
+a pull request can be checked on demand:
+`gh workflow run quality-gates --ref BRANCH`. For a tag, the extra job
 `release-check` verifies that the tagged commit lies on `main` and that the
 tag equals `v` + `__version__`.
 
-Recommended GitHub branch protection (Settings > Branches > Add rule), for
-`main` and `develop`: *Require a pull request before merging*, *Require
-status checks to pass* (all `gates` jobs), *Do not allow bypassing*, no
-force pushes, no deletion.
+## Branch protection
+
+`main` and `develop` are protected on GitHub: changes only by pull request,
+merge only with all three `gates` jobs green and the branch up to date, the
+rule applies to administrators too, no force push, no deletion. Set once
+per branch by the repository owner (normal user; `gh` acts with the owner's
+token):
+
+~~~bash
+for branch in develop main; do
+gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+EOF
+done
+~~~
+
+`required_approving_review_count: 0` demands a pull request but no second
+person's approval (single maintainer). Tags are not affected by branch
+protection; the integrator pushes release tags directly.
 
 ## Feature cycle
 
@@ -470,26 +540,48 @@ pandoc handbook.md -o handbook.pdf --pdf-engine=xelatex --highlight-style=tango 
 
 # Release procedure
 
-Performed by the integrator on a clean, up-to-date `develop`:
+Performed by the integrator. Because `main` and `develop` are protected,
+every step that changes a branch goes through a pull request.
 
-1. Update `__version__` in `src/mediatools/__init__.py` (Semantic
-   Versioning) and add the section to `CHANGELOG.md`.
-2. Run `tools/check.sh`, rebuild diagrams and PDFs, commit on `develop`
-   ("mediatools X.Y.Z") and push; wait for green CI.
-3. Merge into `main` without fast-forward, tag and push:
+1. Release branch from an up-to-date `develop`; set `__version__` in
+   `src/mediatools/__init__.py` (Semantic Versioning), turn the
+   `[Unreleased]` section of `CHANGELOG.md` into `[X.Y.Z] - date`, rebuild
+   diagrams and PDFs, run `tools/check.sh`, commit "mediatools X.Y.Z":
+
+~~~bash
+git switch develop && git pull --ff-only
+git switch -c release/X.Y.Z
+# ... version, CHANGELOG, PDFs ...
+git commit -am "mediatools X.Y.Z"
+git push -u origin release/X.Y.Z
+gh pr create --base main --title "Release X.Y.Z" --fill
+gh pr checks --watch && gh pr merge --merge --delete-branch
+~~~
+
+2. Tag the merge commit on `main` and push the tag; CI runs
+   `release-check` for it:
 
 ~~~bash
 git switch main && git pull --ff-only
-git merge --no-ff develop -m "Release X.Y.Z"
 git tag -a vX.Y.Z -m "mediatools X.Y.Z"
-git push origin main vX.Y.Z
-git switch develop
+git push origin vX.Y.Z
 ~~~
 
-`--no-ff` keeps one merge commit per release on `main`, so
-`git log --first-parent main` lists exactly the releases. A hotfix branches
-from `main`, is merged back into `main` (tag `vX.Y.Z+1`) and into
-`develop`.
+3. Bring the release back into `develop` (pull request from `main`):
+
+~~~bash
+gh pr create --base develop --head main --title "Merge release X.Y.Z into develop" \
+  --body "Back-merge of release X.Y.Z."
+gh pr checks --watch && gh pr merge --merge
+git switch develop && git pull --ff-only
+~~~
+
+4. Install the release on the own machine: `./install.sh` (newest tag).
+
+Merge commits (no squash, no rebase) keep every commit; `git log
+--first-parent main` lists exactly the releases. A hotfix branches from
+`main`, goes into `main` by pull request (tag `vX.Y.Z+1`) and back into
+`develop` as in step 3.
 
 # Adding a subcommand
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import signal
 import sys
+from datetime import datetime
 from typing import Iterable
 
 from mediatools.core.datadir import DataDir
@@ -17,14 +18,20 @@ from mediatools.triage.remover import FileRemover
 class Triage:
     """Interactive batch review: close a window to discard that video.
 
+    Before the first batch, :meth:`announce` reports how many videos match
+    and roughly how long the review will take, and asks whether to start.
+
     Workflow per batch:
 
     1. open ``batch`` candidates, one player process each
-    2. the user closes the windows of unwanted videos and presses Enter
+    2. the user **closes** the windows of the videos to **remove** and leaves
+       the windows of the videos to **keep** open, then presses Enter
     3. summary (remove / keep / player error) and confirmation
     4. removal of each discarded file **together with its ``_flat`` hard
-       links** (otherwise no space would be freed); kept files go to the
-       kept list; remaining players are closed
+       links** (otherwise no space would be freed); by default an empty
+       placeholder keeps the original name, so a downloader does not fetch
+       the video again; kept files go to the kept list; remaining players
+       are closed
 
     Attributes:
         root: Absolute start directory.
@@ -37,11 +44,16 @@ class Triage:
         prompt: Prompt for the questions.
         links: Resolver for ``_flat`` names.
         batch_no: Number of the current batch.
+        placeholder: Leave a 0-byte file under the name of a removed video.
+        discarded_log: TSV file that records every removed video.
     """
+
+    SECONDS_PER_DECISION = 15
 
     def __init__(self, root: str, logger, finder: Iterable[tuple[str, float]],
                  player: PlayerSession, remover: FileRemover, kept: KeptList,
-                 batch: int = 10, prompt: Prompt | None = None):
+                 batch: int = 10, prompt: Prompt | None = None, placeholder: bool = True,
+                 discarded_log: str | None = None):
         """Wire the collaborators.
 
         Args:
@@ -53,7 +65,13 @@ class Triage:
             kept: Kept list.
             batch: Videos per batch.
             prompt: Prompt; a default :class:`Prompt` if None.
+            placeholder: Leave an empty file under the name of a removed video.
+            discarded_log: TSV of removed videos; ``<data>/state/triage_discarded.tsv``
+                if None.
         """
+        self.placeholder = placeholder
+        self.discarded_log = discarded_log or os.path.join(DataDir().sub("state"),
+                                                           "triage_discarded.tsv")
         self.root = os.path.abspath(root)
         self.log = logger
         self.finder = finder
@@ -81,6 +99,35 @@ class Triage:
         self.log.info("interrupted by %s; nothing removed in this batch",
                       signal.Signals(signum).name)
         sys.exit(130)
+
+    def announce(self, candidates: list[tuple[str, float]], scanned: int,
+                 ask: bool = True) -> bool:
+        """Report size and estimated duration of the session and ask to start.
+
+        The estimate assumes that each batch is watched once through its
+        longest clip plus :attr:`SECONDS_PER_DECISION` for the decision.
+
+        Args:
+            candidates: All matching ``(path, duration)`` pairs.
+            scanned: Number of videos examined in the search.
+            ask: Ask before starting; False only reports.
+
+        Returns:
+            True if the review should start.
+        """
+        count = len(candidates)
+        batches = -(-count // self.batch) if count else 0
+        total = sum(duration for _path, duration in candidates)
+        estimate = sum(max(d for _p, d in candidates[i:i + self.batch]) +
+                       self.SECONDS_PER_DECISION for i in range(0, count, self.batch))
+        self.log.info("%i of %i videos match: %i batch(es) of up to %i, total clip length "
+                      "%.0f min, estimated review time about %.0f min", count, scanned,
+                      batches, self.batch, total / 60, estimate / 60)
+        if not count:
+            return False
+        self.log.info("CLOSE a window = REMOVE that video%s; leave it OPEN = KEEP it.",
+                      " (an empty placeholder keeps its name)" if self.placeholder else "")
+        return not ask or self.prompt.yes_no("Start the review?", default=True)
 
     def run(self) -> int:
         """Review all candidates batch by batch.
@@ -116,7 +163,8 @@ class Triage:
         for number, (path, duration) in enumerate(batch, 1):
             self.log.info("  [%2d] %6.1fs  %s", number, duration, path)
         self.player.open([path for path, _ in batch])
-        print("\nClose every player window whose video you want to REMOVE.")
+        print("\nCLOSE the window of every video you want to REMOVE.\n"
+              "Leave the windows of the videos you want to KEEP open.")
         answer = self.prompt.text("Then press Enter here (s = skip batch, q = quit)").lower()
         if answer in ("s", "q"):
             self.player.close_all()
@@ -126,21 +174,38 @@ class Triage:
         closed, still_open, errors = self.player.classify()
         plan = {path: self.links.flat_names(path) for path in closed}
         self._summary(plan, still_open, errors)
+        what = "replace by empty placeholder" if self.placeholder else self.remover.verb
         confirmed = bool(closed) and self.prompt.yes_no(
-            f"{self.remover.verb} {len(closed)} file(s) and their _flat links?")
+            f"Remove {len(closed)} video(s) ({what}) and their _flat links?")
         self.player.close_all()
 
         if confirmed:
             for path, flat_names in plan.items():
-                for name in [path] + flat_names:
-                    if self.remover.remove(name):
-                        self.links.forget(name)
+                self._discard(path, flat_names)
             self.kept.add(still_open)
         elif closed:
             self.log.info("not confirmed, nothing removed")
         else:
             self.kept.add(still_open)
         return True
+
+    def _discard(self, path: str, flat_names: list[str]) -> None:
+        """Remove the ``_flat`` links and the video, record the removal.
+
+        Args:
+            path: Original video.
+            flat_names: Its ``_flat`` hard links.
+        """
+        size = os.path.getsize(path)
+        for name in flat_names:
+            if self.remover.remove(name):
+                self.links.forget(name)
+        if self.remover.discard(path, self.placeholder):
+            self.links.forget(path)
+            stamp = datetime.now().isoformat(timespec="seconds")
+            with open(self.discarded_log, "a", encoding="utf-8",
+                      errors="surrogateescape") as handle:
+                handle.write(f"{stamp}\t{size}\t{path}\n")
 
     def _summary(self, plan: dict[str, list[str]], still_open: list[str],
                  errors: list[tuple[str, int]]) -> None:
@@ -151,7 +216,7 @@ class Triage:
             still_open: Files whose player is still running.
             errors: ``(path, exit_code)`` of players that failed.
         """
-        self.log.info("closed -> %s: %i", self.remover.verb, len(plan))
+        self.log.info("closed -> remove: %i", len(plan))
         for path, flat in plan.items():
             extra = self._other_links(path, flat)
             self.log.info("    - %s%s%s", path,
