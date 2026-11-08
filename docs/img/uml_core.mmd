@@ -85,6 +85,13 @@ classDiagram
     +init(name, verbose, datadir)
     +close()
   }
+  class VersionInfo {
+    +package_dir
+    +version
+    +init(package_dir, version)
+    +checkout()
+    +describe()
+  }
   class TreeWalker {
     +skip
     +init(extra_skip)

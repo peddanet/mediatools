@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.1.0 -- Handbook"
+title: "mediatools 1.2.0 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
-date: "2026-11-03"
+date: "2026-11-08"
 lang: en-GB
 abstract: |
   mediatools is a Python package (standard library only) with subcommands

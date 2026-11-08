@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-08
+
 ### Changed
 - `install.sh` installs a release tag from GitHub (newest `vX.Y.Z`, or the
   tag given; `--list` shows all) into its own virtual environment
