@@ -121,16 +121,46 @@ def test_renamer_renames_and_respects_conflicts(tmp_path: Path) -> None:
         DatabaseRenamer(str(tmp_path), "same.db", "same.db", LOG)
 
 
-def test_cli_rename_db(datadir: Path, tmp_path: Path) -> None:
-    """``rename-db`` uses [shrink] db_name as the new name.
+def test_cli_rename_db(tmp_path: Path) -> None:
+    """``rename-db OLD NEW`` renames without asking and stores NEW.
 
     Args:
-        datadir: Test data directory (fixture).
         tmp_path: Temporary directory (fixture).
     """
     make_file(tmp_path / "c/d/legacy.db")
-    write_ini(datadir, "[shrink]\ndb_name = fresh.db\n")
-    assert main(["rename-db", "legacy.db", str(tmp_path / "c"), "--dry-run"]) == 0
-    assert (tmp_path / "c/d/legacy.db").exists()
-    assert main(["rename-db", "legacy.db", str(tmp_path / "c"), "-y"]) == 0
+    assert main(["rename-db", "legacy.db", "fresh.db", str(tmp_path / "c"), "--dry-run"]) == 0
+    assert (tmp_path / "c/d/legacy.db").exists() and not Config().exists()
+    assert main(["rename-db", "legacy.db", "fresh.db", "--dry-run", str(tmp_path / "c")]) == 0
+    assert main(["rename-db", "legacy.db", "fresh.db", str(tmp_path / "c")]) == 0
     assert (tmp_path / "c/d/fresh.db").exists()
+    assert Config().db_name() == "fresh.db"
+    with pytest.raises(SystemExit):
+        main(["rename-db", "legacy.db", "fresh.db", "one", "two"])
+
+
+def test_cli_config_set_and_sync_source(tmp_path: Path,
+                                        capsys: pytest.CaptureFixture) -> None:
+    """``config --set`` changes values, also in new sections.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        capsys: Output capture (fixture).
+    """
+    assert main(["config", "--set", f"collection.root={tmp_path}",
+                 "--set", "sync.source=/nonexistent/home"]) == 0
+    assert "[collection] root" in capsys.readouterr().out
+    assert Config().path_value("collection", "root") == str(tmp_path)
+    assert Config().path_value("sync", "source") == "/nonexistent/home"
+    with pytest.raises(SystemExit, match="SECTION.KEY=VALUE"):
+        main(["config", "--set", "novalue"])
+
+
+def test_set_value_keeps_comments() -> None:
+    """Changing one value keeps comments and other values."""
+    config = Config()
+    config.set_value("shrink", "db_name", "renamed.db")
+    text = Path(config.path).read_text(encoding="utf-8")
+    assert "db_name = renamed.db" in text and "# File name of the per-directory" in text
+    assert Config().db_name() == "renamed.db"
+    config.set_value("extra", "key", "v")
+    assert Config().get("extra", "key") == "v"

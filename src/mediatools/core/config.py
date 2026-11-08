@@ -30,8 +30,15 @@ class Config:
 
 [collection]
 # Master directory of the media collection; its sub-directories are units.
-# Used whenever a command is called without a path.
+# Used whenever a command is called without a path. A path given on the
+# command line always wins. Change it with:
+#   mediatools config --set collection.root=~/other/collection
 root =
+
+[sync]
+# Default source of "mediatools sync" (e.g. your home directory);
+# empty = [collection] root.
+source =
 
 [shrink]
 # File name of the per-directory database of shrunk videos.
@@ -98,6 +105,50 @@ max_deletions = 500
         with open(self.path, "w", encoding="utf-8") as handle:
             handle.write(self.TEMPLATE)
         return True
+
+    def set_value(self, section: str, key: str, value: str) -> None:
+        """Set one value in the INI file, keeping comments and layout.
+
+        The file is created from the template if it does not exist. Only
+        the line ``key = ...`` inside the section is replaced (or added at
+        the end of the section).
+
+        Args:
+            section: INI section.
+            key: Key inside the section.
+            value: New value.
+        """
+        self.write_template()
+        with open(self.path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+        current, start, end, hit = None, None, len(lines), None
+        for number, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                if current == section:
+                    end = number
+                    break
+                current = stripped[1:-1].strip()
+                if current == section:
+                    start = number
+            elif current == section and stripped.split("=", 1)[0].strip() == key \
+                    and not stripped.startswith(("#", ";")):
+                hit = number
+        entry = f"{key} = {value}"
+        if hit is not None:
+            lines[hit] = entry
+        elif start is not None:
+            insert = end
+            while insert > start + 1 and not lines[insert - 1].strip():
+                insert -= 1
+            lines.insert(insert, entry)
+        else:
+            lines += ["", f"[{section}]", entry]
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        if not self.parser.has_section(section):
+            self.parser.add_section(section)
+        self.parser.set(section, key, value)
 
     # -- values ----------------------------------------------------------
     def get(self, section: str, key: str) -> str:

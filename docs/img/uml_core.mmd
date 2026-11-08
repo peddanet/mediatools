@@ -6,6 +6,7 @@ classDiagram
     +init(datadir)
     +exists()
     +write_template()
+    +set_value(section, key, value)
     +get(section, key)
     +path_value(section, key)
     +integer(section, key)
@@ -20,6 +21,15 @@ classDiagram
     +sub(name)
     +file(sub, prefix, suffix)
     +stamp()
+  }
+  class DurationCache {
+    +path
+    +entries
+    +hits
+    +init(path)
+    +get(file_path, st)
+    +put(file_path, st, duration)
+    +save()
   }
   class MediaTypes {
     +FLAT_DIR
@@ -43,6 +53,24 @@ classDiagram
     +video_codec(path)
     +has_video(path)
   }
+  class ProgressBar {
+    +total_bytes
+    +total_files
+    +done_bytes
+    +done_files
+    +initial_rate
+    +stream
+    +started
+    +enabled
+    +init(total_bytes, total_files, initial_rate, stream)
+    +rate(current_bytes)
+    +remaining_seconds(current_bytes)
+    +line(name, file_fraction, file_bytes)
+    +show(name, file_fraction, file_bytes)
+    +file_done(size)
+    +clear()
+    +duration_text(seconds)
+  }
   class Prompt {
     +assume_yes
     +input
@@ -56,6 +84,13 @@ classDiagram
     +logger
     +init(name, verbose, datadir)
     +close()
+  }
+  class VersionInfo {
+    +package_dir
+    +version
+    +init(package_dir, version)
+    +checkout()
+    +describe()
   }
   class TreeWalker {
     +skip

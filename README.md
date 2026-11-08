@@ -19,18 +19,18 @@ mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
 mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
 mediatools config    one local file for paths and names (kept outside the repo)
-mediatools rename-db rename shrink databases to the configured name
+mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 ```
 
 ---
 
 ## Contents
 
-- [Why](#why)
+- [In one minute](#in-one-minute)
+- [Typical folder layout](#typical-folder-layout)
 - [Safety model](#safety-model)
-- [Requirements](#requirements)
 - [Installation](#installation)
-- [Quick start](#quick-start)
+- [First steps](#first-steps)
 - [Subcommands](#subcommands)
   - [shrink](#shrink) · [progress](#progress) · [triage](#triage) · [flatten](#flatten) · [sync](#sync) · [snapshot](#snapshot)
 - [Configuration](#configuration)
@@ -43,30 +43,62 @@ mediatools rename-db rename shrink databases to the configured name
 
 ---
 
-## Why
+## In one minute
 
-Archives of creator platforms - one folder per campaign,
-posts with numbered folders, attachments, image galleries - quickly grow into
-trees like this (illustrative example):
+You keep a local copy of videos and pictures that a download tool fetches
+folder by folder - for example an archiver for a creator platform. After some months the collection has the usual problems:
+
+| Problem | Command | Result |
+|---|---|---|
+| The disk is full of large H.264 videos | `shrink` | HEVC re-encode, often half the size or less, same file name |
+| How much is still left to shrink? | `progress` | read-only report with a time estimate |
+| Many short clips you never wanted | `triage` | watch them in batches, close a window to discard the clip |
+| Every file is buried four or five folder levels deep | `flatten` | one flat folder of hard links per project, no extra space |
+| The backup turns hard links into full copies, or deletes too much | `sync`, `snapshot` | rsync backup that keeps hard links; versioned snapshots |
+
+**The key idea:** the download tool decides by *file name* whether it already
+has a file. mediatools therefore never takes a name away. A shrunk video keeps
+its name, a discarded clip leaves an empty placeholder under its name, a flat
+view consists of additional names (hard links), and `sync` never deletes. The
+next download run fetches only what is really new - not the large originals
+again, not the clips you discarded.
+
+> **Before you start:** `shrink` re-encodes *lossy* and then replaces the
+> original. There is no undo except a backup. Make a backup first (`sync` or
+> `snapshot`) and try `shrink --keep-copies` on a test folder to judge the
+> quality - see [First steps](#first-steps).
 
 ```text
-collection/
-└── projectA/
-    ├── posts/members/987654321 2024-05-01 10-00-00/Videos/making_of_part1.mp4
-    ├── posts/public/Images/cover_2024.jpg
-    └── attachments/...
+mediatools shrink    re-encode videos to HEVC in place, tracked per directory
+mediatools progress  read-only report: which videos are already shrunk
+mediatools triage    open short clips in batches, close a window to discard it
+mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
+mediatools sync      rsync backup that keeps hard links and never deletes
+mediatools snapshot  versioned backups with rsnapshot on a removable disk
+mediatools config    one local file for paths and names (kept outside the repo)
+mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 ```
 
-Three things become painful at a few hundred thousand files:
+## Typical folder layout
 
-1. **Disk space** - source videos are H.264 at high bit rates.
-2. **Browsing** - every image or clip is buried four or five levels deep.
-3. **Backups** - hard links (from deduplication or flat views) silently turn
-   into full copies when the backup tool does not preserve them.
+mediatools makes no assumption about a particular platform. It works on a
+**collection root** whose direct sub-directories are called **units** (one per
+project, campaign or channel); everything below a unit may be nested
+arbitrarily (illustrative example):
 
-`mediatools` addresses each point with one subcommand and shares one set of
-rules between them (which directories are never entered, how files are
-identified, where logs go).
+```text
+collection/                      <- collection root ([collection] root)
+└── projectA/                    <- unit
+    ├── posts/members/987654321 2024-05-01 10-00-00/Videos/making_of_part1.mp4
+    ├── posts/public/Images/cover_2024.jpg
+    ├── attachments/...
+    └── _flat/                   <- created by flatten: hard links of all media
+```
+
+At a few hundred thousand files the three pain points of the table above add
+up: disk space, browsing and backups. `mediatools` addresses each with one
+subcommand, and all subcommands share one set of rules (which directories are
+never entered, how files are identified, where logs go).
 
 ## Safety model
 
@@ -80,11 +112,16 @@ identified, where logs go).
 | A player that exits immediately is treated as an error, its file is kept | `triage` |
 | `rsync --delete` is **never** used; target-only files are reported, not removed | `sync` |
 | A newer file on the receiving side is never overwritten (`rsync -u`) | `sync` |
+| Empty placeholders are never copied over a full file (`rsync --min-size=1`) | `sync` |
 | Every run writes a time-stamped log; every flatten run a reversible plan | all |
 | `snapshot` refuses to adopt or sync a directory that is not a copy of the source (dry-run probe) | `snapshot` |
 | `snapshot` aborts if a run would remove more files than `max_deletions` from the newest snapshot | `snapshot` |
 
-## Requirements
+## Installation
+
+Everything except the system packages in step 1 runs as a **normal user**.
+
+### 1. System packages
 
 | Tool | Needed by | Debian/Ubuntu package |
 |---|---|---|
@@ -94,47 +131,105 @@ identified, where logs go).
 | gio (trash) | triage | `libglib2.0-bin` |
 | rsync ≥ 3.0 | sync, snapshot | `rsync` |
 | rsnapshot ≥ 1.4 | snapshot | `rsnapshot` |
+| git, Python venv module | installation option A | `git`, `python3-venv` |
+| pipx | installation option B | `pipx` |
 
 ```bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
 ffmpeg -hide_banner -encoders | grep libx265      # must print a libx265 line
 ```
+
+`sudo` is needed because apt writes to `/usr` and the package database. You
+only need the packages of the subcommands you use.
 
 Hard links require a Linux file system such as ext4, btrfs or XFS on both
 sides of a `sync`. exFAT, FAT and NTFS cannot store hard links.
 
-## Installation
+### 2. Install a release
 
-**Option A - no installation, launcher script (recommended for personal use)**
+mediatools is always installed from a **release tag** (`vX.Y.Z`) on GitHub,
+never from the working files of a clone. `mediatools --version` therefore
+shows exactly the release you installed.
+
+**Option A - installer (recommended)**
 
 ```bash
-git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
-cd ~/Projects/mediatools
-./install.sh                     # creates ~/scripts/mediatools (or BIN_DIR=...)
-mediatools --version
+curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+bash install.sh                  # newest release; bash install.sh --list shows all
+mediatools --version             # e.g. "mediatools 1.2.0"
 ```
+
+The installer needs `git` and the Python venv module
+(`sudo apt install git python3-venv`). It
+
+1. reads the release tags from GitHub and picks the newest one (or the one
+   given: `bash install.sh v1.2.0`),
+2. installs that release into a virtual environment of its own,
+   `~/scripts/mediatools.d/venv`,
+3. links the command to `~/scripts/mediatools` (`BIN_DIR=~/.local/bin bash
+   install.sh` for another place; the directory must be in `PATH`),
+4. checks that the installed program reports the version of the tag.
+
+**Update** to the newest release: run `bash install.sh` again.
+**Remove**: `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`
+(configuration and logs in `~/scripts/mediatools.d` stay).
 
 **Option B - pipx**
 
 ```bash
-pipx install ~/Projects/mediatools
+pipx ensurepath                  # once: puts ~/.local/bin into PATH, then open a new terminal
+pipx install git+https://github.com/peddanet/mediatools.git@v1.2.0
 ```
 
-Ubuntu 24.04 and later block `pip install --user` for the system Python
-(PEP 668); use option A or pipx.
+Replace `v1.2.0` with the newest tag from the
+[releases](https://github.com/peddanet/mediatools/tags). Update by
+installing the new tag with `pipx install --force ...@vX.Y.Z`; remove with
+`pipx uninstall mediatools`.
 
-## Quick start
+Ubuntu 24.04 and later block `pip install --user` for the system Python
+(PEP 668); both options use a virtual environment instead.
+
+### 3. Where mediatools keeps its files
+
+Configuration, logs, state, reports and (option A) the installed release are
+stored in one directory, default `~/scripts/mediatools.d` (see
+[Data directory](#data-directory)). To use another place, set
+`MEDIATOOLS_HOME` **before** installing, for example in `~/.profile`:
 
 ```bash
-mediatools config --init                 # writes ~/scripts/mediatools.d/mediatools.ini
-"${EDITOR:-nano}" "$(mediatools config --path)"   # set [collection] root
+echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+```
 
-mediatools progress                      # how much is still H.264?
-mediatools shrink                        # shrink, asks once for confirmation
-mediatools triage --max-seconds 30       # review clips up to 30 s
-mediatools flatten --dry-run             # what would _flat contain?
-mediatools flatten                       # create the hard links
-mediatools sync                          # back up; asks where the disk is
+## First steps
+
+Nothing below changes a file until you confirm a question.
+
+```bash
+mediatools config --set collection.root=~/Videos/collection   # your collection root
+mediatools config                                             # check the effective values
+mediatools progress                                           # how much is still H.264?
+mediatools triage --dry-run --max-seconds 30                  # how many short clips, how long?
+mediatools flatten --dry-run                                  # what would _flat contain?
+```
+
+Judge the shrink quality on a copy before touching the collection:
+
+```bash
+mkdir -p ~/shrinktest && cp ~/Videos/collection/projectA/some/video.mp4 ~/shrinktest/
+mediatools shrink --keep-copies ~/shrinktest                  # result in ~/shrinktest/newShrinkedFiles/
+```
+
+`--keep-copies` leaves the originals untouched and records nothing. Compare
+both files in a player; if the quality is too low, use a smaller `--crf`
+(for example 24).
+
+Then make a backup and start the real work:
+
+```bash
+mediatools sync                          # back up; asks for the disk, shows a dry run first
+mediatools triage --max-seconds 30       # discard unwanted short clips first
+mediatools shrink                        # largest files first; Ctrl+C stops cleanly
+mediatools flatten                       # create the flat hard-link views
 ```
 
 Every command also accepts an explicit path instead of `[collection] root`.
@@ -148,26 +243,43 @@ name**, so download tools that skip existing names do not fetch the large
 original again.
 
 ```bash
-mediatools shrink [PATH] [--keep-copies] [--crf 28] [--threads 6] [--ext mp4] [-y] [-v]
+mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
+                  [--keep-copies] [--crf 28] [--threads 6] [--ext mp4] [-y] [-v]
 ```
 
-Per file, in this order:
+1. **Plan.** All videos are checked against the database of their
+   directory. *The database always has precedence:* a recorded file counts
+   as processed, whatever its codec. Matching is by **file name within the
+   directory**, so databases written before the collection was moved stay
+   valid. Then the run reports files, volume and the estimated time and
+   asks once.
+2. **Order.** Largest files first by default (most space saved early);
+   `--min-seconds 60` leaves short clips for a `triage` session first.
+3. **Per file:** already HEVC → recorded only; otherwise encode into
+   `newShrinkedFiles/`, validate, copy over the original *in place* (same
+   inode, so `_flat` links see the new content), record.
 
-1. **Database** - the directory's `shrink.db` (name configurable) has a row with the same
-   path, size and mtime → skipped. *The database always has precedence.*
-2. **Codec** - already HEVC → recorded, not re-encoded.
-3. **Encode** into `newShrinkedFiles/`, validate, copy over the original
-   *in place* (same inode, so `_flat` links see the new content), record.
+A progress line shows percentage by volume, files, GiB and the remaining
+time (measured speed of this and earlier runs).
+
+| Key | Effect |
+|---|---|
+| Ctrl+C once | finish the current file, record it, stop |
+| Ctrl+C twice | abort the current file at once - its original stays untouched |
+
+The next run continues with the files left. Overwriting an original is
+protected by a marker file: if the machine fails during the copy, the next
+run repeats the copy from the validated output before anything else. A file
+that ffmpeg cannot encode is logged and skipped (exit code 2).
 
 | Option | Meaning |
 |---|---|
+| `--order` | `largest` (default), `smallest` or `path` (directory order) |
+| `--min-seconds S` | leave out videos shorter than S seconds (durations cached) |
 | `--keep-copies` | leave originals untouched, keep shrunk copies for review, record nothing |
 | `--crf N` | libx265 constant rate factor, default 28 |
 | `--ext LIST` | extensions to process, default `mp4` |
 | `-y` | skip the confirmation question |
-
-Ctrl+C is honoured after the current file. A file that ffmpeg cannot
-encode is logged and skipped; the run continues and ends with exit code 2.
 
 ### progress
 
@@ -175,22 +287,40 @@ encode is logged and skipped; the run continues and ends with exit code 2.
 mediatools progress [PATH] [--ext mp4]
 ```
 
-Read-only. Writes `progress_done_<ts>.txt` and `progress_todo_<ts>.txt` to
-the [data directory](#data-directory) and prints the counts.
+Read-only. Counts processed videos (recorded in the database of their
+directory), those recorded with a different size since, and those still to
+do with their volume; estimates the encoding time from the speed measured by
+earlier `shrink` runs; reports database rows without a matching file. The
+three lists go to the [data directory](#data-directory).
 
 ### triage
 
 ```bash
 mediatools triage [PATH] [--max-seconds 60] [--min-seconds 0] [--batch 10]
-                       [--player vlc] [--audio] [--delete] [--include-kept] [--dry-run]
+                         [--player vlc] [--audio] [--delete] [--no-placeholder]
+                         [--include-kept] [--dry-run] [-y]
 ```
 
-1. Finds videos with a duration between the two thresholds.
+1. Counts the videos with a duration between the two thresholds and reports
+   number, batches, total length and a rough review-time estimate, then asks
+   whether to start (`--dry-run`: report and list only; `-y`: no start
+   question). Durations are cached, so a second count is fast.
 2. Opens a batch, **one player process per video** (muted, looping).
-3. You close the windows of the clips you do not want and press Enter.
-4. The script lists *remove / keep / player error* and asks for confirmation.
+3. **Close the window = remove the video. Leave the window open = keep it.**
+   Then press Enter.
+4. The script lists *remove / keep / player error* and asks for confirmation
+   (always, also with `-y`).
 5. Removed: the file **and its `_flat` hard links** (otherwise no space would
-   be freed). Kept files are remembered and not shown again.
+   be freed). By default an **empty placeholder (0 bytes)** is left under the
+   original name, so a downloader that skips existing names does not fetch
+   the video again; `--no-placeholder` removes the name completely. Every
+   removal is recorded in `state/triage_discarded.tsv`. Kept files are
+   remembered and not shown again.
+
+Placeholders are ignored by `shrink`, `progress`, `flatten` and `triage`, and
+`sync` never copies them over the full file on the backup (`--min-size=1`).
+Whether a downloader really skips a 0-byte file depends on the downloader -
+check it once with one video before a large session.
 
 VLC is started with `--no-one-instance --no-playlist-enqueue`; a player that
 exits within three seconds counts as an error and its file is kept. Trashed
@@ -242,7 +372,7 @@ Without `TARGET` you are asked which mounted disk to use; the choice is
 remembered. The transfer is
 
 ```bash
-rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude='*.part' SOURCE/ TARGET/
+rsync -aHu --no-inc-recursive --min-size=1 --exclude=newShrinkedFiles/ --exclude='*.part' SOURCE/ TARGET/
 ```
 
 preceded by a dry run with a summary and a confirmation. Before that the
@@ -304,6 +434,9 @@ They live in `~/scripts/mediatools.d/mediatools.ini` (or
 [collection]
 root = ~/Pictures/collection
 
+[sync]
+source = ~
+
 [shrink]
 db_name = shrink.db
 
@@ -323,8 +456,17 @@ max_deletions = 500
 ```
 
 `mediatools config` prints the effective values. If the database name is
-changed, `mediatools rename-db OLDNAME [PATH]` renames existing databases
-(and their `.bak_*` backups) in one pass; `--dry-run` lists them first.
+changed, `mediatools rename-db OLDNAME NEWNAME [PATH]` renames existing
+databases (and their `.bak_*` backups) in one pass without further questions
+and stores the new name as `[shrink] db_name`; `--dry-run` lists them first.
+
+Every command takes an explicit path, which always wins over the file. To
+change a default permanently:
+
+```bash
+mediatools config --set collection.root=~/Pictures/other   # shrink, triage, flatten, ...
+mediatools config --set sync.source=~                      # default source of sync
+```
 
 ## How the pieces fit together
 
@@ -349,8 +491,10 @@ All logs and state live in `$MEDIATOOLS_HOME` (default
 
 ```text
 mediatools.ini   configuration
+venv/      installed release (install.sh)
 logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
-state/     triage_kept.tsv, sync_targets.json, snapshot_levels.json
+state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
+           shrink_throughput.json, sync_targets.json, snapshot_levels.json
 plans/     flatten_<ts>.tsv  (input for --undo)
 reports/   progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
 snapshot/  rsnapshot.conf (generated), rsnapshot.log
@@ -387,9 +531,15 @@ and all paths come from the configuration file; the defaults are generic.
 ```bash
 pip install -e '.[dev]'                  # pytest, pylint, mypy, pycodestyle, bandit
 git config core.hooksPath .githooks      # pre-push hook runs the gates
-tools/check.sh                           # format, lint, types, security, tests
+tools/check.sh                           # privacy, format, lint, types, security, tests
+                                         # (needs ffmpeg, rsync, rsnapshot installed)
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```
+
+Inside the development venv `mediatools` runs the code of the clone, and
+`mediatools --version` says so: `mediatools 1.2.0 (source checkout
+~/Projects/mediatools, not an installed release)`. The installed release
+(`~/scripts/mediatools`) is not affected by anything in the clone.
 
 Branching: `main` holds releases only (tag `vX.Y.Z`), `develop` integrates,
 work happens on `feature/*` branches with pull requests into `develop`.
@@ -403,7 +553,8 @@ without a shell.
 ```text
 src/mediatools/
 ├── cli.py                  Cli               argument parsing and dispatch
-├── core/                   Config, DataDir, RunLog, MediaTypes, MediaProbe, TreeWalker, Prompt
+├── core/                   Config, DataDir, RunLog, MediaTypes, MediaProbe, TreeWalker, Prompt,
+│                           VersionInfo
 ├── shrink/                 ShrinkDatabase, DatabaseRenamer, HevcEncoder, Shrinker, ProgressReport
 ├── triage/                 CandidateFinder, PlayerSession, FlatLinkResolver,
 │                           FileRemover, KeptList, Triage

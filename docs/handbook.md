@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.1.0 -- Handbook"
+title: "mediatools 1.2.0 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
-date: "2026-11-03"
+date: "2026-11-08"
 lang: en-GB
 abstract: |
   mediatools is a Python package (standard library only) with subcommands
@@ -46,6 +46,28 @@ header-includes: |
 
 # Overview
 
+## Purpose
+
+mediatools maintains a local copy of videos and pictures that a download
+tool fetches folder by folder, for example an archiver for a creator
+platform. Such collections grow into deeply nested trees with large H.264
+videos, many unwanted short clips and backups that silently turn hard links
+into full copies.
+
+The central design rule follows from how download tools work: they decide
+by **file name** whether a file is already present. mediatools therefore
+never takes a name away -- a shrunk video keeps its name, a discarded clip
+leaves an empty placeholder, a flat view consists of additional names (hard
+links), and `sync` never deletes. The next download run fetches only what
+is really new.
+
+`shrink` re-encodes lossy and replaces the original; the only undo is a
+backup. The recommended order for a new user is therefore: configure, look
+(`progress`, `--dry-run`), judge the quality with `shrink --keep-copies` on
+a test folder, back up, then work (section "First steps").
+
+## Subcommands
+
 | Subcommand | Purpose | Writes to |
 |---|---|---|
 | `shrink` | HEVC re-encode in place, name kept | original files (same inode), `shrink.db` |
@@ -69,34 +91,121 @@ Shared rules, implemented once in `mediatools.core`:
 
 # Installation
 
+Everything except the system packages runs as a **normal user**.
+
 ## Prerequisites
 
 ~~~bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
 ffmpeg -hide_banner -encoders | grep libx265
 ~~~
 
 `sudo` is needed because apt writes to `/usr` and the package database;
-from the user context it is sufficient, a root shell is not required. The
-second command runs as normal user and must print a line containing
-`libx265`.
+from the user context it is sufficient, a root shell is not required. Only
+the packages of the subcommands in use are needed (README, table
+"System packages"). The second command runs as normal user and must print a
+line containing `libx265`.
 
-## Clone and launcher
+## Option A: installer (recommended)
 
-The project lives in `~/Projects/mediatools`; the launcher is a small shell
-script in `~/scripts`, which is in `PATH`. Everything runs as normal user:
+mediatools is installed from a **release tag** (`vX.Y.Z`) on GitHub, never
+from the working files of a clone, so `mediatools --version` always shows
+the installed release:
 
 ~~~bash
-mkdir -p ~/Projects
-git clone https://github.com/peddanet/mediatools.git ~/Projects/mediatools
-cd ~/Projects/mediatools
-./install.sh
+curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+bash install.sh
 mediatools --version
 ~~~
 
-* `git clone URL DIR` -- copy the repository into `DIR`.
-* `install.sh` writes only `~/scripts/mediatools`; it refuses to overwrite a
-  file it did not create.
+* `curl -fsSLO URL` -- download the installer into the current directory
+  (`-f` fail on HTTP errors, `-sS` quiet but show errors, `-L` follow
+  redirects, `-O` keep the remote file name). A clone contains the same
+  script; running it from there makes no difference, because it installs
+  from GitHub, not from the clone.
+* `bash install.sh` -- reads the release tags with `git ls-remote`, picks
+  the newest `vX.Y.Z` (or the tag given as argument), installs it with pip
+  into `~/scripts/mediatools.d/venv`, checks that the program reports the
+  tag's version and links `~/scripts/mediatools` to it. It replaces only a
+  link it created itself or the launcher of version 1.1.0 and refuses any
+  other file.
+* `bash install.sh --list` -- list the releases; `bash install.sh v1.2.0`
+  -- install a given release, also an older one.
+* `BIN_DIR=~/.local/bin bash install.sh` -- link the command elsewhere.
+
+Everything runs as normal user; the installer writes only below
+`$MEDIATOOLS_HOME` and `BIN_DIR`. It needs `git` and the venv module
+(`sudo apt install git python3-venv`).
+
+Update: run `bash install.sh` again. Remove:
+`rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`.
+
+## Option B: pipx
+
+~~~bash
+pipx ensurepath
+pipx install git+https://github.com/peddanet/mediatools.git@v1.2.0
+~~~
+
+* `pipx ensurepath` -- adds `~/.local/bin` to `PATH` (once; open a new
+  terminal afterwards).
+* `pipx install git+URL@TAG` -- builds the given release into a virtual
+  environment of its own; replace `v1.2.0` with the newest tag. Update with
+  `pipx install --force git+URL@NEWTAG`, remove with
+  `pipx uninstall mediatools`.
+
+Ubuntu 24.04 and later block `pip install --user` for the system Python
+(PEP 668); both options use a virtual environment instead.
+
+## Development checkout
+
+Code imported from a clone (development venv with `pip install -e`) is
+marked by `--version`:
+
+~~~text
+mediatools 1.2.0 (source checkout /home/USER/Projects/mediatools, not an installed release)
+~~~
+
+The installed release is not affected by anything in the clone.
+
+## Data directory
+
+Configuration, logs, state, reports and the installed release (`venv/`)
+are kept in `$MEDIATOOLS_HOME`, default `~/scripts/mediatools.d`. Another
+location is set in `~/.profile` before installing:
+
+~~~bash
+echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+~~~
+
+## First steps
+
+Nothing in the first block changes a file:
+
+~~~bash
+mediatools config --set collection.root=~/Videos/collection
+mediatools config
+mediatools progress
+mediatools triage --dry-run --max-seconds 30
+mediatools flatten --dry-run
+~~~
+
+Judge the shrink quality on a copy (`--keep-copies` leaves the originals
+untouched and records nothing; a smaller `--crf` means higher quality):
+
+~~~bash
+mkdir -p ~/shrinktest && cp ~/Videos/collection/projectA/some/video.mp4 ~/shrinktest/
+mediatools shrink --keep-copies ~/shrinktest
+~~~
+
+Then back up and work; every step asks before it changes anything:
+
+~~~bash
+mediatools sync
+mediatools triage --max-seconds 30
+mediatools shrink
+mediatools flatten
+~~~
 
 ## Running the tests on the target machine
 
@@ -107,7 +216,8 @@ python3 -m pytest -q
 ~~~
 
 Expected: all tests pass. Tests that need ffmpeg, rsync or rsnapshot are
-skipped when the tool is missing.
+skipped when the tool is missing. `sudo` is needed only for the apt
+installation; the tests run as normal user.
 
 # Configuration
 
@@ -129,6 +239,7 @@ mediatools config               # print the effective values incl. defaults
 | Section / key | Default | Used by |
 |---|---|---|
 | `[collection] root` | -- | every command called without a path |
+| `[sync] source` | `[collection] root` | `sync` called without a source |
 | `[shrink] db_name` | `shrink.db` | shrink, progress, rename-db |
 | `[flatten] abbreviations` | `Videos=V, Images=I, Audios=U` | flatten, naming level 1 |
 | `[snapshot] source`, `disk` | -- | snapshot (required) |
@@ -140,6 +251,24 @@ mediatools config               # print the effective values incl. defaults
 A missing or invalid value stops the command with a message that names the
 key and the expected format.
 
+**Which directory is used.** A path on the command line always wins; the
+file only provides defaults. Different jobs usually start at different
+levels -- for example the collection for `shrink`, `triage` and `flatten`,
+but the whole home directory for `sync` and `snapshot` -- hence the separate
+keys. Change a default without an editor:
+
+~~~bash
+mediatools config --set collection.root=~/Pictures/collection
+mediatools config --set sync.source=~ --set snapshot.source=~
+mediatools config                      # show the effective values
+~~~
+
+`--set SECTION.KEY=VALUE` replaces only that line and keeps all comments;
+a missing file is created from the template first.
+
+For `flatten`, `root` must be the **master level**: each direct
+sub-directory is treated as one unit with its own `_flat`.
+
 ## Renaming existing databases
 
 If the shrink databases of an existing collection carry another file name,
@@ -147,12 +276,15 @@ set `[shrink] db_name` and rename them in one pass. The old name is passed
 on the command line only:
 
 ~~~bash
-mediatools rename-db OLDNAME.db --dry-run     # list, change nothing
-mediatools rename-db OLDNAME.db               # rename after confirmation
+mediatools rename-db OLDNAME.db NEWNAME.db PATH --dry-run     # list, change nothing
+mediatools rename-db OLDNAME.db NEWNAME.db PATH               # rename
 ~~~
 
-`OLDNAME.db` and its backups `OLDNAME.db.bak_*` become `shrink.db` and
-`shrink.db.bak_*`. Renaming within a directory keeps the inode; content and
+`OLDNAME.db` and its backups `OLDNAME.db.bak_*` become `NEWNAME.db` and
+`NEWNAME.db.bak_*`; there is no further question. Afterwards `NEWNAME.db` is
+stored as `[shrink] db_name` (comments in the file are kept), so `shrink` and
+`progress` find the renamed databases. `PATH` defaults to `[collection] root`
+and may also follow the options. Renaming within a directory keeps the inode; content and
 time stamps are unchanged. A directory that already contains the new name
 is reported as a conflict and left alone -- nothing is overwritten.
 
@@ -218,13 +350,16 @@ Design principles:
 ## Invocation
 
 ~~~bash
-mediatools shrink ~/Pictures/collection
-mediatools shrink ~/Pictures/collection --keep-copies
+mediatools shrink ~/Pictures/collection                       # largest first
+mediatools shrink ~/Pictures/collection --min-seconds 60      # skip short clips
+mediatools shrink ~/Pictures/collection --order path --keep-copies
 mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 ~~~
 
 | Option | Default | Meaning |
 |---|---|---|
+| `--order` | `largest` | `largest`, `smallest` or `path` (directory order) |
+| `--min-seconds S` | 0 | leave out videos shorter than S seconds |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
 | `--threads N` | 6 | ffmpeg threads |
@@ -232,28 +367,68 @@ mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 | `-y` | off | no confirmation question |
 | `-v` | off | debug logging |
 
+## Plan
+
+Before anything is encoded, the whole tree is walked once:
+
+1. Interrupted replacements are completed (see *Interruption*).
+2. Every video is checked against the database of its directory; recorded
+   files are counted as processed and left out. 0-byte placeholders are
+   ignored.
+3. With `--min-seconds`, the durations of the remaining videos are read
+   (cached in `state/triage_durations.tsv`, shared with `triage`) and short
+   ones are left out.
+4. The rest is sorted (`--order`), and the run reports, for example (numbers illustrative):
+
+~~~text
+already processed (database): 12000 | shorter than 60 s: 1500 | to encode: 6500 files,
+560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+Start encoding and REPLACE the originals? [y/N]
+~~~
+
+The estimate uses `state/shrink_throughput.json` (source bytes and encoding
+seconds of all earlier runs); during the run the measured speed of the run
+itself takes over.
+
 ## Decision per file
 
 ![Decision logic of Shrinker](img/shrink_flow.png){width=70%}
 
-1. **Database first.** A row with identical path, size and mtime means
-   "already processed"; the file is skipped without probing.
+1. **Database first.** A recorded file name means "already processed",
+   regardless of the codec it was processed with; the file is skipped
+   without probing.
 2. **Codec.** If the first video stream is already HEVC, the file is
    recorded but not re-encoded (re-encoding HEVC costs quality for little
    gain).
 3. **Encode and validate.** `HevcEncoder` runs
 
    ~~~text
-   ffmpeg -nostdin -y -threads 6 -i SRC -vcodec libx265 -crf 28 TMP
+   ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 -threads 6 \
+          -i SRC -vcodec libx265 -crf 28 TMP
    ~~~
 
-   and accepts the result only if the exit code is 0, the output is not
-   empty, has a video stream, and its duration equals the input within
-   `max(1 s, 2 %)`.
+   in its own process group and accepts the result only if the exit code
+   is 0, the output is not empty, has a video stream, and its duration
+   equals the input within `max(1 s, 2 %)`. ffmpeg's messages go to
+   `TMP.ffmpeg.log`; on failure its last lines are logged.
 4. **Copy back in place.** `shutil.copyfile` writes into the existing
    inode. All hard links of the file -- `_flat` entries, deduplication
    links -- therefore show the shrunk content immediately, and no second
    encode happens via another name.
+
+## Progress display
+
+(numbers illustrative; on screen this is one line)
+
+~~~text
+[#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB |
+ETA 2d21h |  63 % clip.mp4
+~~~
+
+Percentage, volume and remaining time are measured in source bytes,
+because the encoding time grows with the file size, not with the number of
+files. The line is drawn only on a terminal; the log file receives the
+normal messages.
 
 ## Database
 
@@ -264,7 +439,14 @@ CREATE TABLE files (path text NOT NULL PRIMARY KEY,
 
 * One database per directory with videos; file name `[shrink] db_name`
   (default `shrink.db`).
-* `modified` is the mtime after shrinking, format `YYYY-MM-DD HH:MM:SS`.
+* **Matching uses the file name**, not the stored absolute path: a database
+  describes the files of its own directory, and the stored path still
+  points to wherever the collection was when the row was written. A row
+  whose size differs from the file today is reported by `progress` as
+  "size changed since" and still counts as processed -- nothing is encoded
+  twice.
+* `path` and `modified` (mtime after shrinking, `YYYY-MM-DD HH:MM:SS`) are
+  still written for compatibility and traceability.
 * Databases of the first script generation (no `PRIMARY KEY`) are backed up
   next to the original (suffix `.bak_` plus timestamp) and migrated in one
   transaction.
@@ -278,11 +460,27 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 
 ## Interruption and failures
 
-Ctrl+C, Ctrl+Z and SIGTERM set a flag; the running ffmpeg receives the
-terminal's SIGINT too and stops; the original stays untouched and the
-temporary output is removed. Copy-back and database entry are executed as
-one unit and are never separated by an interruption. A file that cannot be
-encoded is logged as `FAILED`; the run continues and ends with exit code 2.
+| Event | Behaviour |
+|---|---|
+| Ctrl+C (or Ctrl+Z) once | the current file is finished, validated, copied and recorded; then the run stops |
+| Ctrl+C a second time, SIGTERM | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
+| power failure, kill -9 | see the replacement journal below |
+| ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
+
+Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
+reaches only mediatools, which decides what happens. The signal handler only
+sets flags and never raises an exception, so a replacement in progress
+always completes.
+
+**Replacement journal.** Overwriting an original is the only moment in
+which data could be lost. The sequence is: write the marker
+`newShrinkedFiles/<name>.replace`, copy the validated output into the
+original, flush it to disk (`fsync`), record it, delete the output, delete
+the marker. If the machine fails anywhere in between, the next run finds the
+marker next to the validated output and repeats the copy before it plans
+anything else. Without a marker, the original was never touched.
+
+Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed.
 
 # progress
 
@@ -290,8 +488,24 @@ encoded is logged as `FAILED`; the run continues and ends with exit code 2.
 mediatools progress ~/Pictures/collection
 ~~~
 
-Writes `reports/progress_done_<ts>.txt` and `reports/progress_todo_<ts>.txt`
-and prints the counts. It creates no database and deletes nothing.
+(numbers illustrative)
+
+~~~text
+videos: 20000 | processed: 12000 (of which size changed since: 12) |
+todo: 8000 (640.0 GiB)
+databases: 900 | rows without a matching file: 40
+estimated encoding time at the measured 1.5 MB/s: about 5 d 7 h
+~~~
+
+* **processed** -- the file name is recorded in the database of its
+  directory; **size changed since** -- recorded, but the file has another
+  size today (still counted as processed);
+* **todo** -- not recorded, with the total volume;
+* **rows without a matching file** -- the file was deleted or renamed
+  after it was recorded.
+
+The three lists go to `reports/progress_{done,changed,todo}_<ts>.txt`. The
+command creates no database and changes nothing.
 
 # triage
 
@@ -303,20 +517,57 @@ mediatools triage ~/Pictures/collection/A --batch 3
 mediatools triage ~/Pictures/collection --min-seconds 10 --max-seconds 30
 ~~~
 
-1. `CandidateFinder` walks the tree lazily and yields clips within the
-   duration range that are not on the kept list.
+1. **Count first.** `CandidateFinder` collects all clips within the
+   duration range that are not on the kept list; empty placeholders are
+   skipped. Durations come from `state/triage_durations.tsv` when size and
+   modification time are unchanged, otherwise from ffprobe. The session then
+   reports, for example (numbers illustrative):
+
+~~~text
+412 of 18230 videos match: 42 batch(es) of up to 10, total clip length 196 min,
+estimated review time about 75 min
+CLOSE a window = REMOVE that video (an empty placeholder keeps its name);
+leave it OPEN = KEEP it.
+Start the review? [Y/n]
+~~~
+
+   The estimate assumes that each batch is watched once through its longest
+   clip plus 15 s for the decision. `--dry-run` prints the list and this
+   report and stops; `-y` skips only this start question.
 2. `PlayerSession` starts one player process per clip (VLC muted and
    looping by default), then waits 3 s and flags processes that already
    ended.
-3. The user closes the windows of clips to discard and presses Enter
-   (`s` skips the batch, `q` quits).
-4. Classification and summary, then confirmation:
+3. **Close the window of every video to remove; leave the windows of the
+   videos to keep open.** Then press Enter (`s` skips the batch, `q` quits).
+4. Classification and summary, then confirmation -- always, also with `-y`:
 
 | Process state | Meaning | Action after `y` |
 |---|---|---|
-| running | keep | close window, add to kept list |
-| ended with 0 after the start window | discard | remove file and its `_flat` links |
+| running (window still open) | keep | close window, add to kept list |
+| ended with 0 after the start window (window closed) | remove | remove file and its `_flat` links, leave placeholder |
 | ended within 3 s or with code ≠ 0 | player error | keep, not added to kept list |
+
+## Placeholders
+
+A removed video is replaced by an empty file (0 bytes) with the same name.
+Download tools that skip files whose name already exists therefore do not
+fetch it again. Details:
+
+* The original goes to the trash (or is deleted with `--delete`); the
+  placeholder is created right afterwards and never overwrites a file.
+* `shrink`, `progress`, `flatten` and `triage` ignore 0-byte files.
+* `sync` passes `--min-size=1` to rsync: the placeholder is not copied over
+  the full file on the backup, and because the placeholder is newer, `-u`
+  prevents a reverse sync from restoring the old file over it.
+* `snapshot` treats the placeholder like any change: the newest snapshot
+  holds the empty file, older snapshots keep the video.
+* Every removal is appended to `state/triage_discarded.tsv`
+  (`time<TAB>size<TAB>path`).
+* `--no-placeholder` removes the name completely.
+
+Whether a particular downloader treats a 0-byte file as "already present" or
+as an incomplete download is a property of that downloader; test it with a
+single file before a large session.
 
 ## Why `_flat` links are removed too
 
@@ -343,6 +594,8 @@ Trashed files occupy space until the trash is emptied (`gio trash --empty`).
 | `--player` | `vlc` | e.g. `mpv`, `"flatpak run org.videolan.VLC"` |
 | `--audio` | off | play with sound |
 | `--delete` | off | permanent deletion instead of trash |
+| `--no-placeholder` | off | do not leave an empty file under the removed name |
+| `-y` | off | skip the start question; batches are still confirmed |
 | `--include-kept` | off | show kept clips again |
 | `--dry-run` | off | list candidates only |
 
@@ -437,7 +690,8 @@ Without a target, mounted file systems below `/media`, `/run/media` and
 ## rsync options
 
 ~~~text
-rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude=*.part \
+rsync -aHu --no-inc-recursive --min-size=1 \
+      --exclude=newShrinkedFiles/ --exclude=*.part \
       --exclude=.Trash-*/ --exclude=.mediatools-hl-* SOURCE/ TARGET/
 ~~~
 
@@ -447,6 +701,7 @@ rsync -aHu --no-inc-recursive --exclude=newShrinkedFiles/ --exclude=*.part \
 | `-H` | hard links stay hard links -- `_flat` costs no space on the target |
 | `-u` | a newer file on the receiver is never overwritten (protects shrunk files when copying back) |
 | `--no-inc-recursive` | complete file list first; recommended by the rsync manual with `-H` |
+| `--min-size=1` | empty triage placeholders never replace the full file on the target |
 | no `--delete` | files that exist only in the target are kept and reported |
 
 rsync detects hard links only inside the transfer set; therefore the unit
@@ -689,14 +944,36 @@ including the maximum name length.
 **UPSERT** -- `INSERT … ON CONFLICT … DO UPDATE` in SQLite; needs a unique
 key. [SQLite UPSERT](https://sqlite.org/lang_upsert.html)
 
+**PEP 668** -- marks the system Python of a distribution as "externally
+managed", so `pip install --user` is refused there.
+[PEP 668](https://peps.python.org/pep-0668/)
+
+**pipx** -- installs Python command-line applications, each into a virtual
+environment of its own, as a normal user. [pipx](https://pipx.pypa.io/stable/)
+
+**Placeholder** -- empty file (0 bytes) left by `triage` under the name of
+a discarded clip, so a download tool that skips existing names does not
+fetch it again.
+
+**Release tag** -- annotated git tag `vX.Y.Z` on `main` that marks a
+released state; the installer installs only such tags.
+[git-tag(1)](https://git-scm.com/docs/git-tag)
+
 **rsnapshot** -- snapshot tool based on rsync and hard links.
 [rsnapshot](https://rsnapshot.org/)
 
 **Snapshot level** -- rsnapshot retention class (`alpha`, `beta`, …); each
 level keeps a fixed number of snapshots.
 
+**Source checkout** -- code run directly from a clone (launcher or
+`pip install -e`) instead of an installed release; `--version` names it.
+
 **systemd user unit** -- service managed by the user's own systemd
 instance, without root.
+
+**Virtual environment (venv)** -- self-contained Python installation
+directory with its own packages, created by `python3 -m venv`.
+[venv documentation](https://docs.python.org/3/library/venv.html)
 
 **Unit** -- direct sub-directory of the master directory (e.g. one project).
 
@@ -722,4 +999,7 @@ Link check of 2026-11-03. "verified" = page content retrieved on that date.
 | [rsnapshot manual page (mankier.com)](https://www.mankier.com/1/rsnapshot) | found via search; `sync_first`, `link_dest`, retain levels |
 | [rsnapshot](https://rsnapshot.org/) | project home page, not retrieved in this session |
 | [rsnapshot(1), FreeBSD manual pages](https://man.freebsd.org/cgi/man.cgi?manpath=FreeBSD+Ports+15.1.quarterly&query=rsnapshot&sektion=1) | found via search; running as a normal user with an own configuration file |
+| [pipx documentation](https://pipx.pypa.io/stable/) | found via search; `pipx install git+URL` and `pipx reinstall` checked locally with pipx 1.4.3 |
+| [PEP 668](https://peps.python.org/pep-0668/) | found via search |
+| [git-tag(1)](https://git-scm.com/docs/git-tag), [venv documentation](https://docs.python.org/3/library/venv.html) | standard references, not retrieved in this session; `install.sh` behaviour checked by automated tests and an end-to-end installation from a local repository |
 | rsnapshot 1.4.5 behaviour (adopt, rotation, link sharing) | checked end to end on ext4 and by automated tests |
