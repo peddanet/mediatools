@@ -120,6 +120,32 @@ Returns:
     if another shrink run is still active.
 ~~~
 
+**`_switch_release`**
+
+~~~text
+_switch_release(restart: SelfRestart, run: RunLog) -> int
+
+Replace this process by the installed release (see :class:`SelfRestart`).
+
+Args:
+    restart: Command line and log of the new process.
+    run: Log of this run; closed before the switch.
+
+Returns:
+    1 - only if the new process could not be started.
+~~~
+
+**`cmd_reload`**
+
+~~~text
+cmd_reload(_args: argparse.Namespace) -> int
+
+Run ``mediatools reload``: ask the running shrink to switch releases.
+
+Returns:
+    0 if a running shrink was asked, 1 if none runs.
+~~~
+
 **`cmd_stop`**
 
 ~~~text
@@ -1334,6 +1360,12 @@ start (left by a crash) is removed as well. A second job of the same
 name cannot start while the first one is alive (:meth:`start` raises
 :class:`RuntimeError`); a PID file of a crashed job does not block.
 
+``mediatools reload`` creates ``<data>/state/<name>.restart`` the same
+way: the job switches to a newly installed release after its current
+file (see :class:`SelfRestart`). It hands its registration over
+(:meth:`handover`) instead of removing it, so a watching ``attach``
+sees one continuous job with the same PID.
+
 The PID file also names the log file, and the job writes its progress
 lines to ``<data>/state/<name>.status``; ``mediatools attach`` shows
 both. With ``background`` the job moves into the background when the
@@ -1347,6 +1379,7 @@ Attributes:
     name: Job name, e.g. ``shrink``.
     pid_file: Path of the PID file (PID and log file path).
     stop_file: Path of the stop-request file.
+    restart_file: Path of the restart-request file.
     status_file: Path of the progress status file.
     console_file: Terminal output of a job in the background.
     last_poll: Monotonic time of the last check for the stop file.
@@ -1427,6 +1460,36 @@ finish(self) -> None
 Unregister the current process and release the sleep lock.
 ~~~
 
+**`handover`**
+
+~~~text
+handover(self) -> None
+
+Prepare the switch to a new release: keep PID and status files.
+
+The sleep lock is released (the new process takes its own); stop
+and restart requests are consumed.
+~~~
+
+**`restart_requested`**
+
+~~~text
+restart_requested(self) -> bool
+
+Tell whether ``mediatools reload`` asked for a switch.
+
+Returns:
+    True if the restart file exists.
+~~~
+
+**`clear_restart`**
+
+~~~text
+clear_restart(self) -> None
+
+Drop a restart request that cannot be served.
+~~~
+
 **`stop_requested`**
 
 ~~~text
@@ -1475,6 +1538,18 @@ Returns:
     stop file is left behind that would stop the next run).
 ~~~
 
+**`request_restart`**
+
+~~~text
+request_restart(self) -> int | None
+
+Ask the running job to switch to the installed release after its current file.
+
+Returns:
+    PID of the job that was asked, or None if none runs (then no
+    request file is left behind).
+~~~
+
 **`_remove`**
 
 ~~~text
@@ -1511,7 +1586,13 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, name: str, verbose: bool = False, datadir: DataDir | None = None)
+__init__(
+    self,
+    name: str,
+    verbose: bool = False,
+    datadir: DataDir | None = None,
+    continue_path: str | None = None,
+)
 
 Create the logger and its two handlers.
 
@@ -1519,6 +1600,8 @@ Args:
     name: Command name; used in the logger and file name.
     verbose: If True, DEBUG messages are logged as well.
     datadir: Data directory; the default one if None.
+    continue_path: Existing log file to append to (a job that
+        switched to a new release); None creates a new file.
 ~~~
 
 **`close`**
@@ -1527,6 +1610,82 @@ Args:
 close(self) -> None
 
 Flush and close all handlers (important in tests).
+~~~
+
+### `SelfRestart` (`mediatools.core.selfrestart`) {.unnumbered}
+
+~~~text
+Restarts the current command with the installed release, in the same process.
+
+Used by ``mediatools shrink`` when ``mediatools reload`` (or ``mediatools
+update``) asks a running job to switch to a newly installed release.
+The switch happens only between two files: the job finishes its current
+file, closes its result table and then calls :meth:`execute`, which
+replaces the process image with ``python -m mediatools`` of the same
+interpreter (``os.execv``). The process keeps its PID, session, terminal
+or console file and environment, so ``mediatools attach`` and ``stop``
+keep working and the sleep lock (bound to the PID) is taken over.
+
+The new process runs the same command line plus ``--foreground`` (it is
+already in the background), ``-y`` (the user confirmed the run) and
+``--continue-log`` (it appends to the same log file). It plans again;
+every file finished so far is recorded in the databases, so it continues
+with the files left. Before the switch, :meth:`installed_version` starts
+the installed release once with ``--version``; a release that does not
+answer is not switched to.
+
+Attributes:
+    argv: Command-line arguments of the running command (without the
+        program name).
+    log_path: Log file the new process continues.
+    python: Interpreter of the installed release.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, argv: list[str], log_path: str, python: str | None = None) -> None
+
+Store what the new process needs.
+
+Args:
+    argv: Arguments of the running command, without the program name.
+    log_path: Log file to continue.
+    python: Interpreter; the running one if None.
+~~~
+
+**`command`**
+
+~~~text
+command(self) -> list[str]
+
+Build the command line of the new process.
+
+Returns:
+    Argument vector for :func:`os.execv` (element 0 is the program).
+~~~
+
+**`installed_version`**
+
+~~~text
+installed_version(self) -> str | None
+
+Ask the installed release for its version.
+
+Returns:
+    Version string, e.g. ``1.2.11``, or None if it does not start or
+    answers unexpectedly.
+~~~
+
+**`execute`**
+
+~~~text
+execute(self) -> None
+
+Replace the current process by the new one; returns only on failure.
+
+Raises:
+    OSError: If the program cannot be started.
 ~~~
 
 ### `SleepInhibitor` (`mediatools.core.sleepinhibitor`) {.unnumbered}
@@ -1620,7 +1779,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.9')
+__init__(self, package_dir: str | None = None, version: str = '1.2.10')
 
 Locate the imported package.
 
@@ -2932,6 +3091,14 @@ original is untouched. Signals never interrupt the replacement itself.
 
 **Crash safety.** See :class:`ReplaceJournal`.
 
+**New release during a run.** ``mediatools reload`` (also sent by
+``mediatools update``) asks the job to switch to the installed release.
+Between two files - never during an encode or a replacement - the job
+checks that the installed release starts (``--version``), closes its
+table and summary and returns :attr:`RESTART`; the caller then replaces
+the process (:class:`SelfRestart`). A release that does not start, or
+the same version, is not switched to and the run continues.
+
 **Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
 hold only partial outputs of aborted runs. They are listed in the plan
 summary and deleted only after the start question is confirmed.
@@ -2949,13 +3116,15 @@ Attributes:
         ``throughput`` (speed and size ratio for the estimates) and
         ``decode`` (trial decode before encoding; None skips it) and
         ``ffmpeg_logs`` (folder for the ffmpeg messages of failed
-        encodes; None deletes them).
+        encodes; None deletes them) and ``restart`` (switch to a new
+        release on request; None ignores requests).
     planner: Planning phase; holds the probe and the replacement
         journal.
     control: Stop requests from ``mediatools stop``, or None.
     databases: Open databases per directory.
-    flags: ``stop`` (finish the current file, then stop) and ``abort``
-        (stop the current file at once).
+    flags: ``stop`` (finish the current file, then stop), ``abort``
+        (stop the current file at once) and ``restart`` (switch to the
+        installed release before the next file).
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
         ``failed``, ``broken``, ``failed_before`` (left out: recorded as
@@ -3059,7 +3228,8 @@ Args:
 
 Returns:
     0 on success or if declined, 1 if stopped by the user, 2 if a
-    file failed.
+    file failed, :attr:`RESTART` if the caller is to switch to the
+    installed release.
 ~~~
 
 **`_run`**
@@ -3233,6 +3403,14 @@ Args:
     force: Check the stop file now, ignoring the poll interval.
 ~~~
 
+**`_poll_restart`**
+
+~~~text
+_poll_restart(self) -> None
+
+Turn a request of ``mediatools reload`` into a switch before the next file.
+~~~
+
 **`_mark_stopping`**
 
 ~~~text
@@ -3299,6 +3477,8 @@ Attributes:
         (no check).
     ffmpeg_logs: Folder for ffmpeg's messages of failed encodes, or
         None (they are deleted).
+    restart: Switch to a newly installed release on request, or None
+        (requests are ignored).
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}

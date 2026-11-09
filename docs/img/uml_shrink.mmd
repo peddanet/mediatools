@@ -166,6 +166,7 @@ classDiagram
     -_result(item)
     -_show(name, fraction, size)
     -_poll_stop(force)
+    -_poll_restart()
     -_mark_stopping(message)
     -_remove_leftovers()
     -_size_or_none(path)
@@ -179,6 +180,7 @@ classDiagram
     +results
     +decode
     +ffmpeg_logs
+    +restart
   }
   class ThroughputLog {
     +path

@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.decodecheck import DecodeCheck
+from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.durationcache import DurationCache
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.throughput import ThroughputLog
@@ -22,6 +23,8 @@ class ShrinkState(TypedDict):
             (no check).
         ffmpeg_logs: Folder for ffmpeg's messages of failed encodes, or
             None (they are deleted).
+        restart: Switch to a newly installed release on request, or None
+            (requests are ignored).
     """
 
     durations: DurationCache | None
@@ -30,3 +33,4 @@ class ShrinkState(TypedDict):
     results: ResultTable | None
     decode: DecodeCheck | None
     ffmpeg_logs: str | None
+    restart: SelfRestart | None

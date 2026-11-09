@@ -22,6 +22,12 @@ class RunControl:
     name cannot start while the first one is alive (:meth:`start` raises
     :class:`RuntimeError`); a PID file of a crashed job does not block.
 
+    ``mediatools reload`` creates ``<data>/state/<name>.restart`` the same
+    way: the job switches to a newly installed release after its current
+    file (see :class:`SelfRestart`). It hands its registration over
+    (:meth:`handover`) instead of removing it, so a watching ``attach``
+    sees one continuous job with the same PID.
+
     The PID file also names the log file, and the job writes its progress
     lines to ``<data>/state/<name>.status``; ``mediatools attach`` shows
     both. With ``background`` the job moves into the background when the
@@ -35,6 +41,7 @@ class RunControl:
         name: Job name, e.g. ``shrink``.
         pid_file: Path of the PID file (PID and log file path).
         stop_file: Path of the stop-request file.
+        restart_file: Path of the restart-request file.
         status_file: Path of the progress status file.
         console_file: Terminal output of a job in the background.
         last_poll: Monotonic time of the last check for the stop file.
@@ -60,6 +67,7 @@ class RunControl:
         self.name = name
         self.pid_file = os.path.join(state, f"{name}.pid")
         self.stop_file = os.path.join(state, f"{name}.stop")
+        self.restart_file = os.path.join(state, f"{name}.restart")
         self.status_file = os.path.join(state, f"{name}.status")
         self.console_file = os.path.join(state, f"{name}.console")
         self.last_poll = 0.0
@@ -80,6 +88,7 @@ class RunControl:
                                f"watch it with 'mediatools attach', stop it with "
                                f"'mediatools stop'")
         self._remove(self.stop_file)
+        self._remove(self.restart_file)
         self._register()
 
     def _register(self) -> None:
@@ -131,6 +140,30 @@ class RunControl:
             self._remove(self.pid_file)
             self._remove(self.status_file)
         self._remove(self.stop_file)
+        self._remove(self.restart_file)
+
+    def handover(self) -> None:
+        """Prepare the switch to a new release: keep PID and status files.
+
+        The sleep lock is released (the new process takes its own); stop
+        and restart requests are consumed.
+        """
+        if self.inhibitor is not None:
+            self.inhibitor.stop()
+        self._remove(self.stop_file)
+        self._remove(self.restart_file)
+
+    def restart_requested(self) -> bool:
+        """Tell whether ``mediatools reload`` asked for a switch.
+
+        Returns:
+            True if the restart file exists.
+        """
+        return os.path.exists(self.restart_file)
+
+    def clear_restart(self) -> None:
+        """Drop a restart request that cannot be served."""
+        self._remove(self.restart_file)
 
     def stop_requested(self, force: bool = False) -> bool:
         """Tell whether a stop was requested, checking at most every POLL_SECONDS.
@@ -194,6 +227,20 @@ class RunControl:
             return None
         with open(self.stop_file, "w", encoding="utf-8") as handle:
             handle.write(f"stop requested at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        return pid
+
+    def request_restart(self) -> int | None:
+        """Ask the running job to switch to the installed release after its current file.
+
+        Returns:
+            PID of the job that was asked, or None if none runs (then no
+            request file is left behind).
+        """
+        pid = self.active_pid()
+        if pid is None:
+            return None
+        with open(self.restart_file, "w", encoding="utf-8") as handle:
+            handle.write(f"restart requested at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         return pid
 
     @staticmethod
