@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.4 -- Handbook"
+title: "mediatools 1.2.5 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"

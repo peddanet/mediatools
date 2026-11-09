@@ -5,7 +5,9 @@ from pathlib import Path
 
 from conftest import make_file
 from mediatools.core import DataDir, MediaTypes, Prompt, TreeWalker
+from mediatools import __version__
 from mediatools.core.progressbar import ProgressBar
+from mediatools.core.runlog import RunLog
 
 
 def test_media_types() -> None:
@@ -103,3 +105,16 @@ def test_progress_bar_texts() -> None:
     assert not pbar.drawn and pbar.stream.getvalue().endswith("\033[1A\r\033[K")
     pbar.clear()                                       # nothing drawn: no output
     assert pbar.stream.getvalue().endswith("\033[1A\r\033[K")
+
+
+def test_run_log_names_version_and_pid(datadir: Path) -> None:
+    """The log file states the running version and process ID.
+
+    Args:
+        datadir: Temporary data directory (fixture).
+    """
+    run = RunLog("demo")
+    run.close()
+    text = Path(run.path).read_text(encoding="utf-8")
+    assert f"mediatools {__version__}" in text and f"(pid {os.getpid()})" in text
+    assert run.path.startswith(str(datadir))
