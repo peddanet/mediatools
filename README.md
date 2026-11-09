@@ -228,7 +228,7 @@ Then make a backup and start the real work:
 ```bash
 mediatools sync                          # back up; asks for the disk, shows a dry run first
 mediatools triage --max-seconds 30       # discard unwanted short clips first
-mediatools shrink                        # largest files first; Ctrl+C or 'mediatools stop' stops cleanly
+mediatools shrink                        # asks, then runs in the background; 'mediatools stop' stops cleanly
 mediatools flatten                       # create the flat hard-link views
 ```
 
@@ -243,8 +243,10 @@ name**, so download tools that skip existing names do not fetch the large
 original again.
 
 ```bash
-mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
+mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S] [--foreground]
                   [--keep-copies] [--crf 28] [--threads N] [--ext mp4] [-y] [-v]
+mediatools attach        # (alias: front) watch a shrink running in the background
+mediatools stop          # ask it to finish its current file and end
 ```
 
 1. **Plan.** All videos are checked against the database of their
@@ -272,12 +274,43 @@ total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB | E
 file   35 % of 2.40 GiB (0.84 GiB encoded) | 17m left | example_clip.mp4
 ~~~
 
+Each finished video adds a row to a framed result table (terminal and
+`reports/shrink_results_<ts>.txt`); long paths wrap inside their cell:
+
+~~~text
+results (also in reports/shrink_results_<ts>.txt):
+┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬────────────────────────┐
+│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file                   │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
+│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ creator_a/Posts/       │
+│      │       │          │          │         │          │          │        │ Videos/                │
+│      │       │          │          │         │          │          │        │ example_clip_with_a_ra │
+│      │       │          │          │         │          │          │        │ ther_long_descriptive_ │
+│      │       │          │          │         │          │          │        │ name.mp4               │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
+│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ creator_b/video/       │
+│      │       │          │          │         │          │          │        │ another clip.mp4       │
+└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴────────────────────────┘
+~~~
+
+While shrink runs, sleep and idle actions are blocked by a systemd
+inhibitor lock (`systemd-inhibit --what=sleep:idle`), released when the run
+ends - no wrapper command is needed.
+
 | Key | Effect |
 |---|---|
-| `mediatools stop` (any other terminal) | finish the current file, record it, stop - independent of keyboard focus |
-| Ctrl+C once | the same as `mediatools stop` |
-| Ctrl+C twice | abort the current file at once - its original stays untouched |
-| terminal closed | like Ctrl+C twice |
+| `mediatools stop` (any terminal) | finish the current file, record it, stop |
+| terminal closed | nothing - the run continues in the background; `mediatools attach` shows it again |
+| Ctrl+C in `mediatools attach` | leaves the view only; the run continues |
+| Ctrl+C once (`--foreground` only) | the same as `mediatools stop` |
+| Ctrl+C twice (`--foreground` only) | abort the current file at once - its original stays untouched |
+
+**Background mode.** After the confirmation, `shrink` moves into the
+background: the prompt returns, the terminal may be closed, and the run
+continues in a session of its own. `mediatools attach` (alias `front`)
+shows the last log lines, every new line and the two progress lines;
+Ctrl+C leaves the view. `--foreground` keeps the run in the terminal as
+before.
 
 The next run continues with the files left; a power failure at any moment
 loses no file. Overwriting an original is protected by a journal: the
@@ -516,7 +549,7 @@ state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
            shrink_codecs.tsv, shrink.pid, shrink.stop (only while stopping),
            shrink_throughput.json, sync_targets.json, snapshot_levels.json
 plans/     flatten_<ts>.tsv  (input for --undo)
-reports/   progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
+reports/   shrink_results_*.txt, progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
 snapshot/  rsnapshot.conf (generated), rsnapshot.log
 ```
 
