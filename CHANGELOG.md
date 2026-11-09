@@ -5,6 +5,31 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-11-09
+
+### Added
+- Failure memory: videos that failed (`FAILED`) or cannot be decoded
+  (`BROKEN`) are noted in a new table `failures` of their directory's
+  database and left out of later runs while their size is unchanged
+  (listed as `FAILED BEFORE`). `--retry-failed` includes them; a
+  successful retry deletes the row. The table `files` keeps its meaning.
+- ffmpeg's complete message file of a failed encode is kept in
+  `logs/ffmpeg/<timestamp>_<name>.ffmpeg.log` (before: only the last 8
+  lines in the run log).
+- A second `mediatools shrink` is refused while a shrink run is alive
+  (exit code 3, hints for `attach` and `stop`).
+
+### Changed
+- Stricter validation of an encode: the output must be at least 2 % of the
+  input's size and its first 10 s must decode without errors, in addition
+  to exit code, video stream and duration. A failed validation keeps the
+  original as before.
+- `shrinker.py` split: planning in `ShrinkPlanner` (planner.py), the
+  crash-safe copy-back in `ReplaceJournal` (journal.py). Behaviour
+  unchanged.
+- Documentation rebuilt: diagrams (classes, shrink sequence and decision
+  diagram) and both PDFs.
+
 ## [1.2.8] - 2026-11-09
 
 ### Added

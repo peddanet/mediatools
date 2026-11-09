@@ -7,6 +7,7 @@ import signal
 import subprocess
 from collections.abc import Callable
 
+from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.probe import MediaProbe
 
 
@@ -14,8 +15,12 @@ class HevcEncoder:
     """Encodes a video with ffmpeg/libx265 and validates the result.
 
     The output is accepted only if ffmpeg exits with 0, the file is not
-    empty, it contains a video stream and its duration matches the input
-    within ``max(TOL_ABS, duration * TOL_REL)`` seconds.
+    empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
+    a video stream, its duration matches the input within
+    ``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
+    :class:`DecodeCheck` set - its start decodes without errors. A
+    suspiciously small output is typical of an input whose data could not
+    be decoded: the encoder then writes almost nothing but grey frames.
 
     **CPU use.** libx265 runs its own thread pool, which by default uses
     every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
@@ -29,8 +34,9 @@ class HevcEncoder:
     ffmpeg runs in its own session (process group): a Ctrl+C in the
     terminal reaches only mediatools, which decides whether the current
     encode finishes or is stopped with :meth:`abort`. Progress is read from
-    ``-progress pipe:1``; ffmpeg's messages go to ``<dst>.ffmpeg.log`` and
-    are logged on failure.
+    ``-progress pipe:1``; ffmpeg's messages go to ``<dst>.ffmpeg.log``; the
+    file is deleted after a validated encode and kept otherwise (its last
+    lines are logged; the caller decides where it is kept).
 
     Attributes:
         crf: libx265 constant rate factor.
@@ -38,6 +44,7 @@ class HevcEncoder:
         niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
         probe: :class:`MediaProbe` used for validation.
         log: Optional logger.
+        decode: Trial decode of the output, or None (no decode check).
         ffmpeg: Name or path of the ffmpeg executable.
         process: Running ffmpeg process, if any.
         aborted: True after :meth:`abort` during the current encode.
@@ -45,12 +52,13 @@ class HevcEncoder:
 
     TOL_ABS = 1.0
     TOL_REL = 0.02
+    MIN_RATIO = 0.02
 
     NICENESS = 19
 
     def __init__(self, crf: int = 28, threads: int | None = None,
                  probe: MediaProbe | None = None, logger=None, ffmpeg: str = "ffmpeg",
-                 niceness: int = NICENESS):
+                 niceness: int = NICENESS, decode: DecodeCheck | None = None):
         """Configure the encoder.
 
         Args:
@@ -61,7 +69,9 @@ class HevcEncoder:
             logger: Optional :class:`logging.Logger`.
             ffmpeg: Name or path of the ffmpeg executable.
             niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
+            decode: Trial decode of the output, or None (no decode check).
         """
+        self.decode = decode
         self.crf = crf
         self.niceness = niceness
         self.threads = threads if threads and threads > 0 else self.default_threads()
@@ -137,11 +147,13 @@ class HevcEncoder:
             self._error("ffmpeg exit code %i, original kept: %s", returncode, src)
             self._log_tail(log_path)
             return False
-        os.remove(log_path)
         if not os.path.isfile(dst) or os.path.getsize(dst) == 0:
             self._error("no output produced, original kept: %s", src)
             return False
-        return self.validate(src, dst)
+        if not self.validate(src, dst):
+            return False
+        os.remove(log_path)
+        return True
 
     def abort(self) -> None:
         """Stop a running encode (SIGTERM to ffmpeg's process group)."""
@@ -170,29 +182,42 @@ class HevcEncoder:
             self._error("ffmpeg: %s", text)
 
     def validate(self, src: str, dst: str) -> bool:
-        """Compare video stream and duration of the output with the input.
+        """Check size, video stream, duration and decodability of the output.
 
         Args:
             src: Input video.
             dst: Encoded output.
 
         Returns:
-            True if the output has a video stream and a matching duration
-            (or if the duration of either file cannot be determined).
+            True if the output is at least :attr:`MIN_RATIO` of the input,
+            has a video stream, a matching duration (or the duration of
+            either file cannot be determined) and - with a decode check -
+            decodes without errors.
         """
+        try:
+            in_size, out_size = os.path.getsize(src), os.path.getsize(dst)
+        except OSError:
+            in_size = out_size = 0                   # sizes unknown: not compared
+        if in_size > 0 and out_size < in_size * self.MIN_RATIO:
+            self._error("output only %.2f %% of the source (minimum %.0f %%), original kept: %s",
+                        100 * out_size / in_size, 100 * self.MIN_RATIO, src)
+            return False
         if not self.probe.has_video(dst):
             self._error("output has no video stream, original kept: %s", src)
             return False
         d_in, d_out = self.probe.duration(src), self.probe.duration(dst)
         if d_in is None or d_out is None:
-            self._info("duration unknown (in=%s, out=%s), accepted on stream check", d_in, d_out)
-            return True
-        tolerance = max(self.TOL_ABS, d_in * self.TOL_REL)
-        if abs(d_in - d_out) > tolerance:
+            self._info("duration unknown (in=%s, out=%s), not compared", d_in, d_out)
+        elif abs(d_in - d_out) > max(self.TOL_ABS, d_in * self.TOL_REL):
             self._error("duration mismatch (in=%.2fs, out=%.2fs), original kept: %s",
                         d_in, d_out, src)
             return False
-        self._info("output validated (in=%.2fs, out=%.2fs)", d_in, d_out)
+        if self.decode is not None:
+            errors = self.decode.unusable(dst)
+            if errors is not None:
+                self._error("output does not decode (%i errors), original kept: %s", errors, src)
+                return False
+        self._info("output validated (in=%s s, out=%s s)", d_in, d_out)
         return True
 
     def _info(self, *args) -> None:
