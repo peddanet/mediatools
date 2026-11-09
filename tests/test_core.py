@@ -88,10 +88,18 @@ def test_progress_bar_texts() -> None:
     pbar.file_done(500)
     pbar.file_done(250)
     assert pbar.remaining_seconds() is not None
-    assert "..." in pbar.line("y" * 50, 0.5, 100)
+    assert "y" not in pbar.line("y" * 50, 0.5, 100)      # file details are on line 2
+    line = pbar.file_line("a" * 30 + "b" * 30, 0.5, 1024 ** 3, width=70)
+    assert line.startswith("file   50 % of 1.00 GiB (0.50 GiB encoded) | ")
+    assert len(line) == 70 and line.endswith("a...bbbbbb")
     assert ProgressBar.duration_text(90061) == "1d01h"
     assert ProgressBar.duration_text(3700) == "1h01m"
     assert ProgressBar.duration_text(120) == "2m"
-    pbar.show("z")
+    pbar.show("z", 0.25, 100)
+    pbar.show("z", 0.5, 100)
+    assert pbar.stream.getvalue().count("\n") == 2   # second draw reuses both lines
+    assert "\033[1A" in pbar.stream.getvalue() and pbar.drawn
     pbar.clear()
-    assert "\r" in pbar.stream.getvalue()
+    assert not pbar.drawn and pbar.stream.getvalue().endswith("\033[1A\r\033[K")
+    pbar.clear()                                       # nothing drawn: no output
+    assert pbar.stream.getvalue().endswith("\033[1A\r\033[K")
