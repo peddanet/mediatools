@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.5 -- Developer Documentation"
+title: "mediatools 1.2.6 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -167,8 +167,10 @@ directory, configuration -- lives in `core`.
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
-| `ProgressBar` | one-line terminal display: percentage by bytes, files, remaining time, pending stop |
-| `RunControl` | PID file and stop request of a running job (`mediatools stop`) |
+| `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
+| `RunControl` | PID/stop/status files of a running job, background mode (fork, `setsid`), sleep lock in the working process |
+| `AttachView` | `mediatools attach`: log backlog, new lines, progress lines; Ctrl+C leaves the view |
+| `SleepInhibitor` | systemd sleep/idle inhibitor lock for the lifetime of a job |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
 | `Prompt` | yes/no and text questions, `--yes` support |
 
@@ -185,6 +187,9 @@ directory, configuration -- lives in `core`.
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
+| `ShrinkState` | typed collection of the run helpers (caches, throughput, result table) |
+| `FileResult` | outcome of one video (status, sizes, times) |
+| `ResultTable` | framed per-file result table: terminal, log, `reports/shrink_results_<ts>.txt` |
 
 ## Package `triage`
 
@@ -207,7 +212,8 @@ directory, configuration -- lives in `core`.
 |---|---|
 | `FlatNamer` | names within the byte limit, levels 0..3, disambiguation |
 | `FlatIndex` | `_flat/_index.tsv`, atomic save |
-| `PlanEntry`, `FlatPlan` | actions, counts, TSV persistence |
+| `PlanEntry` | one planned or executed flatten action |
+| `FlatPlan` | actions, counts, TSV persistence |
 | `Flattener` | discovery, analysis, apply, undo |
 
 ## Package `sync`

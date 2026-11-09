@@ -218,6 +218,7 @@ def test_shrink_keep_copies_via_cli(tmp_path: Path) -> None:
     """
     original = make_video(tmp_path / "u/a.mp4", seconds=1)
     size = os.path.getsize(original)
-    assert Cli().main(["shrink", str(tmp_path), "--keep-copies", "-y", "--threads", "1"]) == 0
+    assert Cli().main(["shrink", str(tmp_path), "--keep-copies", "-y", "--threads", "1",
+                       "--foreground"]) == 0
     assert os.path.getsize(original) == size
     assert os.path.exists(tmp_path / "u/newShrinkedFiles/a.mp4")
