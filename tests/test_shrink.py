@@ -4,6 +4,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from conftest import make_file, make_video, needs_ffmpeg, read
 from mediatools.core.probe import MediaProbe
 from mediatools.shrink import (HevcEncoder, ProgressReport, ShrinkDatabase, Shrinker,
@@ -169,3 +171,18 @@ def test_encoder_reports_progress(tmp_path: Path) -> None:
     assert HevcEncoder(logger=LOG).encode(video, str(tmp_path / "out.mp4"), seen.append)
     assert seen and max(seen) <= 1.0
     assert not os.path.exists(tmp_path / "out.mp4.ffmpeg.log")
+
+
+def test_encoder_keeps_one_cpu_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decoder threads and the x265 pool default to logical CPUs minus one.
+
+    Args:
+        monkeypatch: Patcher (fixture).
+    """
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+    cmd = HevcEncoder().command("in.mp4", "out.mp4")
+    assert cmd[cmd.index("-threads") + 1] == "15"
+    assert cmd[cmd.index("-x265-params") + 1] == "pools=15"
+    monkeypatch.setattr(os, "cpu_count", lambda: None)
+    assert HevcEncoder().threads == 1
+    assert HevcEncoder(threads=4).command("a", "b")[-2] == "pools=4"

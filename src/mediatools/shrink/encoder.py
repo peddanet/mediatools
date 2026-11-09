@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 from collections.abc import Callable
@@ -16,6 +17,15 @@ class HevcEncoder:
     empty, it contains a video stream and its duration matches the input
     within ``max(TOL_ABS, duration * TOL_REL)`` seconds.
 
+    **CPU use.** libx265 runs its own thread pool, which by default uses
+    every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
+    decoder (``-threads``) and the x265 pool (``-x265-params pools=N``) are
+    therefore set to ``threads``, by default one less than the number of
+    logical CPUs, so that one CPU stays free. In addition ffmpeg runs with
+    the lowest CPU priority (``nice`` 19): it still uses every idle CPU,
+    but yields at once when the user works, so the desktop stays
+    responsive.
+
     ffmpeg runs in its own session (process group): a Ctrl+C in the
     terminal reaches only mediatools, which decides whether the current
     encode finishes or is stopped with :meth:`abort`. Progress is read from
@@ -24,7 +34,8 @@ class HevcEncoder:
 
     Attributes:
         crf: libx265 constant rate factor.
-        threads: ffmpeg ``-threads`` value.
+        threads: Decoder threads and size of the x265 thread pool.
+        niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
         probe: :class:`MediaProbe` used for validation.
         log: Optional logger.
         ffmpeg: Name or path of the ffmpeg executable.
@@ -35,24 +46,39 @@ class HevcEncoder:
     TOL_ABS = 1.0
     TOL_REL = 0.02
 
-    def __init__(self, crf: int = 28, threads: int = 6, probe: MediaProbe | None = None,
-                 logger=None, ffmpeg: str = "ffmpeg"):
+    NICENESS = 19
+
+    def __init__(self, crf: int = 28, threads: int | None = None,
+                 probe: MediaProbe | None = None, logger=None, ffmpeg: str = "ffmpeg",
+                 niceness: int = NICENESS):
         """Configure the encoder.
 
         Args:
             crf: libx265 constant rate factor (28 is the libx265 default).
-            threads: ffmpeg ``-threads`` value.
+            threads: Decoder threads and x265 pool size; None uses
+                :meth:`default_threads`.
             probe: Probe for validation; a new one if None.
             logger: Optional :class:`logging.Logger`.
             ffmpeg: Name or path of the ffmpeg executable.
+            niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
         """
         self.crf = crf
-        self.threads = threads
+        self.niceness = niceness
+        self.threads = threads if threads and threads > 0 else self.default_threads()
         self.probe = probe or MediaProbe()
         self.log = logger
         self.ffmpeg = ffmpeg
         self.process: subprocess.Popen | None = None
         self.aborted = False
+
+    @staticmethod
+    def default_threads() -> int:
+        """Return the default thread count: logical CPUs minus one.
+
+        Returns:
+            At least 1.
+        """
+        return max(1, (os.cpu_count() or 2) - 1)
 
     def command(self, src: str, dst: str) -> list[str]:
         """Build the ffmpeg argument list (no shell is involved).
@@ -62,11 +88,18 @@ class HevcEncoder:
             dst: Output file.
 
         Returns:
-            Argument list for :func:`subprocess.run`.
+            Argument list for :func:`subprocess.run`; prefixed with
+            ``nice -n N`` when a niceness is set and ``nice`` is available.
         """
-        return [self.ffmpeg, "-nostdin", "-y", "-hide_banner", "-nostats",
-                "-progress", "pipe:1", "-threads", str(self.threads), "-i", src,
-                "-vcodec", "libx265", "-crf", str(self.crf), dst]
+        prefix: list[str] = []
+        nice = shutil.which("nice")
+        if self.niceness > 0 and nice:
+            prefix = [nice, "-n", str(self.niceness)]   # exec's ffmpeg: same process
+        return prefix + [
+            self.ffmpeg, "-nostdin", "-y", "-hide_banner", "-nostats",
+            "-progress", "pipe:1", "-threads", str(self.threads), "-i", src,
+            "-vcodec", "libx265", "-crf", str(self.crf),
+            "-x265-params", f"pools={self.threads}", dst]
 
     def encode(self, src: str, dst: str,
                on_progress: Callable[[float], None] | None = None) -> bool:

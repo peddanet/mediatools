@@ -59,7 +59,8 @@ class Cli:
         cmd.add_argument("--keep-copies", action="store_true",
                          help="do not replace originals; keep shrunk copies in newShrinkedFiles/")
         cmd.add_argument("--crf", type=int, default=28, help="libx265 CRF (default 28)")
-        cmd.add_argument("--threads", type=int, default=6, help="ffmpeg threads (default 6)")
+        cmd.add_argument("--threads", type=int, default=None,
+                         help="CPU threads for decoding and x265 (default: logical CPUs - 1)")
         cmd.add_argument("--ext", default="mp4", help="video extensions (default mp4)")
         cmd.add_argument("--order", choices=ShrinkOptions.ORDERS, default="largest",
                          help="processing order (default: largest files first)")
