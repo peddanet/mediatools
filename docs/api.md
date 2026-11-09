@@ -105,6 +105,17 @@ Returns:
     Exit code of :meth:`Shrinker.run` (0 if the user declined).
 ~~~
 
+**`cmd_stop`**
+
+~~~text
+cmd_stop(_args: argparse.Namespace) -> int
+
+Run ``mediatools stop``: request a stop of the running shrink.
+
+Returns:
+    0 if a running shrink was asked to stop, 1 if none runs.
+~~~
+
 **`cmd_progress`**
 
 ~~~text
@@ -554,6 +565,7 @@ Attributes:
     path: Location of the TSV file.
     entries: Mapping path to ``(size, mtime_ns, duration)``.
     hits: Number of lookups answered from the cache in this run.
+    added: Number of values stored since the last :meth:`save`.
 ~~~
 
 **`__init__`**
@@ -821,6 +833,7 @@ Attributes:
     stream: Output stream.
     started: Start time (monotonic seconds).
     enabled: True if the stream is a terminal.
+    note: Text shown at the start of the line, e.g. a pending stop.
 ~~~
 
 **`__init__`**
@@ -1002,6 +1015,102 @@ Returns:
     The stripped answer or ``default``.
 ~~~
 
+### `RunControl` (`mediatools.core.runcontrol`) {.unnumbered}
+
+~~~text
+Lets ``mediatools stop`` ask a running job to end after its current file.
+
+The running job writes its process ID to ``<data>/state/<name>.pid``.
+``mediatools stop`` checks that this process is alive and then creates
+``<data>/state/<name>.stop``; the job notices the file within
+:attr:`POLL_SECONDS`, finishes the current file and ends - exactly like
+the first Ctrl+C, but independent of which window has the keyboard
+focus. Both files are removed when the job ends; a stop file found at
+start (left by a crash) is removed as well.
+
+Attributes:
+    name: Job name, e.g. ``shrink``.
+    pid_file: Path of the PID file.
+    stop_file: Path of the stop-request file.
+    last_poll: Monotonic time of the last check for the stop file.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, name: str, data: DataDir | None = None)
+
+Locate the control files.
+
+Args:
+    name: Job name, e.g. ``shrink``.
+    data: Data directory; the default one if None.
+~~~
+
+**`start`**
+
+~~~text
+start(self) -> None
+
+Register the current process and drop a stale stop request.
+~~~
+
+**`finish`**
+
+~~~text
+finish(self) -> None
+
+Unregister the current process.
+~~~
+
+**`stop_requested`**
+
+~~~text
+stop_requested(self, force: bool = False) -> bool
+
+Tell whether a stop was requested, checking at most every POLL_SECONDS.
+
+Args:
+    force: Check now, ignoring the poll interval.
+
+Returns:
+    True if the stop file exists.
+~~~
+
+**`active_pid`**
+
+~~~text
+active_pid(self) -> int | None
+
+Return the process ID of the running job, if it is alive.
+
+Returns:
+    PID, or None if no job of this name runs.
+~~~
+
+**`request_stop`**
+
+~~~text
+request_stop(self) -> int | None
+
+Ask the running job to stop after its current file.
+
+Returns:
+    PID of the job that was asked, or None if none runs (then no
+    stop file is left behind that would stop the next run).
+~~~
+
+**`_remove`**
+
+~~~text
+_remove(path: str) -> None
+
+Delete a file if it exists.
+
+Args:
+    path: File to delete.
+~~~
+
 ### `RunLog` (`mediatools.core.runlog`) {.unnumbered}
 
 ~~~text
@@ -1060,7 +1169,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.2')
+__init__(self, package_dir: str | None = None, version: str = '1.2.3')
 
 Locate the imported package.
 
@@ -1725,6 +1834,12 @@ Returns:
     Always 0.
 ~~~
 
+### `ShrinkState` (`mediatools.shrink.shrinker`) {.unnumbered}
+
+~~~text
+Persistent helpers of a run: probe caches and measured throughput.
+~~~
+
 ### `Shrinker` (`mediatools.shrink.shrinker`) {.unnumbered}
 
 ~~~text
@@ -1746,7 +1861,8 @@ A run has two phases:
    result replaces the original (in place, the inode is kept, so
    ``_flat`` hard links see the new content) and is recorded.
 
-**Stopping.** The first Ctrl+C (or Ctrl+Z) lets the current file finish
+**Stopping.** The first Ctrl+C (or Ctrl+Z), or ``mediatools stop`` from
+another terminal (see :class:`RunControl`), lets the current file finish
 and then stops; the second Ctrl+C, SIGTERM or SIGHUP (terminal closed)
 aborts the current encode at once - its partial output is deleted, the
 original is untouched. Signals never interrupt the replacement itself.
@@ -1771,9 +1887,10 @@ Attributes:
     opts: What is processed and how (:class:`ShrinkOptions`).
     probe: Probe for codec and duration checks.
     encoder: Encoder for new files.
-    caches: ``durations`` (for ``min_seconds``) and ``codecs`` (for the
-        HEVC check of the plan); a value of None probes without caching.
-    throughput: Speed measurements for the time estimate.
+    state: Persistent helpers: ``durations`` (for ``min_seconds``) and
+        ``codecs`` (HEVC check of the plan) - None probes without caching -
+        and ``throughput`` (speed and size ratio for the estimates).
+    control: Stop requests from ``mediatools stop``, or None.
     databases: Open databases per directory.
     flags: ``stop`` (finish the current file, then stop) and ``abort``
         (stop the current file at once).
@@ -1893,6 +2010,29 @@ Returns:
     ``found["hevc"]``.
 ~~~
 
+**`_checkpoint`**
+
+~~~text
+_checkpoint(
+    self,
+    what: str,
+    cache: DurationCache | None,
+    number: int,
+    total: int,
+) -> None
+
+Report planning progress and store newly probed values.
+
+Saving every :attr:`CHECKPOINT` files keeps the probes of a long
+first check even if the run is interrupted during planning.
+
+Args:
+    what: ``durations`` or ``codecs``.
+    cache: The cache in use, or None.
+    number: Files checked so far.
+    total: Files to check.
+~~~
+
 **`_codec`**
 
 ~~~text
@@ -1935,6 +2075,20 @@ Args:
 Returns:
     0 on success or if declined, 1 if stopped by the user, 2 if a
     file failed.
+~~~
+
+**`_run`**
+
+~~~text
+_run(self, confirm: Callable[[], bool] | None) -> int
+
+Body of :meth:`run`.
+
+Args:
+    confirm: See :meth:`run`.
+
+Returns:
+    See :meth:`run`.
 ~~~
 
 **`_report_plan`**
@@ -2025,6 +2179,28 @@ Args:
     name: Current file name.
     fraction: Encoded fraction of the file.
     size: Its size in bytes.
+~~~
+
+**`_poll_stop`**
+
+~~~text
+_poll_stop(self, force: bool = False) -> None
+
+Turn a request of ``mediatools stop`` into a stop after this file.
+
+Args:
+    force: Check the stop file now, ignoring the poll interval.
+~~~
+
+**`_mark_stopping`**
+
+~~~text
+_mark_stopping(self, message: str) -> None
+
+Set the stop flag and show it in the log and on the progress line.
+
+Args:
+    message: Log message.
 ~~~
 
 **`_replace`**
