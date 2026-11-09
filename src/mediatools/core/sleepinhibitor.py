@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 import signal
-import subprocess  # nosec B404 - fixed argument list, no shell
+import subprocess
 import time
 
 
@@ -60,7 +60,7 @@ class SleepInhibitor:
         cmd = [inhibit, "--what=sleep:idle", "--who=mediatools", f"--why={self.why}",
                "--mode=block", tail, f"--pid={os.getpid()}", "-f", "/dev/null"]
         # the helper must outlive this method, so no 'with' block
-        self.proc = subprocess.Popen(  # nosec B603 pylint: disable=consider-using-with
+        self.proc = subprocess.Popen(  # pylint: disable=consider-using-with
             cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE, start_new_session=True)
         time.sleep(self.SETTLE_SECONDS)

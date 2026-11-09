@@ -26,7 +26,7 @@ from collections.abc import Callable
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-PACKAGES = ("core", "shrink", "triage", "flatten", "sync", "snapshot")
+PACKAGES = ("core", "shrink", "triage", "flatten", "sync", "snapshot", "update")
 
 
 class DocGenerator:
