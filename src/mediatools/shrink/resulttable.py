@@ -38,7 +38,7 @@ class ResultTable:
     """
 
     REPORT_WIDTH = 160
-    MIN_FILE = 20
+    MIN_FILE = 8
     COLUMNS = (("no", 4, ">"), ("end", 5, "<"), ("source", 8, ">"), ("result", 8, ">"),
                ("ratio", 7, ">"), ("length", 8, ">"), ("took", 8, ">"), ("status", 6, "<"))
 

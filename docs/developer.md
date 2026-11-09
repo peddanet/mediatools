@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.6 -- Developer Documentation"
+title: "mediatools 1.2.7 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -240,6 +240,14 @@ directory, configuration -- lives in `core`.
 | `LevelSchedule` | which higher levels are due, state file |
 | `Snapshotter` | check, adopt, init, run, status |
 | `SystemdTrigger` | user unit bound to the disk's mount unit |
+
+## Package `update`
+
+![update](img/uml_update.png){width=40%}
+
+| Class | Responsibility |
+|---|---|
+| `ReleaseUpdater` | `mediatools update`: runs the bundled `apply-release.sh` (see "Applying delivered patch archives") |
 
 ## Package `cli`
 
@@ -591,6 +599,41 @@ Merge commits (no squash, no rebase) keep every commit; `git log
 --first-parent main` lists exactly the releases. A hotfix branches from
 `main`, goes into `main` by pull request (tag `vX.Y.Z+1`) and back into
 `develop` as in step 3.
+
+# Applying delivered patch archives
+
+Hotfixes prepared outside the clone arrive as archives
+`mediatools-hotfix-X.Y.Z-patch.tar.gz` (output of `git format-patch`, one
+release per archive). `mediatools update` applies them. It runs the shell
+script `src/mediatools/update/apply-release.sh`, which is shipped inside the
+package (package data), so every installed release carries it; the same
+script serves every release:
+
+~~~bash
+mediatools update --list     # what is there, nothing changes
+mediatools update            # asks, then applies
+mediatools update -y         # all pending versions, no question
+~~~
+
+| Step | What happens |
+|---|---|
+| inventory | archives in `~/Downloads` (`--downloads DIR`); per version the most recently saved copy (browser copies `... (1).tar.gz`) |
+| classification | versions above the release on `main` are *pending*, the rest and older copies are *stale* |
+| choice | a version means "all pending versions up to it, in ascending order", because each patch builds on the release before it; Enter = all |
+| per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (pre-push gates) -> PR into `main` -> CI -> merge -> tag `vX` -> CI of the tag -> back-merge into `develop` via `merge/hotfix-X` |
+| install | `install.sh` (newest tag), then `mediatools --version` must name the last applied version |
+| tidying | used archives to `~/scripts/mediatools.d/releases/` (plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
+
+The script copies itself to `/tmp` and runs from there, because switching
+branches and the installation rewrite the script while bash is still
+reading it.
+It finds the clone next to itself (source checkout) or uses
+`~/Projects/mediatools` (`--repo DIR`). It logs to
+`~/scripts/mediatools.d/logs/apply-release_<ts>.log` and stops at the first
+failing command; nothing in the download folder is removed then, and the
+same command can be repeated (hotfix branch rebuilt, open pull request
+reused). It runs as a normal user; root would leave root-owned files in
+the clone.
 
 # Adding a subcommand
 

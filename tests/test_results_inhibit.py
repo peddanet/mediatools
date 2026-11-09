@@ -49,7 +49,7 @@ def test_row_layout_and_wrapping(tmp_path: Path) -> None:
     assert len(lines) > 1 and {len(line) for line in lines} == {110}
     assert "2860 MB" in lines[0] and "2860 MB" not in lines[1]
     head = table.head(60)                       # narrower than possible
-    assert [len(line) for line in head] == [102, 102, 102] and "│ file" in head[1]
+    assert [len(line) for line in head] == [90, 90, 90] and "│ file" in head[1]
     assert ResultTable.wrap("a/b/clip.mp4", 20) == ["a/b/clip.mp4"]
     assert ResultTable.wrap("folder name/x.mp4", 12) == ["folder name/", "x.mp4"]
     assert ResultTable.wrap("a" * 12, 5) == ["aaaaa", "aaaaa", "aa"]
