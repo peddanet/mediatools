@@ -127,6 +127,7 @@ classDiagram
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
+    -_broken(path, size)
     -_record_hevc()
     -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
@@ -149,6 +150,7 @@ classDiagram
     +codecs
     +throughput
     +results
+    +decode
   }
   class ThroughputLog {
     +path
