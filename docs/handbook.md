@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.1 -- Handbook"
+title: "mediatools 1.2.2 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -379,11 +379,16 @@ Before anything is encoded, the whole tree is walked once:
 3. With `--min-seconds`, the durations of the remaining videos are read
    (cached in `state/triage_durations.tsv`, shared with `triage`) and short
    ones are left out.
-4. The rest is sorted (`--order`), and the run reports, for example (numbers illustrative):
+4. The codec of every remaining video is read (cached in
+   `state/shrink_codecs.tsv`); videos that are already HEVC are set aside.
+   They are recorded after the start question without encoding and are not
+   counted in volume, time estimate and progress.
+5. The rest is sorted (`--order`), and the run reports, for example (numbers illustrative):
 
 ~~~text
-already processed (database): 12000 | shorter than 60 s: 1500 | to encode: 6500 files,
-560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+already processed (database): 12000 | shorter than 60 s: 1500 | already HEVC,
+recorded without encoding: 40 files, 85.0 GiB
+to encode: 6500 files, 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
 expected afterwards: about 215.6 GiB, saving about 344.4 GiB (output 38 % of the
 source, measured on 25 file(s))
 leftover work folders of aborted runs: 18 folder(s), 3 file(s), 0.4 GiB - deleted
@@ -442,7 +447,9 @@ ETA 2d21h |  63 % clip.mp4
 
 Percentage, volume and remaining time are measured in source bytes,
 because the encoding time grows with the file size, not with the number of
-files. The line is drawn only on a terminal; the log file receives the
+files. Files that need no encoding -- HEVC by now, e.g. a second hard link
+of a file shrunk earlier in the run -- are removed from the totals instead
+of being counted as done, so they do not inflate progress and speed. The line is drawn only on a terminal; the log file receives the
 normal messages.
 
 ## Database

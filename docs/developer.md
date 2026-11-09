@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.1 -- Developer Documentation"
+title: "mediatools 1.2.2 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"

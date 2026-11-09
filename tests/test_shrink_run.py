@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from conftest import make_file, read
+from mediatools.core.codeccache import CodecCache
 from mediatools.core.progressbar import ProgressBar
 from mediatools.shrink import ShrinkDatabase, Shrinker, ShrinkOptions, ThroughputLog
 
@@ -357,3 +358,112 @@ def test_size_forecast_from_measured_ratio(tmp_path: Path,
     with caplog.at_level(logging.INFO, logger="test"):
         shrinker.run(lambda: False)
     assert "expected afterwards: about" in caplog.text and "40 % of the source" in caplog.text
+
+
+class HevcProbe(FakeProbe):
+    """Probe double that reports HEVC for chosen file names."""
+
+    def __init__(self, hevc: set[str]) -> None:
+        """Store the HEVC names.
+
+        Args:
+            hevc: File names reported as HEVC.
+        """
+        super().__init__()
+        self.hevc = hevc
+        self.codec_calls = 0
+
+    def video_codec(self, path: str) -> str:
+        """Report HEVC for the chosen names, H.264 otherwise.
+
+        Args:
+            path: Video file.
+
+        Returns:
+            ``hevc`` or ``h264``.
+        """
+        self.codec_calls += 1
+        return "hevc" if os.path.basename(path) in self.hevc else "h264"
+
+
+def test_hevc_set_aside_in_plan_and_recorded_after_confirmation(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Already-HEVC videos are reported apart, never encoded, recorded only after yes.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        caplog: Log capture (fixture).
+    """
+    paths = videos(tmp_path)
+    probe = HevcProbe({"large.mp4"})
+    shrinker, encoder = build(tmp_path, probe=probe)
+    with caplog.at_level(logging.INFO, logger="test"):
+        assert shrinker.run(lambda: False) == 0
+    assert "already HEVC, recorded without encoding: 1 files" in caplog.text
+    assert "to encode: 2 files" in caplog.text
+    assert not ShrinkDatabase(str(tmp_path / "c/b")).is_done(paths["large.mp4"])
+    shrinker, encoder = build(tmp_path, probe=HevcProbe({"large.mp4"}))
+    shrinker.display = None                          # let the run size the display
+    assert shrinker.run(lambda: True) == 0
+    assert "large.mp4" not in encoder.calls and shrinker.stats["hevc"] == 1
+    assert ShrinkDatabase(str(tmp_path / "c/b")).is_done(paths["large.mp4"])
+    assert shrinker.display is not None and shrinker.display.total_files == 2
+    assert shrinker.display.total_bytes == 110
+
+
+def test_codec_cache_answers_repeated_plans(tmp_path: Path) -> None:
+    """A second plan takes the codecs from the cache.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    videos(tmp_path)
+    cache_file = str(tmp_path / "codecs.tsv")
+    probe = HevcProbe(set())
+    shrinker, _encoder = build(tmp_path, probe=probe)
+    shrinker.caches["codecs"] = CodecCache(cache_file)
+    shrinker.plan()
+    first = probe.codec_calls
+    probe2 = HevcProbe(set())
+    shrinker, _encoder = build(tmp_path, probe=probe2)
+    shrinker.caches["codecs"] = CodecCache(cache_file)
+    shrinker.plan()
+    assert first == 3 and probe2.codec_calls == 0
+
+
+def test_file_hevc_by_now_is_removed_from_progress_totals(tmp_path: Path) -> None:
+    """A file that became HEVC during the run (hard link) leaves the totals.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    videos(tmp_path)
+
+    class LateHevc(FakeProbe):
+        """H.264 while planning, HEVC when the file is processed."""
+
+        def __init__(self) -> None:
+            """Start in planning mode."""
+            super().__init__()
+            self.calls = 0
+
+        def video_codec(self, path: str) -> str:
+            """Report H.264 for the three plan probes, then HEVC for small.mp4.
+
+            Args:
+                path: Video file.
+
+            Returns:
+                Codec name.
+            """
+            self.calls += 1
+            if self.calls > 3 and os.path.basename(path) == "small.mp4":
+                return "hevc"
+            return "h264"
+
+    shrinker, encoder = build(tmp_path, probe=LateHevc())
+    shrinker.display = None                          # let the run size the display
+    assert shrinker.run() == 0
+    assert "small.mp4" not in encoder.calls and shrinker.stats["hevc"] == 1
+    assert shrinker.display is not None
+    assert shrinker.display.total_files == 2 and shrinker.display.done_files == 2

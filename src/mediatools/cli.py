@@ -9,6 +9,7 @@ import sys
 
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
+from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
@@ -226,7 +227,8 @@ class Cli:
         durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
         opts = ShrinkOptions(args.keep_copies, MediaTypes.parse_extensions(args.ext),
                              config.db_name(), args.order, args.min_seconds)
-        shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations)
+        codecs = CodecCache(os.path.join(DataDir().sub("state"), "shrink_codecs.tsv"))
+        shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations, codecs=codecs)
         shrinker.install_signal_handlers()
         prompt = Prompt(args.yes)
         return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
