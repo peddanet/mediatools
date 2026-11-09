@@ -70,10 +70,12 @@ classDiagram
     +started
     +enabled
     +note
+    +drawn
     +init(total_bytes, total_files, initial_rate, stream)
     +rate(current_bytes)
     +remaining_seconds(current_bytes)
-    +line(name, file_fraction, file_bytes)
+    +line(_name, file_fraction, file_bytes)
+    +file_line(name, file_fraction, file_bytes, width)
     +show(name, file_fraction, file_bytes)
     +file_done(size)
     +file_skipped(size)
