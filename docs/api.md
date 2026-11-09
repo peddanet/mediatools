@@ -974,7 +974,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.0')
+__init__(self, package_dir: str | None = None, version: str = '1.2.1')
 
 Locate the imported package.
 
@@ -1315,6 +1315,15 @@ The output is accepted only if ffmpeg exits with 0, the file is not
 empty, it contains a video stream and its duration matches the input
 within ``max(TOL_ABS, duration * TOL_REL)`` seconds.
 
+**CPU use.** libx265 runs its own thread pool, which by default uses
+every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
+decoder (``-threads``) and the x265 pool (``-x265-params pools=N``) are
+therefore set to ``threads``, by default one less than the number of
+logical CPUs, so that one CPU stays free. In addition ffmpeg runs with
+the lowest CPU priority (``nice`` 19): it still uses every idle CPU,
+but yields at once when the user works, so the desktop stays
+responsive.
+
 ffmpeg runs in its own session (process group): a Ctrl+C in the
 terminal reaches only mediatools, which decides whether the current
 encode finishes or is stopped with :meth:`abort`. Progress is read from
@@ -1323,7 +1332,8 @@ are logged on failure.
 
 Attributes:
     crf: libx265 constant rate factor.
-    threads: ffmpeg ``-threads`` value.
+    threads: Decoder threads and size of the x265 thread pool.
+    niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
     probe: :class:`MediaProbe` used for validation.
     log: Optional logger.
     ffmpeg: Name or path of the ffmpeg executable.
@@ -1337,20 +1347,34 @@ Attributes:
 __init__(
     self,
     crf: int = 28,
-    threads: int = 6,
+    threads: int | None = None,
     probe: MediaProbe | None = None,
     logger=None,
     ffmpeg: str = 'ffmpeg',
+    niceness: int = 19,
 )
 
 Configure the encoder.
 
 Args:
     crf: libx265 constant rate factor (28 is the libx265 default).
-    threads: ffmpeg ``-threads`` value.
+    threads: Decoder threads and x265 pool size; None uses
+        :meth:`default_threads`.
     probe: Probe for validation; a new one if None.
     logger: Optional :class:`logging.Logger`.
     ffmpeg: Name or path of the ffmpeg executable.
+    niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
+~~~
+
+**`default_threads`**
+
+~~~text
+default_threads() -> int
+
+Return the default thread count: logical CPUs minus one.
+
+Returns:
+    At least 1.
 ~~~
 
 **`command`**
@@ -1365,7 +1389,8 @@ Args:
     dst: Output file.
 
 Returns:
-    Argument list for :func:`subprocess.run`.
+    Argument list for :func:`subprocess.run`; prefixed with
+    ``nice -n N`` when a niceness is set and ``nice`` is available.
 ~~~
 
 **`encode`**
@@ -1622,7 +1647,8 @@ Shrinks the videos below a directory and keeps their file names.
 A run has two phases:
 
 1. **Plan** - walk the tree, finish replacements interrupted by a crash
-   (journal, see below), and collect every video that is not yet
+   (journal, see below), note leftover ``newShrinkedFiles/`` folders of
+   earlier aborted runs, and collect every video that is not yet
    recorded in its directory's database. The database always has
    precedence: a recorded file counts as processed, whatever its codec.
    Optionally drop videos shorter than ``min_seconds`` and sort the rest
@@ -1633,15 +1659,20 @@ A run has two phases:
    ``_flat`` hard links see the new content) and is recorded.
 
 **Stopping.** The first Ctrl+C (or Ctrl+Z) lets the current file finish
-and then stops; the second Ctrl+C (or SIGTERM) aborts the current
-encode at once - its partial output is deleted, the original is
-untouched. Signals never interrupt the replacement itself.
+and then stops; the second Ctrl+C, SIGTERM or SIGHUP (terminal closed)
+aborts the current encode at once - its partial output is deleted, the
+original is untouched. Signals never interrupt the replacement itself.
 
-**Crash safety.** Before an original is overwritten, a marker
-``newShrinkedFiles/<name>.replace`` is written; it is removed after the
-copy has been flushed to disk and recorded. If the machine fails in
-between, the next run finds the marker next to the validated output and
-repeats the copy before anything else.
+**Crash safety.** The validated output is flushed to disk, then a
+marker ``newShrinkedFiles/<name>.replace`` is written and flushed, and
+the directory entry is flushed; only then is the original overwritten.
+The marker is removed after the copy has been flushed and recorded. If
+the machine fails in between, the next run finds the marker next to the
+complete output and repeats the copy before anything else.
+
+**Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
+hold only partial outputs of aborted runs. They are listed in the plan
+summary and deleted only after the start question is confirmed.
 
 With ``keep_copies=True`` the originals are not touched and nothing is
 recorded; the shrunk copies stay in ``newShrinkedFiles/`` for review.
@@ -1660,7 +1691,8 @@ Attributes:
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
         ``failed``, ``copies``, ``recovered``.
-    failed: Paths that could not be encoded.
+    found: ``failed`` - paths that could not be encoded; ``leftovers`` -
+        ``(folder, files, bytes)`` of leftover work folders.
 ~~~
 
 **`__init__`**
@@ -1696,7 +1728,7 @@ Args:
 ~~~text
 install_signal_handlers(self) -> None
 
-Route SIGINT, SIGTERM and SIGTSTP to :meth:`on_signal`.
+Route SIGINT, SIGTERM, SIGHUP and SIGTSTP to :meth:`on_signal`.
 ~~~
 
 **`on_signal`**
@@ -1704,10 +1736,11 @@ Route SIGINT, SIGTERM and SIGTSTP to :meth:`on_signal`.
 ~~~text
 on_signal(self, signum: int, _frame: object = None) -> None
 
-First Ctrl+C: stop after this file; second Ctrl+C or SIGTERM: abort now.
+First Ctrl+C: stop after this file; second Ctrl+C, SIGTERM, SIGHUP: abort now.
 
 Only flags are set and ffmpeg is told to stop; no exception is
-raised, so a running replacement always completes.
+raised, so a running replacement always completes. After SIGHUP the
+terminal is gone, so the progress line is switched off.
 
 Args:
     signum: Number of the received signal.
@@ -1783,6 +1816,19 @@ Returns:
     file failed.
 ~~~
 
+**`_report_plan`**
+
+~~~text
+_report_plan(self, todo: list[tuple[str, int]], total: int, rate: float | None) -> None
+
+Log the plan summary with time and size estimates and leftovers.
+
+Args:
+    todo: Planned videos.
+    total: Their total size in bytes.
+    rate: Measured speed in source bytes per second, or None.
+~~~
+
 **`_attach_bar_filter`**
 
 ~~~text
@@ -1843,9 +1889,12 @@ _replace(self, out: str, path: str, database: ShrinkDatabase) -> None
 
 Copy a validated output over the original and record it.
 
-Order: marker, copy into the existing inode, flush to disk, record,
-delete output, delete marker. A crash at any point leaves either the
-untouched original or the marker plus the validated output.
+Order: flush the output, write and flush the marker, flush the
+directory entry, copy into the existing inode, flush, record, delete
+output, delete marker. A crash at any point leaves either the
+untouched original or the marker plus the complete validated output;
+repeating the copy is harmless, so a crash after step 5 only causes
+one more identical copy on the next run.
 
 Args:
     out: Validated output in ``newShrinkedFiles/``.
@@ -1864,15 +1913,59 @@ Args:
     dirpath: Directory whose ``newShrinkedFiles`` is checked.
 ~~~
 
-**`_remove_tmp`**
+**`_note_leftover`**
 
 ~~~text
-_remove_tmp(self, dirpath: str) -> None
+_note_leftover(self, dirpath: str) -> None
 
-Delete the temporary output directory of one directory.
+Remember a leftover work folder for the plan summary.
 
 Args:
-    dirpath: Directory whose ``newShrinkedFiles`` is removed.
+    dirpath: Directory whose ``newShrinkedFiles`` is checked.
+~~~
+
+**`_remove_leftovers`**
+
+~~~text
+_remove_leftovers(self) -> None
+
+Delete the leftover work folders noted during planning.
+~~~
+
+**`_size_or_none`**
+
+~~~text
+_size_or_none(path: str) -> int | None
+
+Return a file's size.
+
+Args:
+    path: File.
+
+Returns:
+    Size in bytes, or None if it cannot be read.
+~~~
+
+**`_fsync_file`**
+
+~~~text
+_fsync_file(path: str) -> None
+
+Force a file's content to disk.
+
+Args:
+    path: File.
+~~~
+
+**`_fsync_dir`**
+
+~~~text
+_fsync_dir(path: str) -> None
+
+Force a directory's entries (file creations) to disk.
+
+Args:
+    path: Directory.
 ~~~
 
 **`_remove_quietly`**
@@ -1897,17 +1990,23 @@ Log the summary.
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}
 
 ~~~text
-Accumulates how many source bytes were encoded in how many seconds.
+Accumulates encoding speed and size reduction of finished files.
 
-The ratio (source bytes per second of encoding) depends on CPU, codec
-settings and material; measured on the user's own machine it is the
-best basis for estimating the remaining time. Stored as JSON
-``{"bytes": int, "seconds": float}`` in ``<data>/state/``.
+Speed (source bytes per second of encoding) and size ratio (output
+bytes per source byte) depend on CPU, codec settings and material;
+measured on the user's own machine they are the best basis for the
+estimates shown before a run. Stored as JSON in ``<data>/state/``:
+``{"bytes", "seconds"}`` for the speed and ``{"ratio_src", "ratio_out",
+"files"}`` for the size ratio (the ratio keys were added in 1.2.1, so
+older files carry only the speed).
 
 Attributes:
     path: Location of the JSON file.
     bytes: Accumulated source bytes.
     seconds: Accumulated encoding seconds.
+    ratio_src: Source bytes of the files whose output size is known.
+    ratio_out: Output bytes of those files.
+    files: Number of those files.
 ~~~
 
 **`__init__`**
@@ -1932,16 +2031,28 @@ Returns:
     Source bytes per second, or None without measurements.
 ~~~
 
+**`ratio`**
+
+~~~text
+ratio(self) -> float | None
+
+Return the measured size ratio.
+
+Returns:
+    Output bytes per source byte, or None without measurements.
+~~~
+
 **`add`**
 
 ~~~text
-add(self, size: int, seconds: float) -> None
+add(self, size: int, seconds: float, out_size: int | None = None) -> None
 
 Add one encoded file and save.
 
 Args:
     size: Source size in bytes.
     seconds: Encoding time in seconds.
+    out_size: Output size in bytes; None leaves the ratio unchanged.
 ~~~
 
 **`duration_text`**

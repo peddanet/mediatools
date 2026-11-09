@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.2.0 -- Handbook"
+title: "mediatools 1.2.1 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
-date: "2026-11-08"
+date: "2026-11-09"
 lang: en-GB
 abstract: |
   mediatools is a Python package (standard library only) with subcommands
@@ -362,7 +362,7 @@ mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 | `--min-seconds S` | 0 | leave out videos shorter than S seconds |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
-| `--threads N` | 6 | ffmpeg threads |
+| `--threads N` | CPUs - 1 | decoder threads and size of the x265 thread pool |
 | `--ext LIST` | `mp4` | extensions to process |
 | `-y` | off | no confirmation question |
 | `-v` | off | debug logging |
@@ -371,7 +371,8 @@ mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 
 Before anything is encoded, the whole tree is walked once:
 
-1. Interrupted replacements are completed (see *Interruption*).
+1. Interrupted replacements are completed (see *Interruption*); remaining
+   `newShrinkedFiles/` folders are noted as leftovers of aborted runs.
 2. Every video is checked against the database of its directory; recorded
    files are counted as processed and left out. 0-byte placeholders are
    ignored.
@@ -383,12 +384,19 @@ Before anything is encoded, the whole tree is walked once:
 ~~~text
 already processed (database): 12000 | shorter than 60 s: 1500 | to encode: 6500 files,
 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+expected afterwards: about 215.6 GiB, saving about 344.4 GiB (output 38 % of the
+source, measured on 25 file(s))
+leftover work folders of aborted runs: 18 folder(s), 3 file(s), 0.4 GiB - deleted
+after confirmation
 Start encoding and REPLACE the originals? [y/N]
 ~~~
 
-The estimate uses `state/shrink_throughput.json` (source bytes and encoding
-seconds of all earlier runs); during the run the measured speed of the run
-itself takes over.
+The estimates use `state/shrink_throughput.json`: source bytes and encoding
+seconds (speed) and, since 1.2.1, source and output bytes of the encoded
+files (size ratio). Before the first measured file the line says "not yet
+known". During the run the measured speed of the run itself takes over.
+Leftover folders are listed one by one with `-v`; answering "no" keeps
+them.
 
 ## Decision per file
 
@@ -403,9 +411,16 @@ itself takes over.
 3. **Encode and validate.** `HevcEncoder` runs
 
    ~~~text
-   ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 -threads 6 \
-          -i SRC -vcodec libx265 -crf 28 TMP
+   nice -n 19 ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 \
+          -threads N -i SRC -vcodec libx265 -crf 28 -x265-params pools=N TMP
    ~~~
+
+   `N` is the number of logical CPUs minus one (`--threads`). `-threads`
+   before `-i` sets the decoder threads; libx265 runs its own thread pool,
+   which ffmpeg's `-threads` does not limit and which would otherwise use
+   every CPU, so `pools=N` caps it. One CPU stays free for the desktop.
+   `nice -n 19` gives ffmpeg the lowest CPU priority: it still uses idle
+   CPUs, but yields at once to interactive programs.
 
    in its own process group and accepts the result only if the exit code
    is 0, the output is not empty, has a video stream, and its duration
@@ -463,7 +478,7 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 | Event | Behaviour |
 |---|---|
 | Ctrl+C (or Ctrl+Z) once | the current file is finished, validated, copied and recorded; then the run stops |
-| Ctrl+C a second time, SIGTERM | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
+| Ctrl+C a second time, SIGTERM, SIGHUP (terminal closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
 | power failure, kill -9 | see the replacement journal below |
 | ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
 
@@ -473,12 +488,24 @@ sets flags and never raises an exception, so a replacement in progress
 always completes.
 
 **Replacement journal.** Overwriting an original is the only moment in
-which data could be lost. The sequence is: write the marker
-`newShrinkedFiles/<name>.replace`, copy the validated output into the
-original, flush it to disk (`fsync`), record it, delete the output, delete
-the marker. If the machine fails anywhere in between, the next run finds the
-marker next to the validated output and repeats the copy before it plans
-anything else. Without a marker, the original was never touched.
+which data could be lost. The sequence is:
+
+1. flush the validated output to disk (`fsync`),
+2. write the marker `newShrinkedFiles/<name>.replace` and flush it,
+3. flush the directory `newShrinkedFiles/`, so that the marker's directory
+   entry is on disk as well,
+4. copy the output into the original (same inode),
+5. flush the original,
+6. record it in the database,
+7. delete the output, delete the marker.
+
+Steps 1-3 guarantee that a marker found after a power failure always comes
+with a complete output; without them the file system could have written
+the first part of the copy (step 4) while the marker or the output was
+still only in memory. If the machine fails anywhere between steps 4 and 7,
+the next run finds the marker next to the output and repeats the copy
+before it plans anything else; repeating it is harmless. Without a marker,
+the original was never touched.
 
 Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed.
 
