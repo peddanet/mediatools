@@ -5,6 +5,16 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-09
+
+### Fixed
+- Progress line and time estimate no longer count videos that need no
+  encoding: already-HEVC videos are set aside during planning (codec cached
+  in `state/shrink_codecs.tsv`), reported separately, recorded after the
+  start question, and files that became HEVC during the run (hard links of
+  a file shrunk earlier) are removed from the totals. In `--keep-copies`
+  mode HEVC videos are no longer recorded either.
+
 ## [1.2.1] - 2026-11-09
 
 ### Fixed
