@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.3 -- Handbook"
+title: "mediatools 1.2.4 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -445,19 +445,26 @@ them.
 
 ## Progress display
 
-(numbers illustrative; on screen this is one line)
+(numbers illustrative)
 
 ~~~text
-[#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB |
-ETA 2d21h |  63 % clip.mp4
+total [#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB | ETA 2d21h
+file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
 ~~~
+
+The first line covers the whole run, the second the file being encoded:
+its percentage, its size, the part already encoded and its remaining time
+at the current speed. Both lines are redrawn in place and cut to the
+terminal width (a long file name is shortened in the middle), so a narrow
+window does not fill up with lines.
 
 Percentage, volume and remaining time are measured in source bytes,
 because the encoding time grows with the file size, not with the number of
 files. Files that need no encoding -- HEVC by now, e.g. a second hard link
 of a file shrunk earlier in the run -- are removed from the totals instead
-of being counted as done, so they do not inflate progress and speed. The line is drawn only on a terminal; the log file receives the
-normal messages.
+of being counted as done, so they do not inflate progress and speed. The
+lines are drawn only on a terminal; the log file receives the normal
+messages.
 
 ## Database
 
@@ -509,7 +516,7 @@ mediatools stop
 The command checks that a shrink run is alive (PID file
 `state/shrink.pid` in the data directory), creates `state/shrink.stop` and
 returns at once. The run checks for this file every 2 seconds, shows
-`STOPPING after this file` at the start of its progress line, completes the
+`STOPPING after this file` at the start of its first progress line, completes the
 current file and ends with exit code 1. If no run is active, the command
 prints `no shrink run is active - nothing to stop`, returns 1 and leaves no
 file behind, so a later run is not stopped by mistake. A stop file left by
