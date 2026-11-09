@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.9 -- Handbook"
+title: "mediatools 1.2.10 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -306,6 +306,7 @@ src/mediatools/
     mediatypes.py     MediaTypes       extensions, reserved directory names
     probe.py          MediaProbe       ffprobe wrapper (duration, codec)
     decodecheck.py    DecodeCheck      trial decode: finds videos that cannot be decoded
+    selfrestart.py    SelfRestart      switch a running job to the installed release
     walker.py         TreeWalker       sorted os.walk with skip rules
     prompt.py         Prompt           yes/no and text questions, --yes support
   shrink/
@@ -371,6 +372,7 @@ mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 mediatools shrink ~/Pictures/collection --foreground          # stay in this terminal
 mediatools attach                                             # (alias: front) watch the background run
 mediatools stop                                               # finish the current file, then end
+mediatools reload                                             # switch a running shrink to the installed release
 ~~~
 
 | Option | Default | Meaning |
@@ -651,6 +653,35 @@ shrink is already running (pid 12345) - watch it with 'mediatools attach', stop 
 
 A PID file left by a crashed run does not block: only a living process
 counts.
+
+**New release during a run.** `mediatools update` installs a new release
+and then calls `mediatools reload`; the command can also be given by hand
+after any installation. The running shrink finishes its current file and
+then switches, without ending the run:
+
+1. Between two files -- never during an encode or a replacement -- it finds
+   the request file `state/shrink.restart`.
+2. It starts the installed release once with `--version`. If that fails, or
+   the version is the one already running, the request is dropped, a line
+   is logged and the run continues unchanged.
+3. Otherwise it closes its result table, logs its summary and the line
+   `switching from mediatools A to B now`, and replaces itself
+   (`os.execv`) by `python -m mediatools shrink` of the same installation
+   with the same options plus `--foreground -y`. The process keeps its PID,
+   session and console file; `mediatools attach` and `mediatools stop` keep
+   working, the log file is continued.
+4. The new release plans again. Every file finished so far is in the
+   databases, durations and codecs come from the caches, so planning takes
+   seconds and the run continues with the files left. It asks no question
+   (the run was confirmed) and starts a new result table.
+
+The first switch is possible from a running 1.2.10 on: a run of an older
+release does not know the request and simply finishes with its own code
+-- nothing is mixed, because mediatools loads all its modules at start.
+![Release switch of a running shrink](img/seq_reload.png){width=100%}
+
+`mediatools reload` without a running shrink prints `no shrink run is
+active - nothing to reload` and returns 1.
 
 Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
 reaches only mediatools, which decides what happens. The signal handler only

@@ -19,6 +19,7 @@ from mediatools.core.prompt import Prompt
 from mediatools.core.runcontrol import RunControl
 from mediatools.core.sleepinhibitor import SleepInhibitor
 from mediatools.core.runlog import RunLog
+from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.versioninfo import VersionInfo
 from mediatools.flatten import FlatPlan, Flattener
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
@@ -43,6 +44,7 @@ class Cli:
     def __init__(self):
         """Build the argument parser."""
         self.parser = self._build_parser()
+        self.argv: list[str] = []
 
     # -- parser ----------------------------------------------------------
     @staticmethod
@@ -75,7 +77,10 @@ class Cli:
                               "by default they are left out while their size is unchanged")
         cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
         cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+        cmd.add_argument("--continue-log", help=argparse.SUPPRESS)   # set by a release switch
 
+        sub.add_parser("reload", help="ask a running shrink to switch to the newly installed "
+                                      "release after its current file; returns at once")
         sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
                                     "after its current file; returns at once")
         cmd = sub.add_parser("update", help="apply delivered release patches from the download "
@@ -196,7 +201,8 @@ class Cli:
         Returns:
             Process exit code.
         """
-        args, extra = self.parser.parse_known_args(argv)
+        self.argv = list(argv) if argv is not None else sys.argv[1:]
+        args, extra = self.parser.parse_known_args(self.argv)
         # argparse cannot assign an optional positional that follows an
         # option ("rename-db OLD --dry-run PATH"); accept exactly that case
         for name in ("path", "source"):
@@ -257,7 +263,7 @@ class Cli:
             if another shrink run is still active.
         """
         active = RunControl("shrink").active_pid()
-        if active is not None:
+        if active is not None and active != os.getpid():   # own PID: after a release switch
             print(f"shrink is already running (pid {active}) - watch it with "
                   f"'mediatools attach', stop it with 'mediatools stop'")
             return 3
@@ -265,7 +271,7 @@ class Cli:
         root = self._dir(config.require_path("collection", "root", args.path))
         self._need("ffmpeg", "ffprobe")
         mode = "keep shrunk copies" if args.keep_copies else "REPLACE the originals"
-        run = RunLog("shrink", args.verbose)
+        run = RunLog("shrink", args.verbose, continue_path=args.continue_log)
         probe = MediaProbe()
         encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck())
         durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
@@ -282,9 +288,49 @@ class Cli:
             shutil.get_terminal_size().columns - 1)
         shrinker.state["decode"] = DecodeCheck()
         shrinker.state["ffmpeg_logs"] = os.path.join(DataDir().sub("logs"), "ffmpeg")
+        restart = SelfRestart(self.argv, run.path)
+        shrinker.state["restart"] = restart
         shrinker.install_signal_handlers()
         prompt = Prompt(args.yes)
-        return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
+        code = shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
+        if code == Shrinker.RESTART:
+            return self._switch_release(restart, run)
+        return code
+
+    @staticmethod
+    def _switch_release(restart: SelfRestart, run: RunLog) -> int:
+        """Replace this process by the installed release (see :class:`SelfRestart`).
+
+        Args:
+            restart: Command line and log of the new process.
+            run: Log of this run; closed before the switch.
+
+        Returns:
+            1 - only if the new process could not be started.
+        """
+        run.logger.info("starting the installed release: %s", " ".join(restart.command()))
+        run.close()
+        try:
+            restart.execute()
+        except OSError as err:
+            print(f"switch to the installed release failed ({err}) - run "
+                  f"'mediatools shrink' again to continue", file=sys.stderr)
+        return 1
+
+    @staticmethod
+    def cmd_reload(_args: argparse.Namespace) -> int:
+        """Run ``mediatools reload``: ask the running shrink to switch releases.
+
+        Returns:
+            0 if a running shrink was asked, 1 if none runs.
+        """
+        pid = RunControl("shrink").request_restart()
+        if pid is None:
+            print("no shrink run is active - nothing to reload")
+            return 1
+        print(f"reload requested: shrink (pid {pid}) switches to the installed release "
+              f"after its current file")
+        return 0
 
     @staticmethod
     def cmd_stop(_args: argparse.Namespace) -> int:

@@ -13,6 +13,7 @@ classDiagram
   class ShrinkPlanner { +plan(stopped) list }
   class ReplaceJournal { +replace(out,p,db) +recover(dir) int }
   class DecodeCheck { +unusable(p) int }
+  class SelfRestart { +installed_version() str +execute() }
   class HevcEncoder { +encode(src,dst) +validate(src,dst) }
   class ProgressReport { +run() int }
   class DatabaseRenamer { +plan() +apply(plan) }
@@ -46,6 +47,7 @@ classDiagram
   Shrinker --> HevcEncoder
   Shrinker --> ShrinkPlanner
   Shrinker --> DecodeCheck
+  Shrinker --> SelfRestart
   ShrinkPlanner --> TreeWalker
   ShrinkPlanner --> ReplaceJournal
   ShrinkPlanner --> ShrinkDatabase
