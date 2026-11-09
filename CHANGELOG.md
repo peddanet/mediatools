@@ -5,6 +5,13 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.5] - 2026-11-09
+
+### Added
+- Every log file names the running version and process ID in its second
+  line, e.g. `mediatools 1.2.5 (pid 12345)`, so a log shows which release
+  produced it.
+
 ## [1.2.4] - 2026-11-09
 
 ### Changed

@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 from mediatools.core.datadir import DataDir
+from mediatools.core.versioninfo import VersionInfo
 
 
 class RunLog:
     """Logger that writes to stdout and to a time-stamped log file.
 
     The terminal shows plain messages; the file additionally contains
-    timestamp and level of every line.
+    timestamp and level of every line. The first two lines name the log
+    file and the running version with its process ID, so every log tells
+    which release produced it.
 
     Example:
         >>> run = RunLog("shrink")
@@ -51,6 +55,7 @@ class RunLog:
         self.logger.addHandler(file_handler)
         self.logger.addHandler(stream_handler)
         self.logger.info("log file: %s", self.path)
+        self.logger.info("mediatools %s (pid %i)", VersionInfo().describe(), os.getpid())
 
     def close(self) -> None:
         """Flush and close all handlers (important in tests)."""

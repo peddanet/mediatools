@@ -1148,7 +1148,9 @@ Args:
 Logger that writes to stdout and to a time-stamped log file.
 
 The terminal shows plain messages; the file additionally contains
-timestamp and level of every line.
+timestamp and level of every line. The first two lines name the log
+file and the running version with its process ID, so every log tells
+which release produced it.
 
 Example:
     >>> run = RunLog("shrink")
@@ -1200,7 +1202,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.4')
+__init__(self, package_dir: str | None = None, version: str = '1.2.5')
 
 Locate the imported package.
 
