@@ -11,6 +11,7 @@ import pytest
 
 from conftest import make_file, read
 from mediatools.core.codeccache import CodecCache
+from mediatools.core.durationcache import DurationCache
 from mediatools.core.progressbar import ProgressBar
 from mediatools.shrink import ShrinkDatabase, Shrinker, ShrinkOptions, ThroughputLog
 
@@ -421,14 +422,47 @@ def test_codec_cache_answers_repeated_plans(tmp_path: Path) -> None:
     cache_file = str(tmp_path / "codecs.tsv")
     probe = HevcProbe(set())
     shrinker, _encoder = build(tmp_path, probe=probe)
-    shrinker.caches["codecs"] = CodecCache(cache_file)
+    shrinker.state["codecs"] = CodecCache(cache_file)
     shrinker.plan()
     first = probe.codec_calls
     probe2 = HevcProbe(set())
     shrinker, _encoder = build(tmp_path, probe=probe2)
-    shrinker.caches["codecs"] = CodecCache(cache_file)
+    shrinker.state["codecs"] = CodecCache(cache_file)
     shrinker.plan()
     assert first == 3 and probe2.codec_calls == 0
+
+
+def test_plan_saves_probes_at_checkpoints_and_logs_cache_hits(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Probes are stored during planning, not only at its end; hits are logged.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        caplog: Log capture (fixture).
+        monkeypatch: Patch helper (fixture).
+    """
+    videos(tmp_path)
+    cache_file = tmp_path / "durations.tsv"
+    shrinker, _encoder = build(tmp_path, ShrinkOptions(min_seconds=1))
+    monkeypatch.setattr(Shrinker, "CHECKPOINT", 2)
+    durations = DurationCache(str(cache_file))
+    shrinker.state["durations"] = durations
+    saved: list[int] = []
+    real_save = durations.save
+
+    def counting_save() -> None:
+        saved.append(len(durations.entries))
+        real_save()
+
+    durations.save = counting_save                           # type: ignore[method-assign]
+    shrinker.plan()
+    assert saved == [1, 3]                 # at file 2 (before probing it) and at the end
+    shrinker, _encoder = build(tmp_path, ShrinkOptions(min_seconds=1))
+    shrinker.state["durations"] = DurationCache(str(cache_file))
+    caplog.set_level(logging.INFO, logger="test")
+    shrinker.plan()
+    assert "checking durations: 3 of 3 (3 from cache)" in caplog.text
 
 
 def test_file_hevc_by_now_is_removed_from_progress_totals(tmp_path: Path) -> None:

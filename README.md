@@ -228,7 +228,7 @@ Then make a backup and start the real work:
 ```bash
 mediatools sync                          # back up; asks for the disk, shows a dry run first
 mediatools triage --max-seconds 30       # discard unwanted short clips first
-mediatools shrink                        # largest files first; Ctrl+C stops cleanly
+mediatools shrink                        # largest files first; Ctrl+C or 'mediatools stop' stops cleanly
 mediatools flatten                       # create the flat hard-link views
 ```
 
@@ -268,7 +268,8 @@ time (measured speed of this and earlier runs).
 
 | Key | Effect |
 |---|---|
-| Ctrl+C once | finish the current file, record it, stop |
+| `mediatools stop` (any other terminal) | finish the current file, record it, stop - independent of keyboard focus |
+| Ctrl+C once | the same as `mediatools stop` |
 | Ctrl+C twice | abort the current file at once - its original stays untouched |
 | terminal closed | like Ctrl+C twice |
 
@@ -506,6 +507,7 @@ mediatools.ini   configuration
 venv/      installed release (install.sh)
 logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
 state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
+           shrink_codecs.tsv, shrink.pid, shrink.stop (only while stopping),
            shrink_throughput.json, sync_targets.json, snapshot_levels.json
 plans/     flatten_<ts>.tsv  (input for --undo)
 reports/   progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
