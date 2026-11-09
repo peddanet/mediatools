@@ -124,6 +124,18 @@ class ProgressBar:
         self.done_files += 1
         self.done_bytes += size
 
+    def file_skipped(self, size: int) -> None:
+        """Remove a file that needed no encoding from the totals.
+
+        Such files (already HEVC, recorded meanwhile) cost no encoding time;
+        counting them as done would inflate progress and speed.
+
+        Args:
+            size: Its source size in bytes.
+        """
+        self.total_files = max(0, self.total_files - 1)
+        self.total_bytes = max(1, self.total_bytes - size)
+
     def clear(self) -> None:
         """Remove the status line before a log message is printed."""
         if self.enabled:

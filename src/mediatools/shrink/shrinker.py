@@ -9,6 +9,7 @@ import signal
 import time
 from collections.abc import Callable
 
+from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
@@ -30,7 +31,9 @@ class Shrinker:
        earlier aborted runs, and collect every video that is not yet
        recorded in its directory's database. The database always has
        precedence: a recorded file counts as processed, whatever its codec.
-       Optionally drop videos shorter than ``min_seconds`` and sort the rest
+       Optionally drop videos shorter than ``min_seconds``, set aside videos
+       that are already HEVC (recorded after the start question, never
+       encoded, not counted in volume and time) and sort the rest
        (``largest`` first, ``smallest`` first or walk order ``path``).
     2. **Encode** - per file: already HEVC -> record only; otherwise
        :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
@@ -62,7 +65,8 @@ class Shrinker:
         opts: What is processed and how (:class:`ShrinkOptions`).
         probe: Probe for codec and duration checks.
         encoder: Encoder for new files.
-        durations: Duration cache for ``min_seconds``.
+        caches: ``durations`` (for ``min_seconds``) and ``codecs`` (for the
+            HEVC check of the plan); a value of None probes without caching.
         throughput: Speed measurements for the time estimate.
         databases: Open databases per directory.
         flags: ``stop`` (finish the current file, then stop) and ``abort``
@@ -71,7 +75,8 @@ class Shrinker:
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
             ``failed``, ``copies``, ``recovered``.
         found: ``failed`` - paths that could not be encoded; ``leftovers`` -
-            ``(folder, files, bytes)`` of leftover work folders.
+            ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
+            ``(path, size)`` of planned videos that are already HEVC.
     """
 
     MARKER = ".replace"
@@ -79,7 +84,8 @@ class Shrinker:
     def __init__(self, root: str, logger, opts: ShrinkOptions | None = None,
                  encoder: HevcEncoder | None = None, probe: MediaProbe | None = None,
                  durations: DurationCache | None = None,
-                 throughput: ThroughputLog | None = None, display: ProgressBar | None = None):
+                 throughput: ThroughputLog | None = None, display: ProgressBar | None = None,
+                 codecs: CodecCache | None = None):
         """Configure a run.
 
         Args:
@@ -91,20 +97,21 @@ class Shrinker:
             durations: Duration cache; None probes without caching.
             throughput: Speed measurements; a default one if None.
             display: Progress display; created for the encode phase if None.
+            codecs: Codec cache for the plan; None probes without caching.
         """
         self.root = os.path.abspath(root)
         self.log = logger
         self.opts = opts or ShrinkOptions()
         self.probe = probe or MediaProbe()
         self.encoder = encoder or HevcEncoder(probe=self.probe, logger=logger)
-        self.durations = durations
+        self.caches = {"durations": durations, "codecs": codecs}
         self.throughput = throughput or ThroughputLog()
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "copies": 0, "recovered": 0}
-        self.found: dict[str, list] = {"failed": [], "leftovers": []}
+        self.found: dict[str, list] = {"failed": [], "leftovers": [], "hevc": []}
 
     # -- signals ---------------------------------------------------------
     def install_signal_handlers(self) -> None:
@@ -177,6 +184,7 @@ class Shrinker:
                 break
         if self.opts.min_seconds > 0:
             todo = self._drop_short(todo)
+        todo = self._set_aside_hevc(todo)
         if self.opts.order == "largest":
             todo.sort(key=lambda item: item[1], reverse=True)
         elif self.opts.order == "smallest":
@@ -202,9 +210,50 @@ class Shrinker:
                 self.stats["short"] += 1
             else:
                 kept.append((path, size))
-        if self.durations is not None:
-            self.durations.save()
+        if self.caches["durations"] is not None:
+            self.caches["durations"].save()
         return kept
+
+    def _set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]:
+        """Move videos that are already HEVC out of the encode list.
+
+        Args:
+            todo: Candidates.
+
+        Returns:
+            Candidates that need encoding; the others go to
+            ``found["hevc"]``.
+        """
+        rest = []
+        for number, (path, size) in enumerate(todo, 1):
+            if number % 500 == 0:
+                self.log.info("checking codecs: %i of %i", number, len(todo))
+            if self._codec(path) == "hevc":
+                self.found["hevc"].append((path, size))
+            else:
+                rest.append((path, size))
+        if self.caches["codecs"] is not None:
+            self.caches["codecs"].save()
+        return rest
+
+    def _codec(self, path: str) -> str | None:
+        """Return a video's codec, from the cache if possible.
+
+        Args:
+            path: Video file.
+
+        Returns:
+            Codec name, or None if unknown.
+        """
+        if self.caches["codecs"] is None:
+            return self.probe.video_codec(path)
+        st = os.stat(path)
+        codec = self.caches["codecs"].get(path, st)
+        if codec is None:
+            codec = self.probe.video_codec(path)
+            if codec is not None:
+                self.caches["codecs"].put(path, st, codec)
+        return codec
 
     def _duration(self, path: str) -> float | None:
         """Return a video's duration, from the cache if possible.
@@ -215,14 +264,14 @@ class Shrinker:
         Returns:
             Seconds, or None if unknown.
         """
-        if self.durations is None:
+        if self.caches["durations"] is None:
             return self.probe.duration(path)
         st = os.stat(path)
-        duration = self.durations.get(path, st)
+        duration = self.caches["durations"].get(path, st)
         if duration is None:
             duration = self.probe.duration(path)
             if duration is not None:
-                self.durations.put(path, st, duration)
+                self.caches["durations"].put(path, st, duration)
         return duration
 
     # -- run -------------------------------------------------------------
@@ -243,20 +292,24 @@ class Shrinker:
         total = sum(size for _path, size in todo)
         rate = self.throughput.rate()
         self._report_plan(todo, total, rate)
-        if (todo or self.found["leftovers"]) and confirm is not None and not confirm():
+        if (todo or self.found["leftovers"] or self.found["hevc"]) and confirm is not None \
+                and not confirm():
             if self.found["leftovers"]:
                 self.log.info("leftover work folders kept")
             self._finish()
             return 0
         self._remove_leftovers()
+        self._record_hevc()
         if self.display is None:
             self.display = ProgressBar(total, len(todo), rate)
         self._attach_bar_filter()
         for path, size in todo:
             if self.flags["stop"]:
                 break
-            self._process(path, size)
-            self.display.file_done(size)
+            if self._process(path, size):
+                self.display.file_done(size)
+            else:
+                self.display.file_skipped(size)
         self.display.clear()
         self._finish()
         if self.flags["stop"]:
@@ -274,9 +327,12 @@ class Shrinker:
         """
         estimate = f", about {ThroughputLog.duration_text(total / rate)} at the measured " \
                    f"{rate / 1e6:.1f} MB/s" if rate and total else ""
+        hevc = self.found["hevc"]
         self.log.info("already processed (database): %i | shorter than %.0f s: %i | "
-                      "to encode: %i files, %.1f GiB%s", self.stats["skipped"],
-                      self.opts.min_seconds, self.stats["short"], len(todo), total / 1024 ** 3,
+                      "already HEVC, recorded without encoding: %i files, %.1f GiB",
+                      self.stats["skipped"], self.opts.min_seconds, self.stats["short"],
+                      len(hevc), sum(size for _path, size in hevc) / 1024 ** 3)
+        self.log.info("to encode: %i files, %.1f GiB%s", len(todo), total / 1024 ** 3,
                       estimate)
         ratio = self.throughput.ratio()
         if ratio is not None and total:
@@ -316,23 +372,25 @@ class Shrinker:
                     not isinstance(handler, logging.FileHandler):
                 handler.addFilter(clear_line)
 
-    def _process(self, path: str, size: int) -> None:
+    def _process(self, path: str, size: int) -> bool:
         """Handle one planned video.
 
         Args:
             path: Absolute path of the video.
             size: Its size when planned.
+
+        Returns:
+            True if an encode was attempted, False if the file needed none
+            (removed, recorded meanwhile, or HEVC by now - e.g. a hard link
+            of a file shrunk earlier in this run).
         """
         dirpath = os.path.dirname(path)
         database = self.database(dirpath)
         if not os.path.isfile(path) or database.is_done(path):
-            return                                   # removed or recorded meanwhile
+            return False                             # removed or recorded meanwhile
         if self.probe.video_codec(path) == "hevc":
-            self.log.info("already HEVC, recorded without re-encoding: %s", path)
-            database.ensure()
-            database.record(path)
-            self.stats["hevc"] += 1
-            return
+            self._record_one_hevc(path)
+            return False
         tmp_dir = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
         os.makedirs(tmp_dir, exist_ok=True)
         out = os.path.join(tmp_dir, os.path.basename(path))
@@ -341,6 +399,29 @@ class Shrinker:
         finally:
             with contextlib.suppress(OSError):
                 os.rmdir(tmp_dir)                    # only if empty (not in review mode)
+        return True
+
+    def _record_hevc(self) -> None:
+        """Record the videos set aside as HEVC during planning."""
+        if self.opts.keep_copies:
+            return                                   # review mode records nothing
+        for path, _size in self.found["hevc"]:
+            if self.flags["stop"]:
+                break
+            if os.path.isfile(path) and not self.database(os.path.dirname(path)).is_done(path):
+                self._record_one_hevc(path)
+
+    def _record_one_hevc(self, path: str) -> None:
+        """Record a video that is already HEVC, without encoding it.
+
+        Args:
+            path: Video file.
+        """
+        self.log.info("already HEVC, recorded without re-encoding: %s", path)
+        database = self.database(os.path.dirname(path))
+        database.ensure()
+        database.record(path)
+        self.stats["hevc"] += 1
 
     def _encode_and_replace(self, path: str, size: int, out: str,
                             database: ShrinkDatabase) -> None:

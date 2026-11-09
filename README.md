@@ -251,7 +251,9 @@ mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
    directory. *The database always has precedence:* a recorded file counts
    as processed, whatever its codec. Matching is by **file name within the
    directory**, so databases written before the collection was moved stay
-   valid. Then the run reports files, volume, the estimated time and the
+   valid. Videos that are already HEVC are reported separately (recorded
+   without encoding, not counted in volume and time; codecs are cached).
+   Then the run reports files, volume, the estimated time and the
    expected size afterwards (both measured on earlier files), lists
    leftover `newShrinkedFiles/` folders of aborted runs, and asks once.
    Leftovers are deleted only after a yes.
