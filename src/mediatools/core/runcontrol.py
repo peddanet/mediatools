@@ -18,7 +18,9 @@ class RunControl:
     :attr:`POLL_SECONDS`, finishes the current file and ends - exactly like
     the first Ctrl+C, but independent of which window has the keyboard
     focus. Both files are removed when the job ends; a stop file found at
-    start (left by a crash) is removed as well.
+    start (left by a crash) is removed as well. A second job of the same
+    name cannot start while the first one is alive (:meth:`start` raises
+    :class:`RuntimeError`); a PID file of a crashed job does not block.
 
     The PID file also names the log file, and the job writes its progress
     lines to ``<data>/state/<name>.status``; ``mediatools attach`` shows
@@ -67,7 +69,16 @@ class RunControl:
 
     # -- running job -----------------------------------------------------
     def start(self) -> None:
-        """Register the current process and drop a stale stop request."""
+        """Register the current process and drop a stale stop request.
+
+        Raises:
+            RuntimeError: If another job of this name is still running.
+        """
+        other = self.active_pid()
+        if other is not None and other != os.getpid():
+            raise RuntimeError(f"{self.name} is already running (pid {other}) - "
+                               f"watch it with 'mediatools attach', stop it with "
+                               f"'mediatools stop'")
         self._remove(self.stop_file)
         self._register()
 

@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.8 -- Developer Documentation"
+title: "mediatools 1.2.9 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -169,7 +169,7 @@ directory, configuration -- lives in `core`.
 | `DecodeCheck` | trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
 | `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
-| `RunControl` | PID/stop/status files of a running job, background mode (fork, `setsid`), sleep lock in the working process |
+| `RunControl` | PID/stop/status files of a running job, refuses a second live job of the same name, background mode (fork, `setsid`), sleep lock in the working process |
 | `AttachView` | `mediatools attach`: log backlog, new lines, progress lines; Ctrl+C leaves the view |
 | `SleepInhibitor` | systemd sleep/idle inhibitor lock for the lifetime of a job |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
@@ -183,8 +183,10 @@ directory, configuration -- lives in `core`.
 |---|---|
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
-| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, stream and duration |
-| `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, stop request via `RunControl`, summary |
+| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and decodability; message file kept on failure |
+| `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, minimum duration, HEVC set-aside, order |
+| `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |
+| `Shrinker` | per-file decision (HEVC, trial decode, encode), failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
@@ -314,7 +316,8 @@ Invariants:
 
 ~~~text
 <data>/mediatools.ini                 Config           INI, see the handbook
-<dir>/<db_name>                       ShrinkDatabase   SQLite, files(path PK, size, modified)
+<dir>/<db_name>                       ShrinkDatabase   SQLite, files(path PK, size, modified),
+                                                       failures(name PK, size, status, reason, at)
 <dir>/<db_name>.bak_<ts>              ShrinkDatabase   copy before schema migration
 <unit>/_flat/_index.tsv               FlatIndex        link name TAB relative source path
 <data>/plans/flatten_<ts>.tsv         FlatPlan         action unit link source level note
@@ -324,7 +327,8 @@ Invariants:
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
 <data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
-<dir>/newShrinkedFiles/<n>.replace    Shrinker         journal marker during copy-back
+<dir>/newShrinkedFiles/<n>.replace    ReplaceJournal   journal marker during copy-back
+<data>/logs/ffmpeg/<ts>_<n>.ffmpeg.log Shrinker         complete ffmpeg messages of a failed encode
 <data>/reports/sync_target_only_*.tsv TargetReport     status size path same_as
 <data>/logs/<command>_<ts>.log        RunLog           timestamp level message
 <data>/snapshot/rsnapshot.conf        RsnapshotConf    generated, tab separated
@@ -342,8 +346,10 @@ with `surrogateescape`, so they round-trip unchanged.
 | Situation | Behaviour |
 |---|---|
 | missing external tool | `Cli._need` raises `SystemExit` with the tool names |
-| ffmpeg fails / output invalid | file logged as FAILED, original kept, run continues, exit 2 |
-| trial decode finds undecodable data | file set aside as BROKEN before encoding, not recorded, original kept, run continues, exit code unchanged |
+| ffmpeg fails / output invalid (size, stream, duration, decode) | file logged as FAILED, failure row, message file kept, original kept, run continues, exit 2 |
+| trial decode finds undecodable data | file set aside as BROKEN before encoding, failure row, original kept, run continues, exit code unchanged |
+| video failed in an earlier run, size unchanged | left out in planning unless `--retry-failed` |
+| second `mediatools shrink` while one is alive | refused before planning, exit 3 |
 | Ctrl+C in shrink | flag set; current ffmpeg stops; original untouched; exit 1 |
 | Ctrl+C in triage | all players closed, nothing removed, exit 130 |
 | link creation fails | logged, counted as `error`, flatten exits 1 |
