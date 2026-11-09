@@ -26,7 +26,8 @@ class Shrinker:
     A run has two phases:
 
     1. **Plan** - walk the tree, finish replacements interrupted by a crash
-       (journal, see below), and collect every video that is not yet
+       (journal, see below), note leftover ``newShrinkedFiles/`` folders of
+       earlier aborted runs, and collect every video that is not yet
        recorded in its directory's database. The database always has
        precedence: a recorded file counts as processed, whatever its codec.
        Optionally drop videos shorter than ``min_seconds`` and sort the rest
@@ -37,15 +38,20 @@ class Shrinker:
        ``_flat`` hard links see the new content) and is recorded.
 
     **Stopping.** The first Ctrl+C (or Ctrl+Z) lets the current file finish
-    and then stops; the second Ctrl+C (or SIGTERM) aborts the current
-    encode at once - its partial output is deleted, the original is
-    untouched. Signals never interrupt the replacement itself.
+    and then stops; the second Ctrl+C, SIGTERM or SIGHUP (terminal closed)
+    aborts the current encode at once - its partial output is deleted, the
+    original is untouched. Signals never interrupt the replacement itself.
 
-    **Crash safety.** Before an original is overwritten, a marker
-    ``newShrinkedFiles/<name>.replace`` is written; it is removed after the
-    copy has been flushed to disk and recorded. If the machine fails in
-    between, the next run finds the marker next to the validated output and
-    repeats the copy before anything else.
+    **Crash safety.** The validated output is flushed to disk, then a
+    marker ``newShrinkedFiles/<name>.replace`` is written and flushed, and
+    the directory entry is flushed; only then is the original overwritten.
+    The marker is removed after the copy has been flushed and recorded. If
+    the machine fails in between, the next run finds the marker next to the
+    complete output and repeats the copy before anything else.
+
+    **Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
+    hold only partial outputs of aborted runs. They are listed in the plan
+    summary and deleted only after the start question is confirmed.
 
     With ``keep_copies=True`` the originals are not touched and nothing is
     recorded; the shrunk copies stay in ``newShrinkedFiles/`` for review.
@@ -64,7 +70,8 @@ class Shrinker:
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
             ``failed``, ``copies``, ``recovered``.
-        failed: Paths that could not be encoded.
+        found: ``failed`` - paths that could not be encoded; ``leftovers`` -
+            ``(folder, files, bytes)`` of leftover work folders.
     """
 
     MARKER = ".replace"
@@ -97,26 +104,30 @@ class Shrinker:
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "copies": 0, "recovered": 0}
-        self.failed: list[str] = []
+        self.found: dict[str, list] = {"failed": [], "leftovers": []}
 
     # -- signals ---------------------------------------------------------
     def install_signal_handlers(self) -> None:
-        """Route SIGINT, SIGTERM and SIGTSTP to :meth:`on_signal`."""
-        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGTSTP):
+        """Route SIGINT, SIGTERM, SIGHUP and SIGTSTP to :meth:`on_signal`."""
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGTSTP):
             signal.signal(sig, self.on_signal)
 
     def on_signal(self, signum: int, _frame: object = None) -> None:
-        """First Ctrl+C: stop after this file; second Ctrl+C or SIGTERM: abort now.
+        """First Ctrl+C: stop after this file; second Ctrl+C, SIGTERM, SIGHUP: abort now.
 
         Only flags are set and ffmpeg is told to stop; no exception is
-        raised, so a running replacement always completes.
+        raised, so a running replacement always completes. After SIGHUP the
+        terminal is gone, so the progress line is switched off.
 
         Args:
             signum: Number of the received signal.
         """
+        if signum == signal.SIGHUP and self.display:
+            self.display.enabled = False
         if self.display:
             self.display.clear()
-        if signum == signal.SIGTERM or (signum == signal.SIGINT and self.flags["stop"]):
+        if signum in (signal.SIGTERM, signal.SIGHUP) or \
+                (signum == signal.SIGINT and self.flags["stop"]):
             self.flags["abort"] = self.flags["stop"] = True
             self.log.warning("aborting the current file now - its original stays untouched")
             self.encoder.abort()
@@ -148,7 +159,7 @@ class Shrinker:
         for dirpath, _dirs, files in TreeWalker().walk(self.root):
             if not self.opts.keep_copies:
                 self._recover(dirpath)
-                self._remove_tmp(dirpath)
+                self._note_leftover(dirpath)
             for name in files:
                 if MediaTypes.extension(name) not in self.opts.extensions:
                     continue
@@ -231,15 +242,13 @@ class Shrinker:
         todo = self.plan()
         total = sum(size for _path, size in todo)
         rate = self.throughput.rate()
-        estimate = f", about {ThroughputLog.duration_text(total / rate)} at the measured " \
-                   f"{rate / 1e6:.1f} MB/s" if rate and total else ""
-        self.log.info("already processed (database): %i | shorter than %.0f s: %i | "
-                      "to encode: %i files, %.1f GiB%s", self.stats["skipped"],
-                      self.opts.min_seconds, self.stats["short"], len(todo), total / 1024 ** 3,
-                      estimate)
-        if todo and confirm is not None and not confirm():
+        self._report_plan(todo, total, rate)
+        if (todo or self.found["leftovers"]) and confirm is not None and not confirm():
+            if self.found["leftovers"]:
+                self.log.info("leftover work folders kept")
             self._finish()
             return 0
+        self._remove_leftovers()
         if self.display is None:
             self.display = ProgressBar(total, len(todo), rate)
         self._attach_bar_filter()
@@ -252,7 +261,41 @@ class Shrinker:
         self._finish()
         if self.flags["stop"]:
             return 1
-        return 2 if self.failed else 0
+        return 2 if self.found["failed"] else 0
+
+    def _report_plan(self, todo: list[tuple[str, int]], total: int,
+                     rate: float | None) -> None:
+        """Log the plan summary with time and size estimates and leftovers.
+
+        Args:
+            todo: Planned videos.
+            total: Their total size in bytes.
+            rate: Measured speed in source bytes per second, or None.
+        """
+        estimate = f", about {ThroughputLog.duration_text(total / rate)} at the measured " \
+                   f"{rate / 1e6:.1f} MB/s" if rate and total else ""
+        self.log.info("already processed (database): %i | shorter than %.0f s: %i | "
+                      "to encode: %i files, %.1f GiB%s", self.stats["skipped"],
+                      self.opts.min_seconds, self.stats["short"], len(todo), total / 1024 ** 3,
+                      estimate)
+        ratio = self.throughput.ratio()
+        if ratio is not None and total:
+            self.log.info("expected afterwards: about %.1f GiB, saving about %.1f GiB "
+                          "(output %.0f %% of the source, measured on %i file(s))",
+                          total * ratio / 1024 ** 3, total * (1 - ratio) / 1024 ** 3,
+                          ratio * 100, self.throughput.files)
+        elif total:
+            self.log.info("expected size afterwards: not yet known (measured after the "
+                          "first encoded file)")
+        leftovers = self.found["leftovers"]
+        if leftovers:
+            files = sum(entry[1] for entry in leftovers)
+            size = sum(entry[2] for entry in leftovers)
+            self.log.info("leftover work folders of aborted runs: %i folder(s), %i file(s), "
+                          "%.1f GiB - deleted after confirmation", len(leftovers), files,
+                          size / 1024 ** 3)
+            for folder, count, nbytes in leftovers:
+                self.log.debug("  leftover: %s (%i files, %.0f MB)", folder, count, nbytes / 1e6)
 
     def _attach_bar_filter(self) -> None:
         """Clear the progress line before each console log message."""
@@ -318,12 +361,12 @@ class Shrinker:
             self._remove_quietly(out + ".ffmpeg.log")
             return
         if not ok:
-            self.failed.append(path)
+            self.found["failed"].append(path)
             self.stats["failed"] += 1
             self._remove_quietly(out)
             self._remove_quietly(out + ".ffmpeg.log")      # its tail is in the log
             return
-        self.throughput.add(size, time.monotonic() - started)
+        self.throughput.add(size, time.monotonic() - started, self._size_or_none(out))
         if self.opts.keep_copies:
             self.stats["copies"] += 1
             return
@@ -345,9 +388,12 @@ class Shrinker:
     def _replace(self, out: str, path: str, database: ShrinkDatabase) -> None:
         """Copy a validated output over the original and record it.
 
-        Order: marker, copy into the existing inode, flush to disk, record,
-        delete output, delete marker. A crash at any point leaves either the
-        untouched original or the marker plus the validated output.
+        Order: flush the output, write and flush the marker, flush the
+        directory entry, copy into the existing inode, flush, record, delete
+        output, delete marker. A crash at any point leaves either the
+        untouched original or the marker plus the complete validated output;
+        repeating the copy is harmless, so a crash after step 5 only causes
+        one more identical copy on the next run.
 
         Args:
             out: Validated output in ``newShrinkedFiles/``.
@@ -355,11 +401,14 @@ class Shrinker:
             database: Database of its directory.
         """
         marker = out + self.MARKER
+        self._fsync_file(out)                        # 1. output complete on disk
         with open(marker, "w", encoding="utf-8") as handle:
             handle.write(path + "\n")
-        shutil.copyfile(out, path)                   # writes into the existing inode
-        with open(path, "rb+") as handle:
-            os.fsync(handle.fileno())
+            handle.flush()
+            os.fsync(handle.fileno())                # 2. marker content on disk
+        self._fsync_dir(os.path.dirname(marker))     # 3. marker's directory entry on disk
+        shutil.copyfile(out, path)                   # 4. writes into the existing inode
+        self._fsync_file(path)                       # 5. new content of the original on disk
         database.ensure()
         database.record(path)
         os.remove(out)
@@ -387,16 +436,66 @@ class Shrinker:
                 self._remove_quietly(os.path.join(tmp, entry))
 
     # -- helpers ---------------------------------------------------------
-    def _remove_tmp(self, dirpath: str) -> None:
-        """Delete the temporary output directory of one directory.
+    def _note_leftover(self, dirpath: str) -> None:
+        """Remember a leftover work folder for the plan summary.
 
         Args:
-            dirpath: Directory whose ``newShrinkedFiles`` is removed.
+            dirpath: Directory whose ``newShrinkedFiles`` is checked.
         """
         tmp = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
-        if os.path.isdir(tmp):
-            self.log.info("removing %s", tmp)
+        if not os.path.isdir(tmp):
+            return
+        files = nbytes = 0
+        for base, _dirs, names in os.walk(tmp):
+            for name in names:
+                files += 1
+                nbytes += self._size_or_none(os.path.join(base, name)) or 0
+        self.found["leftovers"].append((tmp, files, nbytes))
+
+    def _remove_leftovers(self) -> None:
+        """Delete the leftover work folders noted during planning."""
+        for tmp, _files, _nbytes in self.found["leftovers"]:
+            self.log.info("removing leftover work folder %s", tmp)
             shutil.rmtree(tmp, ignore_errors=True)
+        self.found["leftovers"] = []
+
+    @staticmethod
+    def _size_or_none(path: str) -> int | None:
+        """Return a file's size.
+
+        Args:
+            path: File.
+
+        Returns:
+            Size in bytes, or None if it cannot be read.
+        """
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _fsync_file(path: str) -> None:
+        """Force a file's content to disk.
+
+        Args:
+            path: File.
+        """
+        with open(path, "rb+") as handle:
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _fsync_dir(path: str) -> None:
+        """Force a directory's entries (file creations) to disk.
+
+        Args:
+            path: Directory.
+        """
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     @staticmethod
     def _remove_quietly(path: str) -> None:
@@ -420,5 +519,5 @@ class Shrinker:
                       counts["copies"], counts["recovered"], counts["failed"])
         if self.flags["stop"]:
             self.log.info("stopped by the user - the next run continues with the files left")
-        for path in self.failed:
+        for path in self.found["failed"]:
             self.log.info("  FAILED: %s", path)

@@ -186,3 +186,18 @@ def test_encoder_logs_tail_of_missing_file(tmp_path: Path) -> None:
     log_path = str(tmp_path / "none.log")
     HevcEncoder(logger=LOG)._log_tail(log_path)  # pylint: disable=protected-access
     assert not os.path.exists(log_path)
+
+
+def test_ffmpeg_runs_with_lowest_priority(tmp_path: Path) -> None:
+    """ffmpeg is started with niceness 19, so the desktop stays responsive.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    src = make_file(tmp_path / "in.mp4")
+    report = tmp_path / "niceness.txt"
+    fake = script(tmp_path / "ffmpeg_nice", f"nice > '{report}'; exit 1")
+    HevcEncoder(probe=FakeProbe(True, [2.0]), logger=LOG, ffmpeg=fake).encode(
+        src, str(tmp_path / "out.mp4"))
+    base = os.nice(0)
+    assert int(report.read_text(encoding="utf-8")) == min(19, base + 19)
