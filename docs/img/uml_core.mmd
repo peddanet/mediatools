@@ -30,6 +30,7 @@ classDiagram
     +path
     +entries
     +hits
+    +added
     +init(path)
     +get(file_path, st)
     +put(file_path, st, duration)
@@ -68,6 +69,7 @@ classDiagram
     +stream
     +started
     +enabled
+    +note
     +init(total_bytes, total_files, initial_rate, stream)
     +rate(current_bytes)
     +remaining_seconds(current_bytes)
@@ -84,6 +86,19 @@ classDiagram
     +init(assume_yes, input_func)
     +yes_no(question, default)
     +text(question, default)
+  }
+  class RunControl {
+    +name
+    +pid_file
+    +stop_file
+    +last_poll
+    +init(name, data)
+    +start()
+    +finish()
+    +stop_requested(force)
+    +active_pid()
+    +request_stop()
+    -_remove(path)
   }
   class RunLog {
     +datadir
@@ -108,5 +123,6 @@ classDiagram
   }
   CodecCache ..> DurationCache
   Config --> DataDir
+  RunControl --> DataDir
   RunLog --> DataDir
   TreeWalker --> MediaTypes

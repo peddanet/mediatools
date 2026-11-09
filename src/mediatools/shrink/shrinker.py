@@ -8,17 +8,27 @@ import shutil
 import signal
 import time
 from collections.abc import Callable
+from typing import TypedDict
 
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.progressbar import ProgressBar
+from mediatools.core.runcontrol import RunControl
 from mediatools.core.walker import TreeWalker
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.shrink.encoder import HevcEncoder
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.throughput import ThroughputLog
+
+
+class ShrinkState(TypedDict):
+    """Persistent helpers of a run: probe caches and measured throughput."""
+
+    durations: DurationCache | None
+    codecs: CodecCache | None
+    throughput: ThroughputLog
 
 
 class Shrinker:
@@ -40,7 +50,8 @@ class Shrinker:
        result replaces the original (in place, the inode is kept, so
        ``_flat`` hard links see the new content) and is recorded.
 
-    **Stopping.** The first Ctrl+C (or Ctrl+Z) lets the current file finish
+    **Stopping.** The first Ctrl+C (or Ctrl+Z), or ``mediatools stop`` from
+    another terminal (see :class:`RunControl`), lets the current file finish
     and then stops; the second Ctrl+C, SIGTERM or SIGHUP (terminal closed)
     aborts the current encode at once - its partial output is deleted, the
     original is untouched. Signals never interrupt the replacement itself.
@@ -65,9 +76,10 @@ class Shrinker:
         opts: What is processed and how (:class:`ShrinkOptions`).
         probe: Probe for codec and duration checks.
         encoder: Encoder for new files.
-        caches: ``durations`` (for ``min_seconds``) and ``codecs`` (for the
-            HEVC check of the plan); a value of None probes without caching.
-        throughput: Speed measurements for the time estimate.
+        state: Persistent helpers: ``durations`` (for ``min_seconds``) and
+            ``codecs`` (HEVC check of the plan) - None probes without caching -
+            and ``throughput`` (speed and size ratio for the estimates).
+        control: Stop requests from ``mediatools stop``, or None.
         databases: Open databases per directory.
         flags: ``stop`` (finish the current file, then stop) and ``abort``
             (stop the current file at once).
@@ -80,6 +92,7 @@ class Shrinker:
     """
 
     MARKER = ".replace"
+    CHECKPOINT = 500
 
     def __init__(self, root: str, logger, opts: ShrinkOptions | None = None,
                  encoder: HevcEncoder | None = None, probe: MediaProbe | None = None,
@@ -104,8 +117,9 @@ class Shrinker:
         self.opts = opts or ShrinkOptions()
         self.probe = probe or MediaProbe()
         self.encoder = encoder or HevcEncoder(probe=self.probe, logger=logger)
-        self.caches = {"durations": durations, "codecs": codecs}
-        self.throughput = throughput or ThroughputLog()
+        self.state: ShrinkState = {"durations": durations, "codecs": codecs,
+                                   "throughput": throughput or ThroughputLog()}
+        self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False}
         self.display = display
@@ -139,8 +153,7 @@ class Shrinker:
             self.log.warning("aborting the current file now - its original stays untouched")
             self.encoder.abort()
             return
-        self.flags["stop"] = True
-        self.log.warning("stopping after the current file (press Ctrl+C again to abort it)")
+        self._mark_stopping("stopping after the current file (press Ctrl+C again to abort it)")
 
     # -- plan ------------------------------------------------------------
     def database(self, dirpath: str) -> ShrinkDatabase:
@@ -203,15 +216,14 @@ class Shrinker:
         """
         kept = []
         for number, (path, size) in enumerate(todo, 1):
-            if number % 500 == 0:
-                self.log.info("checking durations: %i of %i", number, len(todo))
+            if number % self.CHECKPOINT == 0 and number < len(todo):
+                self._checkpoint("durations", self.state["durations"], number, len(todo))
             duration = self._duration(path)
             if duration is not None and duration < self.opts.min_seconds:
                 self.stats["short"] += 1
             else:
                 kept.append((path, size))
-        if self.caches["durations"] is not None:
-            self.caches["durations"].save()
+        self._checkpoint("durations", self.state["durations"], len(todo), len(todo))
         return kept
 
     def _set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]:
@@ -226,15 +238,36 @@ class Shrinker:
         """
         rest = []
         for number, (path, size) in enumerate(todo, 1):
-            if number % 500 == 0:
-                self.log.info("checking codecs: %i of %i", number, len(todo))
+            if number % self.CHECKPOINT == 0 and number < len(todo):
+                self._checkpoint("codecs", self.state["codecs"], number, len(todo))
             if self._codec(path) == "hevc":
                 self.found["hevc"].append((path, size))
             else:
                 rest.append((path, size))
-        if self.caches["codecs"] is not None:
-            self.caches["codecs"].save()
+        self._checkpoint("codecs", self.state["codecs"], len(todo), len(todo))
         return rest
+
+    def _checkpoint(self, what: str, cache: DurationCache | None,
+                    number: int, total: int) -> None:
+        """Report planning progress and store newly probed values.
+
+        Saving every :attr:`CHECKPOINT` files keeps the probes of a long
+        first check even if the run is interrupted during planning.
+
+        Args:
+            what: ``durations`` or ``codecs``.
+            cache: The cache in use, or None.
+            number: Files checked so far.
+            total: Files to check.
+        """
+        if total == 0:
+            return
+        if cache is None:
+            self.log.info("checking %s: %i of %i", what, number, total)
+            return
+        self.log.info("checking %s: %i of %i (%i from cache)", what, number, total, cache.hits)
+        if cache.added:
+            cache.save()
 
     def _codec(self, path: str) -> str | None:
         """Return a video's codec, from the cache if possible.
@@ -245,14 +278,14 @@ class Shrinker:
         Returns:
             Codec name, or None if unknown.
         """
-        if self.caches["codecs"] is None:
+        if self.state["codecs"] is None:
             return self.probe.video_codec(path)
         st = os.stat(path)
-        codec = self.caches["codecs"].get(path, st)
+        codec = self.state["codecs"].get(path, st)
         if codec is None:
             codec = self.probe.video_codec(path)
             if codec is not None:
-                self.caches["codecs"].put(path, st, codec)
+                self.state["codecs"].put(path, st, codec)
         return codec
 
     def _duration(self, path: str) -> float | None:
@@ -264,14 +297,14 @@ class Shrinker:
         Returns:
             Seconds, or None if unknown.
         """
-        if self.caches["durations"] is None:
+        if self.state["durations"] is None:
             return self.probe.duration(path)
         st = os.stat(path)
-        duration = self.caches["durations"].get(path, st)
+        duration = self.state["durations"].get(path, st)
         if duration is None:
             duration = self.probe.duration(path)
             if duration is not None:
-                self.caches["durations"].put(path, st, duration)
+                self.state["durations"].put(path, st, duration)
         return duration
 
     # -- run -------------------------------------------------------------
@@ -286,11 +319,28 @@ class Shrinker:
             0 on success or if declined, 1 if stopped by the user, 2 if a
             file failed.
         """
+        if self.control is not None:
+            self.control.start()
+        try:
+            return self._run(confirm)
+        finally:
+            if self.control is not None:
+                self.control.finish()
+
+    def _run(self, confirm: Callable[[], bool] | None) -> int:
+        """Body of :meth:`run`.
+
+        Args:
+            confirm: See :meth:`run`.
+
+        Returns:
+            See :meth:`run`.
+        """
         mode = "keep copies" if self.opts.keep_copies else "replace originals"
         self.log.info("shrink root: %s  mode: %s  order: %s", self.root, mode, self.opts.order)
         todo = self.plan()
         total = sum(size for _path, size in todo)
-        rate = self.throughput.rate()
+        rate = self.state["throughput"].rate()
         self._report_plan(todo, total, rate)
         if (todo or self.found["leftovers"] or self.found["hevc"]) and confirm is not None \
                 and not confirm():
@@ -304,6 +354,7 @@ class Shrinker:
             self.display = ProgressBar(total, len(todo), rate)
         self._attach_bar_filter()
         for path, size in todo:
+            self._poll_stop(force=True)
             if self.flags["stop"]:
                 break
             if self._process(path, size):
@@ -334,12 +385,12 @@ class Shrinker:
                       len(hevc), sum(size for _path, size in hevc) / 1024 ** 3)
         self.log.info("to encode: %i files, %.1f GiB%s", len(todo), total / 1024 ** 3,
                       estimate)
-        ratio = self.throughput.ratio()
+        ratio = self.state["throughput"].ratio()
         if ratio is not None and total:
             self.log.info("expected afterwards: about %.1f GiB, saving about %.1f GiB "
                           "(output %.0f %% of the source, measured on %i file(s))",
                           total * ratio / 1024 ** 3, total * (1 - ratio) / 1024 ** 3,
-                          ratio * 100, self.throughput.files)
+                          ratio * 100, self.state["throughput"].files)
         elif total:
             self.log.info("expected size afterwards: not yet known (measured after the "
                           "first encoded file)")
@@ -447,7 +498,7 @@ class Shrinker:
             self._remove_quietly(out)
             self._remove_quietly(out + ".ffmpeg.log")      # its tail is in the log
             return
-        self.throughput.add(size, time.monotonic() - started, self._size_or_none(out))
+        self.state["throughput"].add(size, time.monotonic() - started, self._size_or_none(out))
         if self.opts.keep_copies:
             self.stats["copies"] += 1
             return
@@ -462,8 +513,33 @@ class Shrinker:
             fraction: Encoded fraction of the file.
             size: Its size in bytes.
         """
+        self._poll_stop()
         if self.display:
             self.display.show(name, fraction, size)
+
+    def _poll_stop(self, force: bool = False) -> None:
+        """Turn a request of ``mediatools stop`` into a stop after this file.
+
+        Args:
+            force: Check the stop file now, ignoring the poll interval.
+        """
+        if self.control is None or self.flags["stop"]:
+            return
+        if self.control.stop_requested(force):
+            self._mark_stopping("stop requested by 'mediatools stop' - "
+                                "stopping after the current file")
+
+    def _mark_stopping(self, message: str) -> None:
+        """Set the stop flag and show it in the log and on the progress line.
+
+        Args:
+            message: Log message.
+        """
+        self.flags["stop"] = True
+        if self.display:
+            self.display.clear()
+            self.display.note = "STOPPING after this file"
+        self.log.warning(message)
 
     # -- replacement with journal ----------------------------------------
     def _replace(self, out: str, path: str, database: ShrinkDatabase) -> None:

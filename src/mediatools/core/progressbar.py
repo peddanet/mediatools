@@ -27,6 +27,7 @@ class ProgressBar:
         stream: Output stream.
         started: Start time (monotonic seconds).
         enabled: True if the stream is a terminal.
+        note: Text shown at the start of the line, e.g. a pending stop.
     """
 
     WIDTH = 24
@@ -50,6 +51,7 @@ class ProgressBar:
         self.stream = stream or sys.stderr
         self.started = time.monotonic()
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
+        self.note = ""
 
     def rate(self, current_bytes: float = 0.0) -> float | None:
         """Return the speed used for the estimate.
@@ -97,7 +99,8 @@ class ProgressBar:
         remaining = self.remaining_seconds(current)
         eta = "?" if remaining is None else self.duration_text(remaining)
         short = name if len(name) <= 30 else name[:12] + "..." + name[-15:]
-        return (f"[{'#' * filled}{'.' * (self.WIDTH - filled)}] {fraction * 100:5.1f} % | "
+        prefix = f"{self.note} | " if self.note else ""
+        return (f"{prefix}[{'#' * filled}{'.' * (self.WIDTH - filled)}] {fraction * 100:5.1f} % | "
                 f"{self.done_files}/{self.total_files} files | "
                 f"{(self.done_bytes + current) / 1024 ** 3:.1f}/"
                 f"{self.total_bytes / 1024 ** 3:.1f} GiB | ETA {eta} | "

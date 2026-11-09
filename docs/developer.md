@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.2 -- Developer Documentation"
+title: "mediatools 1.2.3 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -167,7 +167,8 @@ directory, configuration -- lives in `core`.
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
-| `ProgressBar` | one-line terminal display: percentage by bytes, files, remaining time |
+| `ProgressBar` | one-line terminal display: percentage by bytes, files, remaining time, pending stop |
+| `RunControl` | PID file and stop request of a running job (`mediatools stop`) |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
 | `Prompt` | yes/no and text questions, `--yes` support |
 
@@ -180,7 +181,7 @@ directory, configuration -- lives in `core`.
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
 | `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, stream and duration |
-| `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, summary |
+| `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, stop request via `RunControl`, summary |
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
@@ -364,6 +365,8 @@ no removal without confirmation               test_triage_not_confirmed_removes_
 database rows of a moved collection count     test_database_matches_by_name_after_move
 1st Ctrl+C finishes, 2nd keeps the original   test_first_ctrl_c_finishes_current_file,
                                               test_second_ctrl_c_aborts_without_touching_original
+'mediatools stop' finishes the current file   test_stop_command_finishes_current_file_and_ends
+no stop file without a running job            test_no_stop_file_without_a_running_job
 interrupted copy-back is completed            test_interrupted_replacement_is_completed
 private terms never reach a push              test_finds_terms_in_files_paths_and_messages
 placeholder left, never overwrites a file     test_triage_removes_original_and_flat_link,

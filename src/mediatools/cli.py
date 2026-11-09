@@ -14,6 +14,7 @@ from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.prompt import Prompt
+from mediatools.core.runcontrol import RunControl
 from mediatools.core.runlog import RunLog
 from mediatools.core.versioninfo import VersionInfo
 from mediatools.flatten import FlatPlan, Flattener
@@ -69,6 +70,9 @@ class Cli:
                          help="leave out videos shorter than this (e.g. 60 before a triage)")
         cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
         cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+
+        sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
+                                    "after its current file; returns at once")
 
         cmd = sub.add_parser("progress", help="read-only report: which videos are shrunk")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
@@ -229,9 +233,24 @@ class Cli:
                              config.db_name(), args.order, args.min_seconds)
         codecs = CodecCache(os.path.join(DataDir().sub("state"), "shrink_codecs.tsv"))
         shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations, codecs=codecs)
+        shrinker.control = RunControl("shrink")
         shrinker.install_signal_handlers()
         prompt = Prompt(args.yes)
         return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
+
+    @staticmethod
+    def cmd_stop(_args: argparse.Namespace) -> int:
+        """Run ``mediatools stop``: request a stop of the running shrink.
+
+        Returns:
+            0 if a running shrink was asked to stop, 1 if none runs.
+        """
+        pid = RunControl("shrink").request_stop()
+        if pid is None:
+            print("no shrink run is active - nothing to stop")
+            return 1
+        print(f"stop requested: shrink (pid {pid}) finishes its current file and ends")
+        return 0
 
     def cmd_progress(self, args: argparse.Namespace) -> int:
         """Run ``mediatools progress``.
