@@ -1,5 +1,9 @@
 classDiagram
   direction LR
+  class CodecCache {
+    +parse(text)
+    +format(value)
+  }
   class Config {
     +path
     +parser
@@ -30,6 +34,8 @@ classDiagram
     +get(file_path, st)
     +put(file_path, st, duration)
     +save()
+    +parse(text)
+    +format(value)
   }
   class MediaTypes {
     +FLAT_DIR
@@ -68,6 +74,7 @@ classDiagram
     +line(name, file_fraction, file_bytes)
     +show(name, file_fraction, file_bytes)
     +file_done(size)
+    +file_skipped(size)
     +clear()
     +duration_text(seconds)
   }
@@ -99,6 +106,7 @@ classDiagram
     +files(root)
     +media_files(root, extensions)
   }
+  CodecCache ..> DurationCache
   Config --> DataDir
   RunLog --> DataDir
   TreeWalker --> MediaTypes
