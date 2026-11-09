@@ -70,6 +70,9 @@ class Cli:
                          help="processing order (default: largest files first)")
         cmd.add_argument("--min-seconds", type=float, default=0.0,
                          help="leave out videos shorter than this (e.g. 60 before a triage)")
+        cmd.add_argument("--retry-failed", action="store_true",
+                         help="include videos that failed in an earlier run (FAILED/BROKEN); "
+                              "by default they are left out while their size is unchanged")
         cmd.add_argument("-y", "--yes", action="store_true", help="do not ask for confirmation")
         cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
 
@@ -250,18 +253,25 @@ class Cli:
             args: Parsed arguments.
 
         Returns:
-            Exit code of :meth:`Shrinker.run` (0 if the user declined).
+            Exit code of :meth:`Shrinker.run` (0 if the user declined), or 3
+            if another shrink run is still active.
         """
+        active = RunControl("shrink").active_pid()
+        if active is not None:
+            print(f"shrink is already running (pid {active}) - watch it with "
+                  f"'mediatools attach', stop it with 'mediatools stop'")
+            return 3
         config = Config()
         root = self._dir(config.require_path("collection", "root", args.path))
         self._need("ffmpeg", "ffprobe")
         mode = "keep shrunk copies" if args.keep_copies else "REPLACE the originals"
         run = RunLog("shrink", args.verbose)
         probe = MediaProbe()
-        encoder = HevcEncoder(args.crf, args.threads, probe, run.logger)
+        encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck())
         durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
         opts = ShrinkOptions(args.keep_copies, MediaTypes.parse_extensions(args.ext),
-                             config.db_name(), args.order, args.min_seconds)
+                             config.db_name(), args.order, args.min_seconds,
+                             args.retry_failed)
         codecs = CodecCache(os.path.join(DataDir().sub("state"), "shrink_codecs.tsv"))
         shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations, codecs=codecs)
         shrinker.control = RunControl(
@@ -271,6 +281,7 @@ class Cli:
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
         shrinker.state["decode"] = DecodeCheck()
+        shrinker.state["ffmpeg_logs"] = os.path.join(DataDir().sub("logs"), "ffmpeg")
         shrinker.install_signal_handlers()
         prompt = Prompt(args.yes)
         return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))

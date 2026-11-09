@@ -10,11 +10,16 @@ classDiagram
     -_connect()
     +exists()
     +ensure()
+    -_ensure_files()
     -_migrate()
     +index()
     +status(file_path)
     +is_done(file_path)
     +record(file_path)
+    +record_failure(file_path, status, reason)
+    +failure(file_path)
+    +failures()
+    +clear_failure(file_path)
     +rows()
   }
   class DatabaseRenamer {
@@ -33,10 +38,11 @@ classDiagram
     +niceness
     +probe
     +log
+    +decode
     +ffmpeg
     +process
     +aborted
-    +init(crf, threads, probe, logger, ffmpeg, niceness)
+    +init(crf, threads, probe, logger, ffmpeg, niceness, decode)
     +default_threads()
     +command(src, dst)
     +encode(src, dst, on_progress)
@@ -55,13 +61,42 @@ classDiagram
     +took
     +init(path, status, source, result, length, took)
   }
+  class ReplaceJournal {
+    +log
+    +init(logger)
+    +replace(out, path, database)
+    +recover(dirpath, database_of)
+    +fsync_file(path)
+    +fsync_dir(path)
+  }
   class ShrinkOptions {
     +keep_copies
     +extensions
     +db_name
     +order
     +min_seconds
-    +init(keep_copies, extensions, db_name, order, min_seconds)
+    +retry_failed
+    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed)
+  }
+  class ShrinkPlanner {
+    +root
+    +log
+    +opts
+    +probe
+    +state
+    +database_of
+    +journal
+    +stats
+    +found
+    +init(root, logger, opts, probe, state, database_of, journal, results)
+    +plan(stopped)
+    -_candidate(path)
+    -_drop_short(todo)
+    -_set_aside_hevc(todo)
+    -_checkpoint(what, cache, number, total)
+    -_codec(path)
+    -_duration(path)
+    -_note_leftover(dirpath)
   }
   class ProgressReport {
     +root
@@ -103,9 +138,9 @@ classDiagram
     +root
     +log
     +opts
-    +probe
     +encoder
     +state
+    +planner
     +control
     +databases
     +flags
@@ -117,17 +152,14 @@ classDiagram
     +on_signal(signum, _frame)
     +database(dirpath)
     +plan()
-    -_drop_short(todo)
-    -_set_aside_hevc(todo)
-    -_checkpoint(what, cache, number, total)
-    -_codec(path)
-    -_duration(path)
     +run(confirm)
     -_run(confirm)
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
     -_broken(path, size)
+    -_record_failure(path, status, reason)
+    -_keep_ffmpeg_log(out, path)
     -_record_hevc()
     -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
@@ -135,13 +167,8 @@ classDiagram
     -_show(name, fraction, size)
     -_poll_stop(force)
     -_mark_stopping(message)
-    -_replace(out, path, database)
-    -_recover(dirpath)
-    -_note_leftover(dirpath)
     -_remove_leftovers()
     -_size_or_none(path)
-    -_fsync_file(path)
-    -_fsync_dir(path)
     -_remove_quietly(path)
     -_finish()
   }
@@ -151,6 +178,7 @@ classDiagram
     +throughput
     +results
     +decode
+    +ffmpeg_logs
   }
   class ThroughputLog {
     +path
@@ -165,14 +193,22 @@ classDiagram
     +add(size, seconds, out_size)
     +duration_text(seconds)
   }
+  ReplaceJournal ..> ShrinkDatabase
   ShrinkOptions ..> Shrinker
+  ShrinkPlanner --> ReplaceJournal
+  ShrinkPlanner --> ShrinkDatabase
+  ShrinkPlanner --> ShrinkOptions
+  ShrinkPlanner --> ShrinkState
+  ShrinkPlanner ..> Shrinker
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   ResultTable ..> FileResult
   Shrinker ..> FileResult
   Shrinker --> HevcEncoder
+  Shrinker --> ReplaceJournal
   Shrinker --> ShrinkDatabase
   Shrinker --> ShrinkOptions
+  Shrinker --> ShrinkPlanner
   Shrinker --> ShrinkState
   Shrinker --> ThroughputLog
   ShrinkState ..> ResultTable

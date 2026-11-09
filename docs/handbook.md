@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.8 -- Handbook"
+title: "mediatools 1.2.9 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -312,7 +312,9 @@ src/mediatools/
     database.py       ShrinkDatabase   per-directory database, schema migration
     dbrenamer.py      DatabaseRenamer  one-time renaming of databases
     encoder.py        HevcEncoder      ffmpeg call and result validation
-    shrinker.py       Shrinker         per-file decision and copy-back
+    shrinker.py       Shrinker         per-file decision, failures, summary
+    planner.py        ShrinkPlanner    planning: DB, failures, durations, codecs, order
+    journal.py        ReplaceJournal   crash-safe copy-back with marker file
     shrinkstate.py    ShrinkState      caches, throughput, result table of a run
     fileresult.py     FileResult       outcome of one video
     resulttable.py    ResultTable      framed result table, report file
@@ -376,6 +378,7 @@ mediatools stop                                               # finish the curre
 | `--order` | `largest` | `largest`, `smallest` or `path` (directory order) |
 | `--min-seconds S` | 0 | leave out videos shorter than S seconds |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
+| `--retry-failed` | off | include videos that failed in an earlier run (`FAILED`/`BROKEN`) |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
 | `--threads N` | CPUs - 1 | decoder threads and size of the x265 thread pool |
 | `--ext LIST` | `mp4` | extensions to process |
@@ -390,7 +393,11 @@ Before anything is encoded, the whole tree is walked once:
    `newShrinkedFiles/` folders are noted as leftovers of aborted runs.
 2. Every video is checked against the database of its directory; recorded
    files are counted as processed and left out. 0-byte placeholders are
-   ignored.
+   ignored. A video recorded as failed in an earlier run (`FAILED` or
+   `BROKEN`, table `failures`) is left out while its size is unchanged;
+   the plan summary and the end of the run list it as `FAILED BEFORE`.
+   `--retry-failed` includes these videos again; a successful retry
+   deletes the failure row.
 3. With `--min-seconds`, the durations of the remaining videos are read
    (cached in `state/triage_durations.tsv`, shared with `triage`) and short
    ones are left out.
@@ -450,9 +457,14 @@ them.
    CPUs, but yields at once to interactive programs.
 
    in its own process group and accepts the result only if the exit code
-   is 0, the output is not empty, has a video stream, and its duration
-   equals the input within `max(1 s, 2 %)`. ffmpeg's messages go to
-   `TMP.ffmpeg.log`; on failure its last lines are logged.
+   is 0, the output is not empty and at least 2 % of the input's size, has
+   a video stream, its duration equals the input within `max(1 s, 2 %)`,
+   and its first 10 s decode without errors. A tiny or undecodable output
+   is typical of an input whose data the decoder could not use -- the
+   encoder then writes little more than grey frames. ffmpeg's messages go
+   to `TMP.ffmpeg.log`; on failure its last lines are logged and the
+   complete file is kept as
+   `logs/ffmpeg/<timestamp>_<name>.ffmpeg.log` in the data directory.
 4. **Copy back in place.** `shutil.copyfile` writes into the existing
    inode. All hard links of the file -- `_flat` entries, deduplication
    links -- therefore show the shrunk content immediately, and no second
@@ -541,6 +553,8 @@ and runs anyway.
 ~~~sql
 CREATE TABLE files (path text NOT NULL PRIMARY KEY,
                     size integer, modified text);
+CREATE TABLE failures (name text NOT NULL PRIMARY KEY, size integer,
+                       status text, reason text, at text);
 ~~~
 
 * One database per directory with videos; file name `[shrink] db_name`
@@ -553,6 +567,11 @@ CREATE TABLE files (path text NOT NULL PRIMARY KEY,
   twice.
 * `path` and `modified` (mtime after shrinking, `YYYY-MM-DD HH:MM:SS`) are
   still written for compatibility and traceability.
+* `failures` holds videos that could not be shrunk (`FAILED`, `BROKEN`)
+  with their size, status, cause and time. It is kept apart from `files`,
+  so `files` still means "processed" for every tool that reads it; older
+  versions ignore the extra table. A row applies only while the file has
+  the recorded size. Review mode (`--keep-copies`) writes no rows.
 * Databases of the first script generation (no `PRIMARY KEY`) are backed up
   next to the original (suffix `.bak_` plus timestamp) and migrated in one
   transaction.
@@ -562,6 +581,8 @@ Inspection (normal user, read-only):
 ~~~bash
 sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
   "SELECT size, modified, path FROM files ORDER BY modified;"
+sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
+  "SELECT at, status, reason, size, name FROM failures ORDER BY at;"
 ~~~
 
 ## Interruption and failures
@@ -573,8 +594,10 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 | Ctrl+C (or Ctrl+Z) once, `--foreground` | the same as `mediatools stop` |
 | Ctrl+C a second time, SIGTERM, SIGHUP (terminal of a `--foreground` run closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
 | power failure, kill -9 | see the replacement journal below |
-| ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
-| video data cannot be decoded (still encrypted, scrambled) | set aside as `BROKEN` before encoding: not encoded, not recorded, original untouched; checked again in the next run; exit code unchanged |
+| ffmpeg cannot encode a file, or the output fails validation | logged as `FAILED`, failure row written, ffmpeg messages kept, run continues, exit code 2 |
+| video data cannot be decoded (still encrypted, scrambled) | set aside as `BROKEN` before encoding: not encoded, original untouched, failure row written; exit code unchanged |
+| a video failed in an earlier run, size unchanged | left out, listed as `FAILED BEFORE`; `--retry-failed` includes it |
+| `mediatools shrink` while another shrink runs | refused at once with the PID and the hints `attach` / `stop`, exit code 3 |
 
 **Background mode.** Planning and the confirmation happen in the
 terminal. Then (`RunControl.begin_work`) the process forks: the parent
@@ -619,6 +642,16 @@ prints `no shrink run is active - nothing to stop`, returns 1 and leaves no
 file behind, so a later run is not stopped by mistake. A stop file left by
 a crash is removed when the next run starts.
 
+**Only one run.** While a shrink run is alive, a second `mediatools shrink`
+is refused before it plans anything:
+
+~~~text
+shrink is already running (pid 12345) - watch it with 'mediatools attach', stop it with 'mediatools stop'
+~~~
+
+A PID file left by a crashed run does not block: only a living process
+counts.
+
 Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
 reaches only mediatools, which decides what happens. The signal handler only
 sets flags and never raises an exception, so a replacement in progress
@@ -644,7 +677,8 @@ the next run finds the marker next to the output and repeats the copy
 before it plans anything else; repeating it is harmless. Without a marker,
 the original was never touched.
 
-Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed.
+Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed,
+3 another shrink run is active.
 
 # progress
 
