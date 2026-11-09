@@ -5,6 +5,14 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-11-09
+
+### Changed
+- Progress display has two lines: the whole run, and the current file with
+  percentage, size, encoded part and remaining time. Both lines are cut to
+  the terminal width, so narrow windows no longer produce a new line per
+  update.
+
 ## [1.2.3] - 2026-11-09
 
 ### Added

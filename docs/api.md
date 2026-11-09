@@ -821,8 +821,11 @@ file size far more than with file count. The remaining time is
 files are done or 30 s have passed, before that from earlier runs
 (``initial_rate``).
 
-On a terminal the line is redrawn in place (``\r``); otherwise (output
-redirected to a file) nothing is drawn and only the log is written.
+Two lines are drawn: the overall progress (:meth:`line`) and the
+current file (:meth:`file_line`: its percentage, size, encoded part and
+remaining time). On a terminal both are redrawn in place and cut to the
+terminal width, so they never wrap; otherwise (output redirected to a
+file) nothing is drawn and only the log is written.
 
 Attributes:
     total_bytes: Bytes of all files of the run.
@@ -833,7 +836,8 @@ Attributes:
     stream: Output stream.
     started: Start time (monotonic seconds).
     enabled: True if the stream is a terminal.
-    note: Text shown at the start of the line, e.g. a pending stop.
+    note: Text shown at the start of the first line, e.g. a pending stop.
+    drawn: True while the two lines are on the screen.
 ~~~
 
 **`__init__`**
@@ -887,12 +891,14 @@ Returns:
 **`line`**
 
 ~~~text
-line(self, name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> str
+line(self, _name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> str
 
-Build the status line.
+Build the line of the overall progress.
+
+The name of the current file is not part of this line (see
+:meth:`file_line`); the parameter keeps both methods interchangeable.
 
 Args:
-    name: Name of the current file.
     file_fraction: Encoded fraction of the current file (0..1).
     file_bytes: Size of the current file.
 
@@ -900,12 +906,37 @@ Returns:
     Text without line break.
 ~~~
 
+**`file_line`**
+
+~~~text
+file_line(
+    self,
+    name: str = '',
+    file_fraction: float = 0.0,
+    file_bytes: int = 0,
+    width: int | None = None,
+) -> str
+
+Build the line of the current file.
+
+Args:
+    name: Name of the current file.
+    file_fraction: Encoded fraction of the current file (0..1).
+    file_bytes: Size of the current file.
+    width: Maximum length; a longer name is shortened in the middle,
+        so that its start and end stay visible. None: no limit.
+
+Returns:
+    Text without line break, e.g.
+    ``file  35 % of 2.40 GiB (0.84 GiB encoded) | 12m left | clip.mp4``.
+~~~
+
 **`show`**
 
 ~~~text
 show(self, name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> None
 
-Redraw the status line on a terminal.
+Redraw both status lines on a terminal.
 
 Args:
     name: Name of the current file.
@@ -943,7 +974,7 @@ Args:
 ~~~text
 clear(self) -> None
 
-Remove the status line before a log message is printed.
+Remove both status lines before a log message is printed.
 ~~~
 
 **`duration_text`**
@@ -1169,7 +1200,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.3')
+__init__(self, package_dir: str | None = None, version: str = '1.2.4')
 
 Locate the imported package.
 
