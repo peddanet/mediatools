@@ -119,6 +119,7 @@ classDiagram
     +name
     +pid_file
     +stop_file
+    +restart_file
     +status_file
     +console_file
     +last_poll
@@ -131,18 +132,31 @@ classDiagram
     +begin_work()
     +detach()
     +finish()
+    +handover()
+    +restart_requested()
+    +clear_restart()
     +stop_requested(force)
     +active_pid()
     +active_log()
     +request_stop()
+    +request_restart()
     -_remove(path)
   }
   class RunLog {
     +datadir
     +path
     +logger
-    +init(name, verbose, datadir)
+    +init(name, verbose, datadir, continue_path)
     +close()
+  }
+  class SelfRestart {
+    +argv
+    +log_path
+    +python
+    +init(argv, log_path, python)
+    +command()
+    +installed_version()
+    +execute()
   }
   class SleepInhibitor {
     +why
@@ -171,6 +185,7 @@ classDiagram
   CodecCache ..> DurationCache
   Config --> DataDir
   RunControl --> DataDir
+  RunControl ..> SelfRestart
   RunControl --> SleepInhibitor
   RunLog --> DataDir
   RunLog --> VersionInfo

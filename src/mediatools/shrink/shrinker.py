@@ -9,6 +9,7 @@ import signal
 import time
 from collections.abc import Callable
 
+from mediatools import __version__
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.datadir import DataDir
 from mediatools.core.durationcache import DurationCache
@@ -56,6 +57,14 @@ class Shrinker:
 
     **Crash safety.** See :class:`ReplaceJournal`.
 
+    **New release during a run.** ``mediatools reload`` (also sent by
+    ``mediatools update``) asks the job to switch to the installed release.
+    Between two files - never during an encode or a replacement - the job
+    checks that the installed release starts (``--version``), closes its
+    table and summary and returns :attr:`RESTART`; the caller then replaces
+    the process (:class:`SelfRestart`). A release that does not start, or
+    the same version, is not switched to and the run continues.
+
     **Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
     hold only partial outputs of aborted runs. They are listed in the plan
     summary and deleted only after the start question is confirmed.
@@ -73,13 +82,15 @@ class Shrinker:
             ``throughput`` (speed and size ratio for the estimates) and
             ``decode`` (trial decode before encoding; None skips it) and
             ``ffmpeg_logs`` (folder for the ffmpeg messages of failed
-            encodes; None deletes them).
+            encodes; None deletes them) and ``restart`` (switch to a new
+            release on request; None ignores requests).
         planner: Planning phase; holds the probe and the replacement
             journal.
         control: Stop requests from ``mediatools stop``, or None.
         databases: Open databases per directory.
-        flags: ``stop`` (finish the current file, then stop) and ``abort``
-            (stop the current file at once).
+        flags: ``stop`` (finish the current file, then stop), ``abort``
+            (stop the current file at once) and ``restart`` (switch to the
+            installed release before the next file).
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
             ``failed``, ``broken``, ``failed_before`` (left out: recorded as
@@ -90,6 +101,8 @@ class Shrinker:
             ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
             ``(path, size)`` of planned videos that are already HEVC.
     """
+
+    RESTART = 4
 
     def __init__(self, root: str, logger, opts: ShrinkOptions | None = None,
                  encoder: HevcEncoder | None = None, probe: MediaProbe | None = None,
@@ -116,10 +129,11 @@ class Shrinker:
         self.encoder = encoder or HevcEncoder(probe=probe, logger=logger)
         self.state: ShrinkState = {"durations": durations, "codecs": codecs,
                                    "throughput": throughput or ThroughputLog(),
-                                   "results": None, "decode": None, "ffmpeg_logs": None}
+                                   "results": None, "decode": None, "ffmpeg_logs": None,
+                                   "restart": None}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
-        self.flags = {"stop": False, "abort": False}
+        self.flags = {"stop": False, "abort": False, "restart": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "broken": 0, "failed_before": 0, "copies": 0, "recovered": 0}
@@ -189,7 +203,8 @@ class Shrinker:
 
         Returns:
             0 on success or if declined, 1 if stopped by the user, 2 if a
-            file failed.
+            file failed, :attr:`RESTART` if the caller is to switch to the
+            installed release.
         """
         if self.control is not None:
             self.control.start()
@@ -197,7 +212,10 @@ class Shrinker:
             return self._run(confirm)
         finally:
             if self.control is not None:
-                self.control.finish()
+                if self.flags["restart"]:
+                    self.control.handover()
+                else:
+                    self.control.finish()
             if self.state["results"] is not None:
                 self.state["results"].finish()
 
@@ -233,7 +251,8 @@ class Shrinker:
         self._attach_bar_filter()
         for path, size in todo:
             self._poll_stop(force=True)
-            if self.flags["stop"]:
+            self._poll_restart()
+            if self.flags["stop"] or self.flags["restart"]:
                 break
             if self._process(path, size):
                 self.display.file_done(size)
@@ -243,6 +262,8 @@ class Shrinker:
         if self.state["results"] is not None:
             self.state["results"].finish()           # close the table before the summary
         self._finish()
+        if self.flags["restart"]:
+            return self.RESTART
         if self.flags["stop"]:
             return 1
         return 2 if self.found["failed"] else 0
@@ -496,6 +517,25 @@ class Shrinker:
         if self.control.stop_requested(force):
             self._mark_stopping("stop requested by 'mediatools stop' - "
                                 "stopping after the current file")
+
+    def _poll_restart(self) -> None:
+        """Turn a request of ``mediatools reload`` into a switch before the next file."""
+        restart = self.state["restart"]
+        if self.control is None or restart is None or not self.control.restart_requested():
+            return
+        new = restart.installed_version()
+        if new is None:
+            self.log.error("reload requested, but the installed release does not start - "
+                           "continuing with mediatools %s", __version__)
+        elif new == __version__:
+            self.log.info("reload requested, but mediatools %s is already running - "
+                          "continuing", new)
+        else:
+            self.log.warning("switching from mediatools %s to %s now - the run continues "
+                             "with the files left, in this log", __version__, new)
+            self.flags["restart"] = True
+            return
+        self.control.clear_restart()
 
     def _mark_stopping(self, message: str) -> None:
         """Set the stop flag and show it in the log and on the progress line.

@@ -29,16 +29,19 @@ class RunLog:
         logger: The configured :class:`logging.Logger`.
     """
 
-    def __init__(self, name: str, verbose: bool = False, datadir: DataDir | None = None):
+    def __init__(self, name: str, verbose: bool = False, datadir: DataDir | None = None,
+                 continue_path: str | None = None):
         """Create the logger and its two handlers.
 
         Args:
             name: Command name; used in the logger and file name.
             verbose: If True, DEBUG messages are logged as well.
             datadir: Data directory; the default one if None.
+            continue_path: Existing log file to append to (a job that
+                switched to a new release); None creates a new file.
         """
         self.datadir = datadir or DataDir()
-        self.path = self.datadir.file("logs", name, ".log")
+        self.path = continue_path or self.datadir.file("logs", name, ".log")
         # unique logger name, so several runs in one process do not share handlers
         self.logger = logging.getLogger(f"mediatools.{name}.{id(self)}")
         # id() values can be reused after garbage collection: close stale
@@ -49,7 +52,8 @@ class RunLog:
         self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False
 
-        file_handler = logging.FileHandler(self.path, mode="w", encoding="utf-8")
+        file_handler = logging.FileHandler(self.path, mode="a" if continue_path else "w",
+                                           encoding="utf-8")
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
         stream_handler = logging.StreamHandler(sys.stdout)
