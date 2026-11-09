@@ -1,6 +1,7 @@
-"""One-line terminal progress display with remaining-time estimate."""
+"""Two-line terminal progress display with remaining-time estimates."""
 from __future__ import annotations
 
+import shutil
 import sys
 import time
 from typing import TextIO
@@ -15,8 +16,11 @@ class ProgressBar:
     files are done or 30 s have passed, before that from earlier runs
     (``initial_rate``).
 
-    On a terminal the line is redrawn in place (``\\r``); otherwise (output
-    redirected to a file) nothing is drawn and only the log is written.
+    Two lines are drawn: the overall progress (:meth:`line`) and the
+    current file (:meth:`file_line`: its percentage, size, encoded part and
+    remaining time). On a terminal both are redrawn in place and cut to the
+    terminal width, so they never wrap; otherwise (output redirected to a
+    file) nothing is drawn and only the log is written.
 
     Attributes:
         total_bytes: Bytes of all files of the run.
@@ -27,7 +31,8 @@ class ProgressBar:
         stream: Output stream.
         started: Start time (monotonic seconds).
         enabled: True if the stream is a terminal.
-        note: Text shown at the start of the line, e.g. a pending stop.
+        note: Text shown at the start of the first line, e.g. a pending stop.
+        drawn: True while the two lines are on the screen.
     """
 
     WIDTH = 24
@@ -52,6 +57,7 @@ class ProgressBar:
         self.started = time.monotonic()
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
         self.note = ""
+        self.drawn = False
 
     def rate(self, current_bytes: float = 0.0) -> float | None:
         """Return the speed used for the estimate.
@@ -82,11 +88,13 @@ class ProgressBar:
             return None
         return max(0.0, self.total_bytes - self.done_bytes - current_bytes) / rate
 
-    def line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0) -> str:
-        """Build the status line.
+    def line(self, _name: str = "", file_fraction: float = 0.0, file_bytes: int = 0) -> str:
+        """Build the line of the overall progress.
+
+        The name of the current file is not part of this line (see
+        :meth:`file_line`); the parameter keeps both methods interchangeable.
 
         Args:
-            name: Name of the current file.
             file_fraction: Encoded fraction of the current file (0..1).
             file_bytes: Size of the current file.
 
@@ -98,25 +106,56 @@ class ProgressBar:
         filled = int(fraction * self.WIDTH)
         remaining = self.remaining_seconds(current)
         eta = "?" if remaining is None else self.duration_text(remaining)
-        short = name if len(name) <= 30 else name[:12] + "..." + name[-15:]
         prefix = f"{self.note} | " if self.note else ""
-        return (f"{prefix}[{'#' * filled}{'.' * (self.WIDTH - filled)}] {fraction * 100:5.1f} % | "
+        gauge = '#' * filled + '.' * (self.WIDTH - filled)
+        return (f"{prefix}total [{gauge}] {fraction * 100:5.1f} % | "
                 f"{self.done_files}/{self.total_files} files | "
                 f"{(self.done_bytes + current) / 1024 ** 3:.1f}/"
-                f"{self.total_bytes / 1024 ** 3:.1f} GiB | ETA {eta} | "
-                f"{file_fraction * 100:3.0f} % {short}")
+                f"{self.total_bytes / 1024 ** 3:.1f} GiB | ETA {eta}")
+
+    def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
+                  width: int | None = None) -> str:
+        """Build the line of the current file.
+
+        Args:
+            name: Name of the current file.
+            file_fraction: Encoded fraction of the current file (0..1).
+            file_bytes: Size of the current file.
+            width: Maximum length; a longer name is shortened in the middle,
+                so that its start and end stay visible. None: no limit.
+
+        Returns:
+            Text without line break, e.g.
+            ``file  35 % of 2.40 GiB (0.84 GiB encoded) | 12m left | clip.mp4``.
+        """
+        current = file_fraction * file_bytes
+        rate = self.rate(current)
+        left = "?" if not rate else self.duration_text((file_bytes - current) / rate)
+        head = (f"file  {file_fraction * 100:3.0f} % of {file_bytes / 1024 ** 3:.2f} GiB "
+                f"({current / 1024 ** 3:.2f} GiB encoded) | {left} left | ")
+        room = None if width is None else max(9, width - len(head))
+        if room is not None and len(name) > room:
+            keep = room - 3
+            name = name[:keep // 2] + "..." + name[len(name) - (keep - keep // 2):]
+        return head + name
 
     def show(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0) -> None:
-        """Redraw the status line on a terminal.
+        """Redraw both status lines on a terminal.
 
         Args:
             name: Name of the current file.
             file_fraction: Encoded fraction of the current file (0..1).
             file_bytes: Size of the current file.
         """
-        if self.enabled:
-            self.stream.write("\r\033[K" + self.line(name, file_fraction, file_bytes))
-            self.stream.flush()
+        if not self.enabled:
+            return
+        width = max(20, shutil.get_terminal_size().columns - 1)
+        first = self.line(name, file_fraction, file_bytes)[:width]
+        second = self.file_line(name, file_fraction, file_bytes, width)[:width]
+        up = "\033[1A" if self.drawn else ""     # back to the first line
+        self.stream.write(f"\r{up}\033[K{first}\n\033[K{second}")
+        self.stream.flush()
+        self.drawn = True
 
     def file_done(self, size: int) -> None:
         """Count a finished (or skipped) file.
@@ -140,10 +179,11 @@ class ProgressBar:
         self.total_bytes = max(1, self.total_bytes - size)
 
     def clear(self) -> None:
-        """Remove the status line before a log message is printed."""
-        if self.enabled:
-            self.stream.write("\r\033[K")
+        """Remove both status lines before a log message is printed."""
+        if self.enabled and self.drawn:
+            self.stream.write("\r\033[K\033[1A\r\033[K")
             self.stream.flush()
+            self.drawn = False
 
     @staticmethod
     def duration_text(seconds: float) -> str:

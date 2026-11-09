@@ -263,8 +263,14 @@ mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
    `newShrinkedFiles/`, validate, copy over the original *in place* (same
    inode, so `_flat` links see the new content), record.
 
-A progress line shows percentage by volume, files, GiB and the remaining
-time (measured speed of this and earlier runs).
+Two progress lines show the whole run (percentage by volume, files, GiB,
+remaining time) and the current file (percentage, size, encoded part,
+remaining time); the speed is measured in this and earlier runs:
+
+~~~text
+total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB | ETA 9d23h
+file   35 % of 2.40 GiB (0.84 GiB encoded) | 17m left | example_clip.mp4
+~~~
 
 | Key | Effect |
 |---|---|
