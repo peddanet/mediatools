@@ -13,7 +13,9 @@ class RunLog:
     """Logger that writes to stdout and to a time-stamped log file.
 
     The terminal shows plain messages; the file additionally contains
-    timestamp and level of every line. The first two lines name the log
+    timestamp and level of every line, and always the DEBUG details
+    (e.g. ffmpeg commands, database records) that the terminal shows only
+    with ``verbose``. The first two lines name the log
     file and the running version with its process ID, so every log tells
     which release produced it.
 
@@ -44,7 +46,7 @@ class RunLog:
         for stale in list(self.logger.handlers):
             stale.close()
             self.logger.removeHandler(stale)
-        self.logger.setLevel(logging.DEBUG if verbose else logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False
 
         file_handler = logging.FileHandler(self.path, mode="w", encoding="utf-8")
@@ -52,6 +54,7 @@ class RunLog:
             logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(logging.Formatter("%(message)s"))
+        stream_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
         self.logger.addHandler(file_handler)
         self.logger.addHandler(stream_handler)
         self.logger.info("log file: %s", self.path)

@@ -2,6 +2,7 @@
 from mediatools.flatten.flatindex import FlatIndex
 from mediatools.flatten.flattener import Flattener
 from mediatools.flatten.namer import FlatNamer
-from mediatools.flatten.plan import FlatPlan, PlanEntry
+from mediatools.flatten.plan import FlatPlan
+from mediatools.flatten.planentry import PlanEntry
 
 __all__ = ["FlatIndex", "Flattener", "FlatNamer", "FlatPlan", "PlanEntry"]
