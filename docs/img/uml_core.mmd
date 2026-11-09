@@ -39,6 +39,16 @@ classDiagram
     +file(sub, prefix, suffix)
     +stamp()
   }
+  class DecodeCheck {
+    +ffmpeg
+    +seconds
+    +max_errors
+    +timeout
+    +init(ffmpeg, seconds, max_errors, timeout)
+    +command(path)
+    +errors(path)
+    +unusable(path)
+  }
   class DurationCache {
     +path
     +entries

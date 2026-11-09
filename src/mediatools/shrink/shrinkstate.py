@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from mediatools.core.codeccache import CodecCache
+from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.durationcache import DurationCache
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.throughput import ThroughputLog
@@ -17,9 +18,12 @@ class ShrinkState(TypedDict):
         codecs: Cache of video codecs (HEVC check of the plan), or None.
         throughput: Measured speed and size ratio for the estimates.
         results: Result table of finished videos, or None.
+        decode: Trial decode that sets aside undecodable videos, or None
+            (no check).
     """
 
     durations: DurationCache | None
     codecs: CodecCache | None
     throughput: ThroughputLog
     results: ResultTable | None
+    decode: DecodeCheck | None

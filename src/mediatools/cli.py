@@ -9,6 +9,7 @@ import sys
 
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
+from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.attachview import AttachView
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
@@ -269,6 +270,7 @@ class Cli:
         shrinker.state["results"] = ResultTable(
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
+        shrinker.state["decode"] = DecodeCheck()
         shrinker.install_signal_handlers()
         prompt = Prompt(args.yes)
         return shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))

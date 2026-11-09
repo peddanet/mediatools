@@ -711,6 +711,101 @@ Returns:
     Timestamp ``YYYY-MM-DD_hh-mm-ss``.
 ~~~
 
+### `DecodeCheck` (`mediatools.core.decodecheck`) {.unnumbered}
+
+~~~text
+Decodes the start of a video and counts the decoder errors.
+
+Some videos have an intact container (``ftyp``/``mdat``/``moov``,
+plausible duration, codec ``avc1``) but sample data a decoder cannot
+use: still encrypted after the encryption boxes were stripped, or
+scrambled. Encoding such a file takes as long as a good one and yields a
+grey or empty result. A short trial decode finds them in seconds: a
+healthy video decodes without errors, an unusable one produces errors
+from the first frame on (``decode_slice_header error``, ``no frame!``,
+``non-existing PPS``, AAC ``channel element ... is not allocated``).
+
+The check reads only; it never writes or changes the file.
+
+Attributes:
+    ffmpeg: Name or path of the ffmpeg executable.
+    seconds: Length of the trial decode from the start, in seconds.
+    max_errors: A file with at least this many error lines is unusable.
+    timeout: Seconds after which the trial is abandoned (result unknown).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    ffmpeg: str = 'ffmpeg',
+    seconds: float = 10.0,
+    max_errors: int = 10,
+    timeout: float = 300.0,
+) -> None
+
+Store the settings.
+
+Args:
+    ffmpeg: Name or path of the ffmpeg executable.
+    seconds: Length of the trial decode, in seconds.
+    max_errors: Error lines from which a file counts as unusable.
+    timeout: Seconds after which the trial is abandoned.
+
+Raises:
+    ValueError: If ``seconds`` or ``timeout`` is not positive or
+        ``max_errors`` is below 1.
+~~~
+
+**`command`**
+
+~~~text
+command(self, path: str) -> list[str]
+
+Build the ffmpeg command of the trial decode.
+
+All streams are decoded (``-f null``: nothing is written); ``-t``
+before ``-i`` limits the input to the first :attr:`seconds`.
+
+Args:
+    path: Video file.
+
+Returns:
+    Argument list for :func:`subprocess.run`.
+~~~
+
+**`errors`**
+
+~~~text
+errors(self, path: str) -> int | None
+
+Count the error lines of a trial decode.
+
+Args:
+    path: Video file.
+
+Returns:
+    Number of non-empty lines ffmpeg wrote at log level ``error``,
+    or None if ffmpeg is missing or the trial timed out.
+~~~
+
+**`unusable`**
+
+~~~text
+unusable(self, path: str) -> int | None
+
+Tell whether a video's data cannot be decoded.
+
+Args:
+    path: Video file.
+
+Returns:
+    The error count if it reaches :attr:`max_errors` (the file is
+    unusable), otherwise None - also when the trial could not run,
+    so an unknown result never blocks a file.
+~~~
+
 ### `DurationCache` (`mediatools.core.durationcache`) {.unnumbered}
 
 ~~~text
@@ -1519,7 +1614,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.7')
+__init__(self, package_dir: str | None = None, version: str = '1.2.8')
 
 Locate the imported package.
 
@@ -2025,9 +2120,10 @@ Outcome of one video.
 Attributes:
     path: Absolute path of the video.
     status: ``shrunk``, ``copy`` (review mode), ``HEVC`` (recorded
-        without encoding) or ``FAILED``.
+        without encoding), ``FAILED`` or ``BROKEN`` (data not decodable,
+        set aside).
     source: Size before, in bytes.
-    result: Size after, in bytes, or None (failed, HEVC).
+    result: Size after, in bytes, or None (failed, HEVC, broken).
     length: Playing time in seconds, or None if unknown.
     took: Wall-clock seconds spent on the file.
 ~~~
@@ -2468,6 +2564,9 @@ A run has two phases:
    encoded, not counted in volume and time) and sort the rest
    (``largest`` first, ``smallest`` first or walk order ``path``).
 2. **Encode** - per file: already HEVC -> record only; otherwise
+   a trial decode (:class:`DecodeCheck`, if set) sets aside videos whose
+   data cannot be decoded (status ``BROKEN``, never encoded, never
+   recorded, original untouched);
    :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
    result replaces the original (in place, the inode is kept, so
    ``_flat`` hard links see the new content) and is recorded.
@@ -2500,15 +2599,17 @@ Attributes:
     encoder: Encoder for new files.
     state: Persistent helpers: ``durations`` (for ``min_seconds``) and
         ``codecs`` (HEVC check of the plan) - None probes without caching -
-        and ``throughput`` (speed and size ratio for the estimates).
+        ``throughput`` (speed and size ratio for the estimates) and
+        ``decode`` (trial decode before encoding; None skips it).
     control: Stop requests from ``mediatools stop``, or None.
     databases: Open databases per directory.
     flags: ``stop`` (finish the current file, then stop) and ``abort``
         (stop the current file at once).
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
-        ``failed``, ``copies``, ``recovered``.
-    found: ``failed`` - paths that could not be encoded; ``leftovers`` -
+        ``failed``, ``broken``, ``copies``, ``recovered``.
+    found: ``failed`` - paths that could not be encoded; ``broken`` -
+        paths whose data could not be decoded; ``leftovers`` -
         ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
         ``(path, size)`` of planned videos that are already HEVC.
 ~~~
@@ -2737,7 +2838,26 @@ Args:
 Returns:
     True if an encode was attempted, False if the file needed none
     (removed, recorded meanwhile, or HEVC by now - e.g. a hard link
-    of a file shrunk earlier in this run).
+    of a file shrunk earlier in this run) or its data cannot be
+    decoded.
+~~~
+
+**`_broken`**
+
+~~~text
+_broken(self, path: str, size: int) -> bool
+
+Set a video aside if a trial decode finds its data unusable.
+
+Such a file is neither encoded nor recorded and stays untouched; the
+next run checks it again.
+
+Args:
+    path: Video file.
+    size: Its size.
+
+Returns:
+    True if the video was set aside.
 ~~~
 
 **`_record_hevc`**
@@ -2940,6 +3060,8 @@ Attributes:
     codecs: Cache of video codecs (HEVC check of the plan), or None.
     throughput: Measured speed and size ratio for the estimates.
     results: Result table of finished videos, or None.
+    decode: Trial decode that sets aside undecodable videos, or None
+        (no check).
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}

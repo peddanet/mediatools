@@ -5,6 +5,17 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-11-09
+
+### Added
+- Trial decode before encoding (`DecodeCheck`): the first 10 s of each
+  video are decoded without output; 10 or more decoder errors mark the
+  video as `BROKEN` (data still encrypted or scrambled although container,
+  duration and codec tag look normal). Such a video is not encoded, not
+  recorded and stays untouched; the run continues, the summary lists it
+  under "not decodable", and the next run checks it again. Before, such
+  files were encoded for as long as a good one and the output was grey.
+
 ## [1.2.7] - 2026-11-09
 
 ### Added
