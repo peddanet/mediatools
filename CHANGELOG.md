@@ -5,6 +5,20 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-09
+
+### Added
+- `mediatools stop`: asks a running `shrink` from any other terminal to
+  finish its current file and end (like the first Ctrl+C, but independent
+  of which window has the keyboard focus). Returns at once; exit code 1 and
+  no leftover request if no shrink run is active. The run shows
+  `STOPPING after this file` on its progress line, also after Ctrl+C.
+
+### Changed
+- Planning stores newly probed durations and codecs every 500 files, not
+  only at the end of each check, so an interrupted first check keeps its
+  work; the progress messages show how many answers came from the cache.
+
 ## [1.2.2] - 2026-11-09
 
 ### Fixed

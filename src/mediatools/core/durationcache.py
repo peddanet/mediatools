@@ -18,6 +18,7 @@ class DurationCache:
         path: Location of the TSV file.
         entries: Mapping path to ``(size, mtime_ns, duration)``.
         hits: Number of lookups answered from the cache in this run.
+        added: Number of values stored since the last :meth:`save`.
     """
 
     def __init__(self, path: str):
@@ -29,6 +30,7 @@ class DurationCache:
         self.path = path
         self.entries: dict[str, tuple[int, int, Any]] = {}
         self.hits = 0
+        self.added = 0
         try:
             with open(path, encoding="utf-8", errors="surrogateescape") as handle:
                 for line in handle:
@@ -64,6 +66,7 @@ class DurationCache:
             duration: Duration in seconds.
         """
         self.entries[file_path] = (st.st_size, st.st_mtime_ns, duration)
+        self.added += 1
 
     def save(self) -> None:
         """Write the cache atomically (temporary file, then rename)."""
@@ -72,6 +75,7 @@ class DurationCache:
             for file_path, (size, mtime, duration) in sorted(self.entries.items()):
                 handle.write(f"{file_path}\t{size}\t{mtime}\t{self.format(duration)}\n")
         os.replace(tmp, self.path)
+        self.added = 0
 
     @staticmethod
     def parse(text: str) -> Any:
