@@ -5,6 +5,30 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-09
+
+### Fixed
+- Replacement journal is durable: the validated output, the marker file and
+  its directory are flushed to disk (`fsync`) before the original is
+  overwritten. Before, a power failure during the copy could leave a
+  partly overwritten original without a marker.
+- Leftover `newShrinkedFiles/` folders of aborted runs are no longer
+  deleted during planning; they are listed in the plan summary (folders,
+  files, size; each folder with `-v`) and deleted only after the start
+  question is confirmed.
+- A closed terminal (SIGHUP) aborts the current file cleanly like a second
+  Ctrl+C instead of ending the program without clean-up.
+- `--threads` now limits the libx265 thread pool as well
+  (`-x265-params pools=N`); ffmpeg's `-threads` alone did not, so x265 used
+  every CPU. The default is the number of logical CPUs minus one, and
+  ffmpeg runs with the lowest CPU priority (`nice -n 19`).
+
+### Added
+- Plan summary forecasts the size after shrinking and the saving, from the
+  measured output/source ratio of earlier files
+  (`state/shrink_throughput.json`, new keys `ratio_src`, `ratio_out`,
+  `files`).
+
 ## [1.2.0] - 2026-11-08
 
 ### Changed

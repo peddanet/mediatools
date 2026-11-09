@@ -1,8 +1,8 @@
 ---
-title: "mediatools 1.2.0 -- Developer Documentation"
+title: "mediatools 1.2.1 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
-date: "2026-11-08"
+date: "2026-11-09"
 lang: en-GB
 abstract: |
   This document is written for developers who maintain or extend
@@ -183,7 +183,7 @@ directory, configuration -- lives in `core`.
 | `Shrinker` | plan (order, minimum duration), per-file decision, journalled in-place copy-back, two-stage Ctrl+C, summary |
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
-| `ThroughputLog` | measured encoding speed for estimates |
+| `ThroughputLog` | measured encoding speed and size ratio for estimates |
 
 ## Package `triage`
 

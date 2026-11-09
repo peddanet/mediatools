@@ -2,6 +2,7 @@
 import io
 import logging
 import os
+import shutil
 import signal
 from collections.abc import Callable
 from pathlib import Path
@@ -244,3 +245,115 @@ def test_progress_bar_and_throughput(tmp_path: Path) -> None:
     log.add(100, 4.0)
     assert ThroughputLog(str(tmp_path / "t.json")).rate() == 25.0
     assert ThroughputLog.duration_text(3 * 3600 + 120) == "3 h 2 min"
+
+
+def test_replacement_flushes_output_marker_and_directory_first(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Output, marker and directory reach the disk before the original is touched.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Patcher (fixture).
+    """
+    paths = videos(tmp_path)
+    events: list[str] = []
+    real_fsync, real_copy = os.fsync, shutil.copyfile
+
+    def fsync(descriptor: int) -> None:
+        """Record which file or directory is flushed.
+
+        Args:
+            descriptor: Open file descriptor.
+        """
+        events.append("fsync:" + os.path.basename(os.readlink(f"/proc/self/fd/{descriptor}")))
+        real_fsync(descriptor)
+
+    def copy(src: str, dst: str) -> str:
+        """Record the copy over the original.
+
+        Args:
+            src: Source file.
+            dst: Destination file.
+
+        Returns:
+            The destination.
+        """
+        events.append("copy:" + os.path.basename(dst))
+        return real_copy(src, dst)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(shutil, "copyfile", copy)
+    shrinker, _encoder = build(tmp_path, ShrinkOptions(order="path"))
+    assert shrinker.run() == 0
+    name = events[0].split(":", 1)[1]               # first file in walk order
+    assert events[:5] == [f"fsync:{name}", f"fsync:{name}.replace", "fsync:newShrinkedFiles",
+                          f"copy:{name}", f"fsync:{name}"]
+    assert read(paths[name]) == b"shrunk:" + name.encode()
+
+
+def test_sighup_aborts_the_current_file(tmp_path: Path) -> None:
+    """A closed terminal (SIGHUP) aborts at once and keeps the original.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    paths = videos(tmp_path)
+    shrinker, encoder = build(tmp_path)
+    encoder.signals_at = {"large.mp4": 0}
+    original_encode = encoder.encode
+
+    def hangup(src: str, dst: str, on_progress: Callable[[float], None] | None = None) -> bool:
+        """Send SIGHUP while the first file is encoded.
+
+        Args:
+            src: Input file.
+            dst: Output file.
+            on_progress: Progress callback.
+
+        Returns:
+            Result of the double.
+        """
+        shrinker.on_signal(signal.SIGHUP)
+        return original_encode(src, dst, on_progress)
+
+    encoder.encode = hangup  # type: ignore[method-assign]
+    assert shrinker.run() == 1
+    assert read(paths["large.mp4"]) == b"l" * 1000
+    assert shrinker.display is not None and not shrinker.display.enabled
+
+
+def test_leftovers_listed_and_removed_only_after_confirmation(tmp_path: Path) -> None:
+    """Leftover work folders survive a declined start question.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    videos(tmp_path)
+    leftover = make_file(tmp_path / "c/a/newShrinkedFiles/old_partial.mp4", b"x" * 50)
+    shrinker, encoder = build(tmp_path)
+    assert shrinker.run(lambda: False) == 0
+    assert os.path.exists(leftover) and not encoder.calls
+    assert shrinker.found["leftovers"][0][1:] == (1, 50)
+    shrinker, encoder = build(tmp_path)
+    assert shrinker.run(lambda: True) == 0
+    assert not os.path.exists(leftover) and len(encoder.calls) == 3
+
+
+def test_size_forecast_from_measured_ratio(tmp_path: Path,
+                                           caplog: pytest.LogCaptureFixture) -> None:
+    """The plan summary forecasts the size after shrinking.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        caplog: Log capture (fixture).
+    """
+    videos(tmp_path)
+    log = ThroughputLog(str(tmp_path / "speed.json"))
+    log.add(1000, 10.0)                       # speed only (format of 1.2.0)
+    assert log.ratio() is None
+    log.add(1000, 10.0, 400)
+    assert ThroughputLog(str(tmp_path / "speed.json")).ratio() == 0.4
+    shrinker, _encoder = build(tmp_path)
+    with caplog.at_level(logging.INFO, logger="test"):
+        shrinker.run(lambda: False)
+    assert "expected afterwards: about" in caplog.text and "40 % of the source" in caplog.text
