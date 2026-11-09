@@ -116,7 +116,8 @@ Args:
     args: Parsed arguments.
 
 Returns:
-    Exit code of :meth:`Shrinker.run` (0 if the user declined).
+    Exit code of :meth:`Shrinker.run` (0 if the user declined), or 3
+    if another shrink run is still active.
 ~~~
 
 **`cmd_stop`**
@@ -1329,7 +1330,9 @@ The running job writes its process ID to ``<data>/state/<name>.pid``.
 :attr:`POLL_SECONDS`, finishes the current file and ends - exactly like
 the first Ctrl+C, but independent of which window has the keyboard
 focus. Both files are removed when the job ends; a stop file found at
-start (left by a crash) is removed as well.
+start (left by a crash) is removed as well. A second job of the same
+name cannot start while the first one is alive (:meth:`start` raises
+:class:`RuntimeError`); a PID file of a crashed job does not block.
 
 The PID file also names the log file, and the job writes its progress
 lines to ``<data>/state/<name>.status``; ``mediatools attach`` shows
@@ -1380,6 +1383,9 @@ Args:
 start(self) -> None
 
 Register the current process and drop a stale stop request.
+
+Raises:
+    RuntimeError: If another job of this name is still running.
 ~~~
 
 **`_register`**
@@ -1614,7 +1620,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.8')
+__init__(self, package_dir: str | None = None, version: str = '1.2.9')
 
 Locate the imported package.
 
@@ -1738,10 +1744,17 @@ The file name is configurable (``[shrink] db_name``, default
 another name. Databases with an early schema (no PRIMARY KEY) are backed
 up and migrated on first use.
 
+Videos that could not be shrunk are kept apart in a second table, so
+``files`` keeps its meaning ("processed") for every tool that reads it.
+A failure counts only while the file has the recorded size; a changed
+file is tried again. Older tools ignore the extra table.
+
 Schema::
 
     CREATE TABLE files (path text NOT NULL PRIMARY KEY,
                         size integer, modified text)
+    CREATE TABLE failures (name text NOT NULL PRIMARY KEY, size integer,
+                           status text, reason text, at text)
 
 Attributes:
     name: File name of the database.
@@ -1807,7 +1820,15 @@ Returns:
 ~~~text
 ensure(self) -> None
 
-Create the database or migrate an old schema.
+Create the database or migrate an old schema; add the failures table.
+~~~
+
+**`_ensure_files`**
+
+~~~text
+_ensure_files(self) -> None
+
+Create the files table or migrate an old schema.
 ~~~
 
 **`_migrate`**
@@ -1868,6 +1889,57 @@ Returns:
 record(self, file_path: str) -> None
 
 Insert or update the row of a file with its current size and mtime.
+
+Args:
+    file_path: Absolute path of the video.
+~~~
+
+**`record_failure`**
+
+~~~text
+record_failure(self, file_path: str, status: str, reason: str) -> None
+
+Note that a file could not be shrunk (call :meth:`ensure` first).
+
+Args:
+    file_path: Absolute path of the video.
+    status: ``FAILED`` or ``BROKEN``.
+    reason: Short cause.
+~~~
+
+**`failure`**
+
+~~~text
+failure(self, file_path: str) -> str | None
+
+Return the recorded failure status of a file of unchanged size.
+
+Args:
+    file_path: Absolute path of a video in this directory.
+
+Returns:
+    ``FAILED`` or ``BROKEN`` if the file is recorded as failed with
+    its current size, otherwise None.
+~~~
+
+**`failures`**
+
+~~~text
+failures(self) -> dict[str, tuple[int, str]]
+
+Return the recorded failures (cached).
+
+Returns:
+    Mapping file name to ``(size, status)``; empty if the database
+    or its failures table does not exist.
+~~~
+
+**`clear_failure`**
+
+~~~text
+clear_failure(self, file_path: str) -> None
+
+Forget a recorded failure, e.g. after a successful retry.
 
 Args:
     file_path: Absolute path of the video.
@@ -1952,8 +2024,12 @@ Returns:
 Encodes a video with ffmpeg/libx265 and validates the result.
 
 The output is accepted only if ffmpeg exits with 0, the file is not
-empty, it contains a video stream and its duration matches the input
-within ``max(TOL_ABS, duration * TOL_REL)`` seconds.
+empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
+a video stream, its duration matches the input within
+``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
+:class:`DecodeCheck` set - its start decodes without errors. A
+suspiciously small output is typical of an input whose data could not
+be decoded: the encoder then writes almost nothing but grey frames.
 
 **CPU use.** libx265 runs its own thread pool, which by default uses
 every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
@@ -1967,8 +2043,9 @@ responsive.
 ffmpeg runs in its own session (process group): a Ctrl+C in the
 terminal reaches only mediatools, which decides whether the current
 encode finishes or is stopped with :meth:`abort`. Progress is read from
-``-progress pipe:1``; ffmpeg's messages go to ``<dst>.ffmpeg.log`` and
-are logged on failure.
+``-progress pipe:1``; ffmpeg's messages go to ``<dst>.ffmpeg.log``; the
+file is deleted after a validated encode and kept otherwise (its last
+lines are logged; the caller decides where it is kept).
 
 Attributes:
     crf: libx265 constant rate factor.
@@ -1976,6 +2053,7 @@ Attributes:
     niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
     probe: :class:`MediaProbe` used for validation.
     log: Optional logger.
+    decode: Trial decode of the output, or None (no decode check).
     ffmpeg: Name or path of the ffmpeg executable.
     process: Running ffmpeg process, if any.
     aborted: True after :meth:`abort` during the current encode.
@@ -1992,6 +2070,7 @@ __init__(
     logger=None,
     ffmpeg: str = 'ffmpeg',
     niceness: int = 19,
+    decode: DecodeCheck | None = None,
 )
 
 Configure the encoder.
@@ -2004,6 +2083,7 @@ Args:
     logger: Optional :class:`logging.Logger`.
     ffmpeg: Name or path of the ffmpeg executable.
     niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
+    decode: Trial decode of the output, or None (no decode check).
 ~~~
 
 **`default_threads`**
@@ -2079,15 +2159,17 @@ Args:
 ~~~text
 validate(self, src: str, dst: str) -> bool
 
-Compare video stream and duration of the output with the input.
+Check size, video stream, duration and decodability of the output.
 
 Args:
     src: Input video.
     dst: Encoded output.
 
 Returns:
-    True if the output has a video stream and a matching duration
-    (or if the duration of either file cannot be determined).
+    True if the output is at least :attr:`MIN_RATIO` of the input,
+    has a video stream, a matching duration (or the duration of
+    either file cannot be determined) and - with a decode check -
+    decodes without errors.
 ~~~
 
 **`_info`**
@@ -2168,6 +2250,92 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
+### `ReplaceJournal` (`mediatools.shrink.journal`) {.unnumbered}
+
+~~~text
+Copies a validated output over its original with a journal marker.
+
+**Crash safety.** The validated output is flushed to disk, then a
+marker ``newShrinkedFiles/<name>.replace`` is written and flushed, and
+the directory entry is flushed; only then is the original overwritten
+(in place: the inode is kept, so ``_flat`` hard links see the new
+content). The marker is removed after the copy has been flushed and
+recorded. If the machine fails in between, :meth:`recover` finds the
+marker next to the complete output in the next run and repeats the
+copy before anything else.
+
+Attributes:
+    log: Logger.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, logger) -> None
+
+Store the logger.
+
+Args:
+    logger: :class:`logging.Logger` for recovery messages.
+~~~
+
+**`replace`**
+
+~~~text
+replace(self, out: str, path: str, database: ShrinkDatabase) -> None
+
+Copy a validated output over the original and record it.
+
+Order: flush the output, write and flush the marker, flush the
+directory entry, copy into the existing inode, flush, record, delete
+output, delete marker. A crash at any point leaves either the
+untouched original or the marker plus the complete validated output;
+repeating the copy is harmless, so a crash after step 5 only causes
+one more identical copy on the next run.
+
+Args:
+    out: Validated output in ``newShrinkedFiles/``.
+    path: Original video.
+    database: Database of its directory.
+~~~
+
+**`recover`**
+
+~~~text
+recover(self, dirpath: str, database_of: Callable[[str], ShrinkDatabase]) -> int
+
+Repeat replacements that a crash interrupted.
+
+Args:
+    dirpath: Directory whose ``newShrinkedFiles`` is checked.
+    database_of: Returns the database of a directory.
+
+Returns:
+    Number of replacements completed.
+~~~
+
+**`fsync_file`**
+
+~~~text
+fsync_file(path: str) -> None
+
+Force a file's content to disk.
+
+Args:
+    path: File.
+~~~
+
+**`fsync_dir`**
+
+~~~text
+fsync_dir(path: str) -> None
+
+Force a directory's entries (file creations) to disk.
+
+Args:
+    path: Directory.
+~~~
+
 ### `ShrinkOptions` (`mediatools.shrink.options`) {.unnumbered}
 
 ~~~text
@@ -2180,6 +2348,9 @@ Attributes:
     db_name: Database file name; None uses the default name.
     order: ``largest`` (default), ``smallest`` or ``path``.
     min_seconds: Leave out videos shorter than this; 0 processes all.
+    retry_failed: Include videos recorded as failed (``FAILED`` or
+        ``BROKEN``) in an earlier run; by default they are left out
+        while their size is unchanged.
 ~~~
 
 **`__post_init__`**
@@ -2219,6 +2390,7 @@ __init__(
     db_name: str | None = None,
     order: str = 'largest',
     min_seconds: float = 0.0,
+    retry_failed: bool = False,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -2254,6 +2426,187 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+### `ShrinkPlanner` (`mediatools.shrink.planner`) {.unnumbered}
+
+~~~text
+Walks the tree and lists the videos a shrink run encodes.
+
+Per directory: finish replacements interrupted by a crash
+(:class:`ReplaceJournal`), note leftover ``newShrinkedFiles/`` folders
+of earlier aborted runs, and collect every video that is not yet
+recorded in its directory's database. The database always has
+precedence: a recorded file counts as processed, whatever its codec.
+A video recorded as failed (``FAILED`` or ``BROKEN``) with unchanged
+size is left out unless ``retry_failed`` is set. Then optionally drop
+videos shorter than ``min_seconds``, set aside videos that are already
+HEVC and sort the rest (``largest`` first, ``smallest`` first or walk
+order ``path``).
+
+Results go into the run's shared ``stats`` and ``found`` dictionaries
+(see :class:`Shrinker`).
+
+Attributes:
+    root: Absolute start directory.
+    log: Logger.
+    opts: Run settings.
+    probe: Probe for codec and duration checks.
+    state: Run helpers; ``durations`` and ``codecs`` are used.
+    database_of: Returns the database of a directory.
+    journal: Completes interrupted replacements.
+    stats: Shared counters ``skipped``, ``short``, ``recovered``,
+        ``failed_before``.
+    found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    root: str,
+    logger,
+    opts: ShrinkOptions,
+    probe: MediaProbe,
+    state: ShrinkState,
+    database_of: Callable[[str], ShrinkDatabase],
+    journal: ReplaceJournal,
+    results: tuple[dict, dict],
+) -> None
+
+Bind the planner to a run.
+
+Args:
+    root: Absolute start directory.
+    logger: :class:`logging.Logger`.
+    opts: Run settings.
+    probe: Probe for codec and duration checks.
+    state: Run helpers (caches).
+    database_of: Returns the database of a directory.
+    journal: Completes interrupted replacements.
+    results: The run's ``(stats, found)`` dictionaries.
+~~~
+
+**`plan`**
+
+~~~text
+plan(self, stopped: Callable[[], bool]) -> list[tuple[str, int]]
+
+Recover interrupted replacements and list the videos to encode.
+
+Args:
+    stopped: Returns True once the run should stop.
+
+Returns:
+    ``(path, size)`` pairs in processing order.
+~~~
+
+**`_candidate`**
+
+~~~text
+_candidate(self, path: str) -> tuple[str, int] | None
+
+Decide whether one file of the walk is a candidate.
+
+Args:
+    path: File in the tree.
+
+Returns:
+    ``(path, size)`` if it is to be encoded, else None (other
+    extension, link, placeholder, recorded or recorded as failed).
+~~~
+
+**`_drop_short`**
+
+~~~text
+_drop_short(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
+
+Remove videos shorter than ``min_seconds``.
+
+Args:
+    todo: Candidates.
+
+Returns:
+    Candidates with a known duration of at least ``min_seconds``
+    (unknown durations are kept).
+~~~
+
+**`_set_aside_hevc`**
+
+~~~text
+_set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
+
+Move videos that are already HEVC out of the encode list.
+
+Args:
+    todo: Candidates.
+
+Returns:
+    Candidates that need encoding; the others go to
+    ``found["hevc"]``.
+~~~
+
+**`_checkpoint`**
+
+~~~text
+_checkpoint(
+    self,
+    what: str,
+    cache: DurationCache | None,
+    number: int,
+    total: int,
+) -> None
+
+Report planning progress and store newly probed values.
+
+Saving every :attr:`CHECKPOINT` files keeps the probes of a long
+first check even if the run is interrupted during planning.
+
+Args:
+    what: ``durations`` or ``codecs``.
+    cache: The cache in use, or None.
+    number: Files checked so far.
+    total: Files to check.
+~~~
+
+**`_codec`**
+
+~~~text
+_codec(self, path: str) -> str | None
+
+Return a video's codec, from the cache if possible.
+
+Args:
+    path: Video file.
+
+Returns:
+    Codec name, or None if unknown.
+~~~
+
+**`_duration`**
+
+~~~text
+_duration(self, path: str) -> float | None
+
+Return a video's duration, from the cache if possible.
+
+Args:
+    path: Video file.
+
+Returns:
+    Seconds, or None if unknown.
+~~~
+
+**`_note_leftover`**
+
+~~~text
+_note_leftover(self, dirpath: str) -> None
+
+Remember a leftover work folder for the plan summary.
+
+Args:
+    dirpath: Directory whose ``newShrinkedFiles`` is checked.
 ~~~
 
 ### `ProgressReport` (`mediatools.shrink.progress`) {.unnumbered}
@@ -2554,22 +2907,22 @@ Shrinks the videos below a directory and keeps their file names.
 
 A run has two phases:
 
-1. **Plan** - walk the tree, finish replacements interrupted by a crash
-   (journal, see below), note leftover ``newShrinkedFiles/`` folders of
-   earlier aborted runs, and collect every video that is not yet
-   recorded in its directory's database. The database always has
-   precedence: a recorded file counts as processed, whatever its codec.
-   Optionally drop videos shorter than ``min_seconds``, set aside videos
-   that are already HEVC (recorded after the start question, never
-   encoded, not counted in volume and time) and sort the rest
-   (``largest`` first, ``smallest`` first or walk order ``path``).
+1. **Plan** - :class:`ShrinkPlanner`: finish replacements interrupted
+   by a crash, note leftover ``newShrinkedFiles/`` folders, collect the
+   videos not yet recorded (and not recorded as failed, unless
+   ``retry_failed``), drop short ones, set aside HEVC, sort.
 2. **Encode** - per file: already HEVC -> record only; otherwise
    a trial decode (:class:`DecodeCheck`, if set) sets aside videos whose
    data cannot be decoded (status ``BROKEN``, never encoded, never
    recorded, original untouched);
    :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
-   result replaces the original (in place, the inode is kept, so
-   ``_flat`` hard links see the new content) and is recorded.
+   result replaces the original (:class:`ReplaceJournal`: in place,
+   crash-safe, the inode is kept, so ``_flat`` hard links see the new
+   content) and is recorded. A file that fails (``FAILED``) or cannot be
+   decoded (``BROKEN``) is recorded as failed in its directory's
+   database and left out of later runs while its size is unchanged;
+   ffmpeg's complete message file of a failed encode is kept in
+   ``ffmpeg_logs``.
 
 **Stopping.** The first Ctrl+C (or Ctrl+Z), or ``mediatools stop`` from
 another terminal (see :class:`RunControl`), lets the current file finish
@@ -2577,12 +2930,7 @@ and then stops; the second Ctrl+C, SIGTERM or SIGHUP (terminal closed)
 aborts the current encode at once - its partial output is deleted, the
 original is untouched. Signals never interrupt the replacement itself.
 
-**Crash safety.** The validated output is flushed to disk, then a
-marker ``newShrinkedFiles/<name>.replace`` is written and flushed, and
-the directory entry is flushed; only then is the original overwritten.
-The marker is removed after the copy has been flushed and recorded. If
-the machine fails in between, the next run finds the marker next to the
-complete output and repeats the copy before anything else.
+**Crash safety.** See :class:`ReplaceJournal`.
 
 **Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
 hold only partial outputs of aborted runs. They are listed in the plan
@@ -2595,21 +2943,26 @@ Attributes:
     root: Absolute start directory.
     log: Logger.
     opts: What is processed and how (:class:`ShrinkOptions`).
-    probe: Probe for codec and duration checks.
     encoder: Encoder for new files.
     state: Persistent helpers: ``durations`` (for ``min_seconds``) and
         ``codecs`` (HEVC check of the plan) - None probes without caching -
         ``throughput`` (speed and size ratio for the estimates) and
-        ``decode`` (trial decode before encoding; None skips it).
+        ``decode`` (trial decode before encoding; None skips it) and
+        ``ffmpeg_logs`` (folder for the ffmpeg messages of failed
+        encodes; None deletes them).
+    planner: Planning phase; holds the probe and the replacement
+        journal.
     control: Stop requests from ``mediatools stop``, or None.
     databases: Open databases per directory.
     flags: ``stop`` (finish the current file, then stop) and ``abort``
         (stop the current file at once).
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
-        ``failed``, ``broken``, ``copies``, ``recovered``.
+        ``failed``, ``broken``, ``failed_before`` (left out: recorded as
+        failed), ``copies``, ``recovered``.
     found: ``failed`` - paths that could not be encoded; ``broken`` -
-        paths whose data could not be decoded; ``leftovers`` -
+        paths whose data could not be decoded; ``failed_before`` - paths
+        left out as recorded failures; ``leftovers`` -
         ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
         ``(path, size)`` of planned videos that are already HEVC.
 ~~~
@@ -2689,88 +3042,8 @@ plan(self) -> list[tuple[str, int]]
 Recover interrupted replacements and list the videos to encode.
 
 Returns:
-    ``(path, size)`` pairs in processing order.
-~~~
-
-**`_drop_short`**
-
-~~~text
-_drop_short(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
-
-Remove videos shorter than :attr:`min_seconds`.
-
-Args:
-    todo: Candidates.
-
-Returns:
-    Candidates with a known duration of at least ``min_seconds``
-    (unknown durations are kept).
-~~~
-
-**`_set_aside_hevc`**
-
-~~~text
-_set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
-
-Move videos that are already HEVC out of the encode list.
-
-Args:
-    todo: Candidates.
-
-Returns:
-    Candidates that need encoding; the others go to
-    ``found["hevc"]``.
-~~~
-
-**`_checkpoint`**
-
-~~~text
-_checkpoint(
-    self,
-    what: str,
-    cache: DurationCache | None,
-    number: int,
-    total: int,
-) -> None
-
-Report planning progress and store newly probed values.
-
-Saving every :attr:`CHECKPOINT` files keeps the probes of a long
-first check even if the run is interrupted during planning.
-
-Args:
-    what: ``durations`` or ``codecs``.
-    cache: The cache in use, or None.
-    number: Files checked so far.
-    total: Files to check.
-~~~
-
-**`_codec`**
-
-~~~text
-_codec(self, path: str) -> str | None
-
-Return a video's codec, from the cache if possible.
-
-Args:
-    path: Video file.
-
-Returns:
-    Codec name, or None if unknown.
-~~~
-
-**`_duration`**
-
-~~~text
-_duration(self, path: str) -> float | None
-
-Return a video's duration, from the cache if possible.
-
-Args:
-    path: Video file.
-
-Returns:
-    Seconds, or None if unknown.
+    ``(path, size)`` pairs in processing order (see
+    :class:`ShrinkPlanner`).
 ~~~
 
 **`run`**
@@ -2849,8 +3122,8 @@ _broken(self, path: str, size: int) -> bool
 
 Set a video aside if a trial decode finds its data unusable.
 
-Such a file is neither encoded nor recorded and stays untouched; the
-next run checks it again.
+Such a file is not encoded and stays untouched; it is recorded as
+failed, so later runs leave it out while its size is unchanged.
 
 Args:
     path: Video file.
@@ -2858,6 +3131,32 @@ Args:
 
 Returns:
     True if the video was set aside.
+~~~
+
+**`_record_failure`**
+
+~~~text
+_record_failure(self, path: str, status: str, reason: str) -> None
+
+Note a failed video in its directory's database (not in review mode).
+
+Args:
+    path: Video file.
+    status: ``FAILED`` or ``BROKEN``.
+    reason: Short cause for the log and the database.
+~~~
+
+**`_keep_ffmpeg_log`**
+
+~~~text
+_keep_ffmpeg_log(self, out: str, path: str) -> None
+
+Keep ffmpeg's complete message file of a failed encode.
+
+Args:
+    out: Output path of the encode; its messages are in
+        ``<out>.ffmpeg.log``.
+    path: Original video (for the name and the log line).
 ~~~
 
 **`_record_hevc`**
@@ -2945,48 +3244,6 @@ Args:
     message: Log message.
 ~~~
 
-**`_replace`**
-
-~~~text
-_replace(self, out: str, path: str, database: ShrinkDatabase) -> None
-
-Copy a validated output over the original and record it.
-
-Order: flush the output, write and flush the marker, flush the
-directory entry, copy into the existing inode, flush, record, delete
-output, delete marker. A crash at any point leaves either the
-untouched original or the marker plus the complete validated output;
-repeating the copy is harmless, so a crash after step 5 only causes
-one more identical copy on the next run.
-
-Args:
-    out: Validated output in ``newShrinkedFiles/``.
-    path: Original video.
-    database: Database of its directory.
-~~~
-
-**`_recover`**
-
-~~~text
-_recover(self, dirpath: str) -> None
-
-Repeat replacements that a crash interrupted.
-
-Args:
-    dirpath: Directory whose ``newShrinkedFiles`` is checked.
-~~~
-
-**`_note_leftover`**
-
-~~~text
-_note_leftover(self, dirpath: str) -> None
-
-Remember a leftover work folder for the plan summary.
-
-Args:
-    dirpath: Directory whose ``newShrinkedFiles`` is checked.
-~~~
-
 **`_remove_leftovers`**
 
 ~~~text
@@ -3007,28 +3264,6 @@ Args:
 
 Returns:
     Size in bytes, or None if it cannot be read.
-~~~
-
-**`_fsync_file`**
-
-~~~text
-_fsync_file(path: str) -> None
-
-Force a file's content to disk.
-
-Args:
-    path: File.
-~~~
-
-**`_fsync_dir`**
-
-~~~text
-_fsync_dir(path: str) -> None
-
-Force a directory's entries (file creations) to disk.
-
-Args:
-    path: Directory.
 ~~~
 
 **`_remove_quietly`**
@@ -3062,6 +3297,8 @@ Attributes:
     results: Result table of finished videos, or None.
     decode: Trial decode that sets aside undecodable videos, or None
         (no check).
+    ffmpeg_logs: Folder for ffmpeg's messages of failed encodes, or
+        None (they are deleted).
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}

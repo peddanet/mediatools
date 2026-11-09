@@ -10,16 +10,18 @@ import time
 from collections.abc import Callable
 
 from mediatools.core.codeccache import CodecCache
+from mediatools.core.datadir import DataDir
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.progressbar import ProgressBar
 from mediatools.core.runcontrol import RunControl
-from mediatools.core.walker import TreeWalker
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.shrink.encoder import HevcEncoder
-from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.fileresult import FileResult
+from mediatools.shrink.journal import ReplaceJournal
+from mediatools.shrink.options import ShrinkOptions
+from mediatools.shrink.planner import ShrinkPlanner
 from mediatools.shrink.shrinkstate import ShrinkState
 from mediatools.shrink.throughput import ThroughputLog
 
@@ -29,22 +31,22 @@ class Shrinker:
 
     A run has two phases:
 
-    1. **Plan** - walk the tree, finish replacements interrupted by a crash
-       (journal, see below), note leftover ``newShrinkedFiles/`` folders of
-       earlier aborted runs, and collect every video that is not yet
-       recorded in its directory's database. The database always has
-       precedence: a recorded file counts as processed, whatever its codec.
-       Optionally drop videos shorter than ``min_seconds``, set aside videos
-       that are already HEVC (recorded after the start question, never
-       encoded, not counted in volume and time) and sort the rest
-       (``largest`` first, ``smallest`` first or walk order ``path``).
+    1. **Plan** - :class:`ShrinkPlanner`: finish replacements interrupted
+       by a crash, note leftover ``newShrinkedFiles/`` folders, collect the
+       videos not yet recorded (and not recorded as failed, unless
+       ``retry_failed``), drop short ones, set aside HEVC, sort.
     2. **Encode** - per file: already HEVC -> record only; otherwise
        a trial decode (:class:`DecodeCheck`, if set) sets aside videos whose
        data cannot be decoded (status ``BROKEN``, never encoded, never
        recorded, original untouched);
        :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
-       result replaces the original (in place, the inode is kept, so
-       ``_flat`` hard links see the new content) and is recorded.
+       result replaces the original (:class:`ReplaceJournal`: in place,
+       crash-safe, the inode is kept, so ``_flat`` hard links see the new
+       content) and is recorded. A file that fails (``FAILED``) or cannot be
+       decoded (``BROKEN``) is recorded as failed in its directory's
+       database and left out of later runs while its size is unchanged;
+       ffmpeg's complete message file of a failed encode is kept in
+       ``ffmpeg_logs``.
 
     **Stopping.** The first Ctrl+C (or Ctrl+Z), or ``mediatools stop`` from
     another terminal (see :class:`RunControl`), lets the current file finish
@@ -52,12 +54,7 @@ class Shrinker:
     aborts the current encode at once - its partial output is deleted, the
     original is untouched. Signals never interrupt the replacement itself.
 
-    **Crash safety.** The validated output is flushed to disk, then a
-    marker ``newShrinkedFiles/<name>.replace`` is written and flushed, and
-    the directory entry is flushed; only then is the original overwritten.
-    The marker is removed after the copy has been flushed and recorded. If
-    the machine fails in between, the next run finds the marker next to the
-    complete output and repeats the copy before anything else.
+    **Crash safety.** See :class:`ReplaceJournal`.
 
     **Leftovers.** ``newShrinkedFiles/`` folders that remain after recovery
     hold only partial outputs of aborted runs. They are listed in the plan
@@ -70,27 +67,29 @@ class Shrinker:
         root: Absolute start directory.
         log: Logger.
         opts: What is processed and how (:class:`ShrinkOptions`).
-        probe: Probe for codec and duration checks.
         encoder: Encoder for new files.
         state: Persistent helpers: ``durations`` (for ``min_seconds``) and
             ``codecs`` (HEVC check of the plan) - None probes without caching -
             ``throughput`` (speed and size ratio for the estimates) and
-            ``decode`` (trial decode before encoding; None skips it).
+            ``decode`` (trial decode before encoding; None skips it) and
+            ``ffmpeg_logs`` (folder for the ffmpeg messages of failed
+            encodes; None deletes them).
+        planner: Planning phase; holds the probe and the replacement
+            journal.
         control: Stop requests from ``mediatools stop``, or None.
         databases: Open databases per directory.
         flags: ``stop`` (finish the current file, then stop) and ``abort``
             (stop the current file at once).
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
-            ``failed``, ``broken``, ``copies``, ``recovered``.
+            ``failed``, ``broken``, ``failed_before`` (left out: recorded as
+            failed), ``copies``, ``recovered``.
         found: ``failed`` - paths that could not be encoded; ``broken`` -
-            paths whose data could not be decoded; ``leftovers`` -
+            paths whose data could not be decoded; ``failed_before`` - paths
+            left out as recorded failures; ``leftovers`` -
             ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
             ``(path, size)`` of planned videos that are already HEVC.
     """
-
-    MARKER = ".replace"
-    CHECKPOINT = 500
 
     def __init__(self, root: str, logger, opts: ShrinkOptions | None = None,
                  encoder: HevcEncoder | None = None, probe: MediaProbe | None = None,
@@ -113,18 +112,22 @@ class Shrinker:
         self.root = os.path.abspath(root)
         self.log = logger
         self.opts = opts or ShrinkOptions()
-        self.probe = probe or MediaProbe()
-        self.encoder = encoder or HevcEncoder(probe=self.probe, logger=logger)
+        probe = probe or MediaProbe()
+        self.encoder = encoder or HevcEncoder(probe=probe, logger=logger)
         self.state: ShrinkState = {"durations": durations, "codecs": codecs,
                                    "throughput": throughput or ThroughputLog(),
-                                   "results": None, "decode": None}
+                                   "results": None, "decode": None, "ffmpeg_logs": None}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
-                      "broken": 0, "copies": 0, "recovered": 0}
-        self.found: dict[str, list] = {"failed": [], "broken": [], "leftovers": [], "hevc": []}
+                      "broken": 0, "failed_before": 0, "copies": 0, "recovered": 0}
+        self.found: dict[str, list] = {"failed": [], "broken": [], "failed_before": [],
+                                       "leftovers": [], "hevc": []}
+        self.planner = ShrinkPlanner(self.root, logger, self.opts, probe, self.state,
+                                     self.database, ReplaceJournal(logger),
+                                     (self.stats, self.found))
 
     # -- signals ---------------------------------------------------------
     def install_signal_handlers(self) -> None:
@@ -172,141 +175,11 @@ class Shrinker:
         """Recover interrupted replacements and list the videos to encode.
 
         Returns:
-            ``(path, size)`` pairs in processing order.
+            ``(path, size)`` pairs in processing order (see
+            :class:`ShrinkPlanner`).
         """
-        todo: list[tuple[str, int]] = []
-        for dirpath, _dirs, files in TreeWalker().walk(self.root):
-            if not self.opts.keep_copies:
-                self._recover(dirpath)
-                self._note_leftover(dirpath)
-            for name in files:
-                if MediaTypes.extension(name) not in self.opts.extensions:
-                    continue
-                path = os.path.join(dirpath, name)
-                if os.path.islink(path) or not os.path.isfile(path):
-                    continue
-                size = os.path.getsize(path)
-                if size == 0:
-                    continue                     # triage placeholder
-                if self.database(dirpath).is_done(path):
-                    self.stats["skipped"] += 1
-                else:
-                    todo.append((path, size))
-            if self.flags["stop"]:
-                break
-        if self.opts.min_seconds > 0:
-            todo = self._drop_short(todo)
-        todo = self._set_aside_hevc(todo)
-        if self.opts.order == "largest":
-            todo.sort(key=lambda item: item[1], reverse=True)
-        elif self.opts.order == "smallest":
-            todo.sort(key=lambda item: item[1])
-        return todo
+        return self.planner.plan(lambda: self.flags["stop"])
 
-    def _drop_short(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]:
-        """Remove videos shorter than :attr:`min_seconds`.
-
-        Args:
-            todo: Candidates.
-
-        Returns:
-            Candidates with a known duration of at least ``min_seconds``
-            (unknown durations are kept).
-        """
-        kept = []
-        for number, (path, size) in enumerate(todo, 1):
-            if number % self.CHECKPOINT == 0 and number < len(todo):
-                self._checkpoint("durations", self.state["durations"], number, len(todo))
-            duration = self._duration(path)
-            if duration is not None and duration < self.opts.min_seconds:
-                self.stats["short"] += 1
-            else:
-                kept.append((path, size))
-        self._checkpoint("durations", self.state["durations"], len(todo), len(todo))
-        return kept
-
-    def _set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]:
-        """Move videos that are already HEVC out of the encode list.
-
-        Args:
-            todo: Candidates.
-
-        Returns:
-            Candidates that need encoding; the others go to
-            ``found["hevc"]``.
-        """
-        rest = []
-        for number, (path, size) in enumerate(todo, 1):
-            if number % self.CHECKPOINT == 0 and number < len(todo):
-                self._checkpoint("codecs", self.state["codecs"], number, len(todo))
-            if self._codec(path) == "hevc":
-                self.found["hevc"].append((path, size))
-            else:
-                rest.append((path, size))
-        self._checkpoint("codecs", self.state["codecs"], len(todo), len(todo))
-        return rest
-
-    def _checkpoint(self, what: str, cache: DurationCache | None,
-                    number: int, total: int) -> None:
-        """Report planning progress and store newly probed values.
-
-        Saving every :attr:`CHECKPOINT` files keeps the probes of a long
-        first check even if the run is interrupted during planning.
-
-        Args:
-            what: ``durations`` or ``codecs``.
-            cache: The cache in use, or None.
-            number: Files checked so far.
-            total: Files to check.
-        """
-        if total == 0:
-            return
-        if cache is None:
-            self.log.info("checking %s: %i of %i", what, number, total)
-            return
-        self.log.info("checking %s: %i of %i (%i from cache)", what, number, total, cache.hits)
-        if cache.added:
-            cache.save()
-
-    def _codec(self, path: str) -> str | None:
-        """Return a video's codec, from the cache if possible.
-
-        Args:
-            path: Video file.
-
-        Returns:
-            Codec name, or None if unknown.
-        """
-        if self.state["codecs"] is None:
-            return self.probe.video_codec(path)
-        st = os.stat(path)
-        codec = self.state["codecs"].get(path, st)
-        if codec is None:
-            codec = self.probe.video_codec(path)
-            if codec is not None:
-                self.state["codecs"].put(path, st, codec)
-        return codec
-
-    def _duration(self, path: str) -> float | None:
-        """Return a video's duration, from the cache if possible.
-
-        Args:
-            path: Video file.
-
-        Returns:
-            Seconds, or None if unknown.
-        """
-        if self.state["durations"] is None:
-            return self.probe.duration(path)
-        st = os.stat(path)
-        duration = self.state["durations"].get(path, st)
-        if duration is None:
-            duration = self.probe.duration(path)
-            if duration is not None:
-                self.state["durations"].put(path, st, duration)
-        return duration
-
-    # -- run -------------------------------------------------------------
     def run(self, confirm: Callable[[], bool] | None = None) -> int:
         """Plan, report, ask and encode.
 
@@ -390,6 +263,9 @@ class Shrinker:
                       "already HEVC, recorded without encoding: %i files, %.1f GiB",
                       self.stats["skipped"], self.opts.min_seconds, self.stats["short"],
                       len(hevc), sum(size for _path, size in hevc) / 1024 ** 3)
+        if self.stats["failed_before"]:
+            self.log.info("left out, failed in an earlier run (FAILED/BROKEN, size unchanged): "
+                          "%i - retry with --retry-failed", self.stats["failed_before"])
         self.log.info("to encode: %i files, %.1f GiB%s", len(todo), total / 1024 ** 3,
                       estimate)
         ratio = self.state["throughput"].ratio()
@@ -447,7 +323,7 @@ class Shrinker:
         database = self.database(dirpath)
         if not os.path.isfile(path) or database.is_done(path):
             return False                             # removed or recorded meanwhile
-        if self.probe.video_codec(path) == "hevc":
+        if self.planner.probe.video_codec(path) == "hevc":
             self._record_one_hevc(path)
             return False
         if self._broken(path, size):
@@ -465,8 +341,8 @@ class Shrinker:
     def _broken(self, path: str, size: int) -> bool:
         """Set a video aside if a trial decode finds its data unusable.
 
-        Such a file is neither encoded nor recorded and stays untouched; the
-        next run checks it again.
+        Such a file is not encoded and stays untouched; it is recorded as
+        failed, so later runs leave it out while its size is unchanged.
 
         Args:
             path: Video file.
@@ -484,8 +360,41 @@ class Shrinker:
                          errors, check.seconds if check else 0, path)
         self.found["broken"].append(path)
         self.stats["broken"] += 1
+        self._record_failure(path, "BROKEN", f"{errors} decoder errors in the trial decode")
         self._result(FileResult(path, "BROKEN", size))
         return True
+
+    def _record_failure(self, path: str, status: str, reason: str) -> None:
+        """Note a failed video in its directory's database (not in review mode).
+
+        Args:
+            path: Video file.
+            status: ``FAILED`` or ``BROKEN``.
+            reason: Short cause for the log and the database.
+        """
+        if self.opts.keep_copies:
+            return
+        database = self.database(os.path.dirname(path))
+        database.ensure()
+        database.record_failure(path, status, reason)
+
+    def _keep_ffmpeg_log(self, out: str, path: str) -> None:
+        """Keep ffmpeg's complete message file of a failed encode.
+
+        Args:
+            out: Output path of the encode; its messages are in
+                ``<out>.ffmpeg.log``.
+            path: Original video (for the name and the log line).
+        """
+        source = out + ".ffmpeg.log"
+        folder = self.state["ffmpeg_logs"]
+        if folder is None or not os.path.isfile(source):
+            self._remove_quietly(source)
+            return
+        os.makedirs(folder, exist_ok=True)
+        target = os.path.join(folder, f"{DataDir.stamp()}_{os.path.basename(path)}.ffmpeg.log")
+        shutil.move(source, target)
+        self.log.info("complete ffmpeg messages: %s", target)
 
     def _record_hevc(self) -> None:
         """Record the videos set aside as HEVC during planning."""
@@ -507,6 +416,7 @@ class Shrinker:
         database = self.database(os.path.dirname(path))
         database.ensure()
         database.record(path)
+        database.clear_failure(path)
         self.stats["hevc"] += 1
         self._result(FileResult(path, "HEVC", os.path.getsize(path)))
 
@@ -534,7 +444,8 @@ class Shrinker:
             self.found["failed"].append(path)
             self.stats["failed"] += 1
             self._remove_quietly(out)
-            self._remove_quietly(out + ".ffmpeg.log")      # its tail is in the log
+            self._keep_ffmpeg_log(out, path)
+            self._record_failure(path, "FAILED", "encode or validation failed")
             self._result(FileResult(path, "FAILED", size, None, length,
                                     time.monotonic() - started))
             return
@@ -545,7 +456,7 @@ class Shrinker:
             self.stats["copies"] += 1
             self._result(FileResult(path, "copy", size, out_size, length, took))
             return
-        self._replace(out, path, database)
+        self.planner.journal.replace(out, path, database)
         self.stats["shrunk"] += 1
         self._result(FileResult(path, "shrunk", size, out_size, length, took))
 
@@ -598,74 +509,7 @@ class Shrinker:
             self.display.note = "STOPPING after this file"
         self.log.warning(message)
 
-    # -- replacement with journal ----------------------------------------
-    def _replace(self, out: str, path: str, database: ShrinkDatabase) -> None:
-        """Copy a validated output over the original and record it.
-
-        Order: flush the output, write and flush the marker, flush the
-        directory entry, copy into the existing inode, flush, record, delete
-        output, delete marker. A crash at any point leaves either the
-        untouched original or the marker plus the complete validated output;
-        repeating the copy is harmless, so a crash after step 5 only causes
-        one more identical copy on the next run.
-
-        Args:
-            out: Validated output in ``newShrinkedFiles/``.
-            path: Original video.
-            database: Database of its directory.
-        """
-        marker = out + self.MARKER
-        self._fsync_file(out)                        # 1. output complete on disk
-        with open(marker, "w", encoding="utf-8") as handle:
-            handle.write(path + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())                # 2. marker content on disk
-        self._fsync_dir(os.path.dirname(marker))     # 3. marker's directory entry on disk
-        shutil.copyfile(out, path)                   # 4. writes into the existing inode
-        self._fsync_file(path)                       # 5. new content of the original on disk
-        database.ensure()
-        database.record(path)
-        os.remove(out)
-        os.remove(marker)
-
-    def _recover(self, dirpath: str) -> None:
-        """Repeat replacements that a crash interrupted.
-
-        Args:
-            dirpath: Directory whose ``newShrinkedFiles`` is checked.
-        """
-        tmp = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
-        if not os.path.isdir(tmp):
-            return
-        for entry in sorted(os.listdir(tmp)):
-            if not entry.endswith(self.MARKER):
-                continue
-            out = os.path.join(tmp, entry[:-len(self.MARKER)])
-            target = os.path.join(dirpath, os.path.basename(out))
-            if os.path.isfile(out) and os.path.isfile(target):
-                self.log.warning("completing an interrupted replacement: %s", target)
-                self._replace(out, target, self.database(dirpath))
-                self.stats["recovered"] += 1
-            else:
-                self._remove_quietly(os.path.join(tmp, entry))
-
     # -- helpers ---------------------------------------------------------
-    def _note_leftover(self, dirpath: str) -> None:
-        """Remember a leftover work folder for the plan summary.
-
-        Args:
-            dirpath: Directory whose ``newShrinkedFiles`` is checked.
-        """
-        tmp = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
-        if not os.path.isdir(tmp):
-            return
-        files = nbytes = 0
-        for base, _dirs, names in os.walk(tmp):
-            for name in names:
-                files += 1
-                nbytes += self._size_or_none(os.path.join(base, name)) or 0
-        self.found["leftovers"].append((tmp, files, nbytes))
-
     def _remove_leftovers(self) -> None:
         """Delete the leftover work folders noted during planning."""
         for tmp, _files, _nbytes in self.found["leftovers"]:
@@ -689,29 +533,6 @@ class Shrinker:
             return None
 
     @staticmethod
-    def _fsync_file(path: str) -> None:
-        """Force a file's content to disk.
-
-        Args:
-            path: File.
-        """
-        with open(path, "rb+") as handle:
-            os.fsync(handle.fileno())
-
-    @staticmethod
-    def _fsync_dir(path: str) -> None:
-        """Force a directory's entries (file creations) to disk.
-
-        Args:
-            path: Directory.
-        """
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-
-    @staticmethod
     def _remove_quietly(path: str) -> None:
         """Delete a file if it exists.
 
@@ -729,13 +550,17 @@ class Shrinker:
         self.log.info("=" * 70)
         self.log.info("shrunk and recorded: %i | already HEVC: %i | processed before (DB): %i "
                       "| too short: %i | copies kept: %i | recovered: %i | failed: %i "
-                      "| not decodable: %i",
+                      "| not decodable: %i | left out (failed before): %i",
                       counts["shrunk"], counts["hevc"], counts["skipped"], counts["short"],
                       counts["copies"], counts["recovered"], counts["failed"],
-                      counts["broken"])
+                      counts["broken"], counts["failed_before"])
         if self.flags["stop"]:
             self.log.info("stopped by the user - the next run continues with the files left")
         for path in self.found["failed"]:
             self.log.info("  FAILED: %s", path)
         for path in self.found["broken"]:
             self.log.info("  BROKEN (not decodable, kept): %s", path)
+        if self.found["failed_before"]:
+            self.log.info("left out because they failed before (retry with --retry-failed):")
+        for path in self.found["failed_before"]:
+            self.log.info("  FAILED BEFORE: %s", path)
