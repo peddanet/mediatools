@@ -25,6 +25,7 @@ from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shr
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
+from mediatools.update import ReleaseUpdater
 from mediatools.triage import CandidateFinder, FileRemover, PlayerSession, Triage
 
 
@@ -44,21 +45,15 @@ class Cli:
 
     # -- parser ----------------------------------------------------------
     @staticmethod
-    def _build_parser() -> argparse.ArgumentParser:
-        """Define all subcommands and options.
+    def _add_shrink_parsers(sub: argparse._SubParsersAction) -> None:
+        """Define ``shrink`` and the commands around a running shrink.
 
-        Returns:
-            The parser.
+        ``stop`` and ``attach`` act on a shrink run in the background;
+        ``update`` installs a new release.
+
+        Args:
+            sub: Sub-parser collection of the main parser.
         """
-        parser = argparse.ArgumentParser(
-            prog="mediatools",
-            description="Maintenance tools for large local media collections: "
-                        "shrink videos to HEVC, review short clips, build flat "
-                        "hard-link views and back up without losing hard links.")
-        parser.add_argument("--version", action="store_true",
-                            help="show the version and whether it is an installed release")
-        sub = parser.add_subparsers(dest="command", metavar="<command>")
-
         cmd = sub.add_parser("shrink", help="re-encode videos to HEVC (libx265) in place")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
         cmd.add_argument("--keep-copies", action="store_true",
@@ -79,9 +74,35 @@ class Cli:
 
         sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
                                     "after its current file; returns at once")
+        cmd = sub.add_parser("update", help="apply delivered release patches from the download "
+                                            "folder (asks which version), then install")
+        cmd.add_argument("--list", action="store_true", help="only show what would be applied")
+        cmd.add_argument("-y", "--yes", action="store_true",
+                         help="apply all pending versions without asking")
+        cmd.add_argument("--downloads", help="folder with the patch archives (default ~/Downloads)")
+        cmd.add_argument("--repo", help="git clone (default ~/Projects/mediatools)")
+
         sub.add_parser("attach", aliases=["front"],
                        help="watch a shrink running in the background (log and progress); "
                             "Ctrl+C leaves the view, the run continues")
+
+    @staticmethod
+    def _build_parser() -> argparse.ArgumentParser:
+        """Define all subcommands and options.
+
+        Returns:
+            The parser.
+        """
+        parser = argparse.ArgumentParser(
+            prog="mediatools",
+            description="Maintenance tools for large local media collections: "
+                        "shrink videos to HEVC, review short clips, build flat "
+                        "hard-link views and back up without losing hard links.")
+        parser.add_argument("--version", action="store_true",
+                            help="show the version and whether it is an installed release")
+        sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+        Cli._add_shrink_parsers(sub)
 
         cmd = sub.add_parser("progress", help="read-only report: which videos are shrunk")
         cmd.add_argument("path", nargs="?", help="directory (default: [collection] root)")
@@ -276,6 +297,22 @@ class Cli:
         return AttachView(RunControl("shrink")).run()
 
     cmd_front = cmd_attach                       # alias of 'attach'
+
+    @staticmethod
+    def cmd_update(args: argparse.Namespace) -> int:
+        """Run ``mediatools update``: apply delivered release patches.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of the bundled release script.
+        """
+        forwarded = ["--list"] if args.list else []
+        forwarded += ["-y"] if args.yes else []
+        forwarded += ["--downloads", args.downloads] if args.downloads else []
+        forwarded += ["--repo", args.repo] if args.repo else []
+        return ReleaseUpdater(forwarded).run()
 
     def cmd_progress(self, args: argparse.Namespace) -> int:
         """Run ``mediatools progress``.

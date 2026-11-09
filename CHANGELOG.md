@@ -5,6 +5,31 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-11-09
+
+### Added
+- `mediatools update`: applies delivered hotfix patch archives, replacing
+  the per-version `apply-mediatools-X.sh`. The script behind it
+  (`apply-release.sh`) ships inside the package. It finds the
+  archives in the download folder (newest copy per version), asks up to
+  which pending version to apply, applies them in order (hotfix branch,
+  pull requests, tags, back-merge), installs the release and tidies the
+  download folder.
+
+### Changed
+- Result table: minimum width 90 columns (was 102), so it also fits a
+  half-width terminal window.
+- Documentation rebuilt: all diagrams (new: package `update`; shrink
+  sequence and decision diagram with background mode, stop request and
+  result table) and both PDFs.
+
+### Fixed
+- `apply-release.sh` could delete itself when it was started again by a
+  program it ran (the tests in the pre-push hook): its control variables
+  are no longer exported, and only the script's own temporary copy is ever
+  removed.
+- bandit warnings about the wording of `# nosec` comments.
+
 ## [1.2.6] - 2026-11-09
 
 ### Added
