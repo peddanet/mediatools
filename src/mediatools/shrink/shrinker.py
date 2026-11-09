@@ -39,6 +39,9 @@ class Shrinker:
        encoded, not counted in volume and time) and sort the rest
        (``largest`` first, ``smallest`` first or walk order ``path``).
     2. **Encode** - per file: already HEVC -> record only; otherwise
+       a trial decode (:class:`DecodeCheck`, if set) sets aside videos whose
+       data cannot be decoded (status ``BROKEN``, never encoded, never
+       recorded, original untouched);
        :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
        result replaces the original (in place, the inode is kept, so
        ``_flat`` hard links see the new content) and is recorded.
@@ -71,15 +74,17 @@ class Shrinker:
         encoder: Encoder for new files.
         state: Persistent helpers: ``durations`` (for ``min_seconds``) and
             ``codecs`` (HEVC check of the plan) - None probes without caching -
-            and ``throughput`` (speed and size ratio for the estimates).
+            ``throughput`` (speed and size ratio for the estimates) and
+            ``decode`` (trial decode before encoding; None skips it).
         control: Stop requests from ``mediatools stop``, or None.
         databases: Open databases per directory.
         flags: ``stop`` (finish the current file, then stop) and ``abort``
             (stop the current file at once).
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
-            ``failed``, ``copies``, ``recovered``.
-        found: ``failed`` - paths that could not be encoded; ``leftovers`` -
+            ``failed``, ``broken``, ``copies``, ``recovered``.
+        found: ``failed`` - paths that could not be encoded; ``broken`` -
+            paths whose data could not be decoded; ``leftovers`` -
             ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
             ``(path, size)`` of planned videos that are already HEVC.
     """
@@ -112,14 +117,14 @@ class Shrinker:
         self.encoder = encoder or HevcEncoder(probe=self.probe, logger=logger)
         self.state: ShrinkState = {"durations": durations, "codecs": codecs,
                                    "throughput": throughput or ThroughputLog(),
-                                   "results": None}
+                                   "results": None, "decode": None}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
-                      "copies": 0, "recovered": 0}
-        self.found: dict[str, list] = {"failed": [], "leftovers": [], "hevc": []}
+                      "broken": 0, "copies": 0, "recovered": 0}
+        self.found: dict[str, list] = {"failed": [], "broken": [], "leftovers": [], "hevc": []}
 
     # -- signals ---------------------------------------------------------
     def install_signal_handlers(self) -> None:
@@ -435,7 +440,8 @@ class Shrinker:
         Returns:
             True if an encode was attempted, False if the file needed none
             (removed, recorded meanwhile, or HEVC by now - e.g. a hard link
-            of a file shrunk earlier in this run).
+            of a file shrunk earlier in this run) or its data cannot be
+            decoded.
         """
         dirpath = os.path.dirname(path)
         database = self.database(dirpath)
@@ -443,6 +449,8 @@ class Shrinker:
             return False                             # removed or recorded meanwhile
         if self.probe.video_codec(path) == "hevc":
             self._record_one_hevc(path)
+            return False
+        if self._broken(path, size):
             return False
         tmp_dir = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
         os.makedirs(tmp_dir, exist_ok=True)
@@ -452,6 +460,31 @@ class Shrinker:
         finally:
             with contextlib.suppress(OSError):
                 os.rmdir(tmp_dir)                    # only if empty (not in review mode)
+        return True
+
+    def _broken(self, path: str, size: int) -> bool:
+        """Set a video aside if a trial decode finds its data unusable.
+
+        Such a file is neither encoded nor recorded and stays untouched; the
+        next run checks it again.
+
+        Args:
+            path: Video file.
+            size: Its size.
+
+        Returns:
+            True if the video was set aside.
+        """
+        check = self.state["decode"]
+        errors = check.unusable(path) if check is not None else None
+        if errors is None:
+            return False
+        self.log.warning("video data cannot be decoded (%i decoder errors in the first %g s; "
+                         "encrypted or damaged) - not encoded, original kept: %s",
+                         errors, check.seconds if check else 0, path)
+        self.found["broken"].append(path)
+        self.stats["broken"] += 1
+        self._result(FileResult(path, "BROKEN", size))
         return True
 
     def _record_hevc(self) -> None:
@@ -695,10 +728,14 @@ class Shrinker:
         counts = self.stats
         self.log.info("=" * 70)
         self.log.info("shrunk and recorded: %i | already HEVC: %i | processed before (DB): %i "
-                      "| too short: %i | copies kept: %i | recovered: %i | failed: %i",
+                      "| too short: %i | copies kept: %i | recovered: %i | failed: %i "
+                      "| not decodable: %i",
                       counts["shrunk"], counts["hevc"], counts["skipped"], counts["short"],
-                      counts["copies"], counts["recovered"], counts["failed"])
+                      counts["copies"], counts["recovered"], counts["failed"],
+                      counts["broken"])
         if self.flags["stop"]:
             self.log.info("stopped by the user - the next run continues with the files left")
         for path in self.found["failed"]:
             self.log.info("  FAILED: %s", path)
+        for path in self.found["broken"]:
+            self.log.info("  BROKEN (not decodable, kept): %s", path)

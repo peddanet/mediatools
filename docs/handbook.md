@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.7 -- Handbook"
+title: "mediatools 1.2.8 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -305,6 +305,7 @@ src/mediatools/
     progressbar.py    ProgressBar      two progress lines, status file
     mediatypes.py     MediaTypes       extensions, reserved directory names
     probe.py          MediaProbe       ffprobe wrapper (duration, codec)
+    decodecheck.py    DecodeCheck      trial decode: finds videos that cannot be decoded
     walker.py         TreeWalker       sorted os.walk with skip rules
     prompt.py         Prompt           yes/no and text questions, --yes support
   shrink/
@@ -484,7 +485,7 @@ messages.
 
 Each finished video adds one row to a framed table: row number, time of
 completion, size before and after, ratio, playing time, wall-clock time
-spent, status (`shrunk`, `copy`, `HEVC`, `FAILED`) and the path relative to
+spent, status (`shrunk`, `copy`, `HEVC`, `FAILED`, `BROKEN`) and the path relative to
 the shrink root. The figures have fixed columns; the path takes the rest of
 the width and wraps inside its cell, after a `/` or a space, so a long name
 makes the row taller instead of breaking the frame:
@@ -573,6 +574,7 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 | Ctrl+C a second time, SIGTERM, SIGHUP (terminal of a `--foreground` run closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
 | power failure, kill -9 | see the replacement journal below |
 | ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
+| video data cannot be decoded (still encrypted, scrambled) | set aside as `BROKEN` before encoding: not encoded, not recorded, original untouched; checked again in the next run; exit code unchanged |
 
 **Background mode.** Planning and the confirmation happen in the
 terminal. Then (`RunControl.begin_work`) the process forks: the parent
@@ -1053,6 +1055,7 @@ Architecture, UML diagrams and the API reference are in
 |---|---|---|
 | `required tool(s) not found` | ffmpeg, rsync, gio or player missing | install the package named in the message |
 | shrink: `FAILED … ffmpeg exit code` | input damaged or unsupported | `ffprobe -v error FILE` |
+| shrink: `BROKEN`, `video data cannot be decoded` | sample data still encrypted (encryption boxes stripped) or scrambled; container and duration look normal | `ffmpeg -v error -t 10 -i FILE -f null -` shows the decoder errors; the file cannot be repaired without the original data |
 | sync refuses target: `cannot store hard links` | target is exFAT/FAT/NTFS | use ext4, btrfs or XFS |
 | sync: `not writable` | target directory owned by root | see the command below |
 | flatten: `other file system, skipped` | file on a different mount | hard links cannot cross file systems |
