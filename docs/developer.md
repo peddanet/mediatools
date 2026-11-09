@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.7 -- Developer Documentation"
+title: "mediatools 1.2.8 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -166,6 +166,7 @@ directory, configuration -- lives in `core`.
 | `DataDir` | `$MEDIATOOLS_HOME` layout: logs, state, plans, reports |
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
+| `DecodeCheck` | trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
 | `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
 | `RunControl` | PID/stop/status files of a running job, background mode (fork, `setsid`), sleep lock in the working process |
@@ -187,7 +188,7 @@ directory, configuration -- lives in `core`.
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
-| `ShrinkState` | typed collection of the run helpers (caches, throughput, result table) |
+| `ShrinkState` | typed collection of the run helpers (caches, throughput, result table, trial decode) |
 | `FileResult` | outcome of one video (status, sizes, times) |
 | `ResultTable` | framed per-file result table: terminal, log, `reports/shrink_results_<ts>.txt` |
 
@@ -342,6 +343,7 @@ with `surrogateescape`, so they round-trip unchanged.
 |---|---|
 | missing external tool | `Cli._need` raises `SystemExit` with the tool names |
 | ffmpeg fails / output invalid | file logged as FAILED, original kept, run continues, exit 2 |
+| trial decode finds undecodable data | file set aside as BROKEN before encoding, not recorded, original kept, run continues, exit code unchanged |
 | Ctrl+C in shrink | flag set; current ffmpeg stops; original untouched; exit 1 |
 | Ctrl+C in triage | all players closed, nothing removed, exit 130 |
 | link creation fails | logged, counted as `error`, flatten exits 1 |
