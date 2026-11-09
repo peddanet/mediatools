@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.2 -- Handbook"
+title: "mediatools 1.2.3 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -383,6 +383,13 @@ Before anything is encoded, the whole tree is walked once:
    `state/shrink_codecs.tsv`); videos that are already HEVC are set aside.
    They are recorded after the start question without encoding and are not
    counted in volume, time estimate and progress.
+
+   Both caches are keyed by path, size and modification time: a value is
+   reused as long as the file is unchanged, so only new or changed videos
+   are probed again. New values are written every 500 files, so an
+   interrupted first check keeps its work. The messages show the share
+   answered from the cache, e.g.
+   `checking codecs: 1000 of 3076 (998 from cache)`.
 5. The rest is sorted (`--order`), and the run reports, for example (numbers illustrative):
 
 ~~~text
@@ -484,10 +491,29 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 
 | Event | Behaviour |
 |---|---|
+| `mediatools stop` in another terminal | the same as Ctrl+C once (see below) |
 | Ctrl+C (or Ctrl+Z) once | the current file is finished, validated, copied and recorded; then the run stops |
 | Ctrl+C a second time, SIGTERM, SIGHUP (terminal closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
 | power failure, kill -9 | see the replacement journal below |
 | ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
+
+**Stopping from another terminal.** A Ctrl+C only reaches the run if its
+terminal window has the keyboard focus. `mediatools stop` does not depend
+on that:
+
+~~~bash
+mediatools stop
+# stop requested: shrink (pid 12345) finishes its current file and ends
+~~~
+
+The command checks that a shrink run is alive (PID file
+`state/shrink.pid` in the data directory), creates `state/shrink.stop` and
+returns at once. The run checks for this file every 2 seconds, shows
+`STOPPING after this file` at the start of its progress line, completes the
+current file and ends with exit code 1. If no run is active, the command
+prints `no shrink run is active - nothing to stop`, returns 1 and leaves no
+file behind, so a later run is not stopped by mistake. A stop file left by
+a crash is removed when the next run starts.
 
 Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
 reaches only mediatools, which decides what happens. The signal handler only

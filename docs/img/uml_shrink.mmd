@@ -70,14 +70,16 @@ classDiagram
     +write()
     +run()
   }
+  class ShrinkState {
+  }
   class Shrinker {
     +root
     +log
     +opts
     +probe
     +encoder
-    +caches
-    +throughput
+    +state
+    +control
     +databases
     +flags
     +display
@@ -90,9 +92,11 @@ classDiagram
     +plan()
     -_drop_short(todo)
     -_set_aside_hevc(todo)
+    -_checkpoint(what, cache, number, total)
     -_codec(path)
     -_duration(path)
     +run(confirm)
+    -_run(confirm)
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
@@ -100,6 +104,8 @@ classDiagram
     -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
     -_show(name, fraction, size)
+    -_poll_stop(force)
+    -_mark_stopping(message)
     -_replace(out, path, database)
     -_recover(dirpath)
     -_note_leftover(dirpath)
@@ -126,7 +132,9 @@ classDiagram
   ShrinkOptions ..> Shrinker
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
+  ShrinkState ..> ThroughputLog
   Shrinker --> HevcEncoder
   Shrinker --> ShrinkDatabase
   Shrinker --> ShrinkOptions
+  Shrinker --> ShrinkState
   Shrinker --> ThroughputLog
