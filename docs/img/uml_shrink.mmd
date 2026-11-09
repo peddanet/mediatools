@@ -76,24 +76,28 @@ classDiagram
     +opts
     +probe
     +encoder
-    +durations
+    +caches
     +throughput
     +databases
     +flags
     +display
     +stats
     +found
-    +init(root, logger, opts, encoder, probe, durations, throughput, display)
+    +init(root, logger, opts, encoder, probe, durations, throughput, display, codecs)
     +install_signal_handlers()
     +on_signal(signum, _frame)
     +database(dirpath)
     +plan()
     -_drop_short(todo)
+    -_set_aside_hevc(todo)
+    -_codec(path)
     -_duration(path)
     +run(confirm)
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
+    -_record_hevc()
+    -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
     -_show(name, fraction, size)
     -_replace(out, path, database)

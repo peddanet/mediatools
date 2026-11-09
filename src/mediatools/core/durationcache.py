@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 
 class DurationCache:
@@ -26,18 +27,19 @@ class DurationCache:
             path: Location of the TSV file (created by :meth:`save`).
         """
         self.path = path
-        self.entries: dict[str, tuple[int, int, float]] = {}
+        self.entries: dict[str, tuple[int, int, Any]] = {}
         self.hits = 0
         try:
             with open(path, encoding="utf-8", errors="surrogateescape") as handle:
                 for line in handle:
                     parts = line.rstrip("\n").split("\t")
                     if len(parts) == 4:
-                        self.entries[parts[0]] = (int(parts[1]), int(parts[2]), float(parts[3]))
+                        self.entries[parts[0]] = (int(parts[1]), int(parts[2]),
+                                                  self.parse(parts[3]))
         except FileNotFoundError:
             pass
 
-    def get(self, file_path: str, st: os.stat_result) -> float | None:
+    def get(self, file_path: str, st: os.stat_result) -> Any:
         """Return the cached duration if the file is unchanged.
 
         Args:
@@ -53,7 +55,7 @@ class DurationCache:
             return entry[2]
         return None
 
-    def put(self, file_path: str, st: os.stat_result, duration: float) -> None:
+    def put(self, file_path: str, st: os.stat_result, duration: Any) -> None:
         """Store a duration.
 
         Args:
@@ -68,5 +70,29 @@ class DurationCache:
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as handle:
             for file_path, (size, mtime, duration) in sorted(self.entries.items()):
-                handle.write(f"{file_path}\t{size}\t{mtime}\t{duration:.3f}\n")
+                handle.write(f"{file_path}\t{size}\t{mtime}\t{self.format(duration)}\n")
         os.replace(tmp, self.path)
+
+    @staticmethod
+    def parse(text: str) -> Any:
+        """Convert a stored value.
+
+        Args:
+            text: Value column of the TSV file.
+
+        Returns:
+            Duration in seconds.
+        """
+        return float(text)
+
+    @staticmethod
+    def format(value: Any) -> str:
+        """Convert a value for storage.
+
+        Args:
+            value: Duration in seconds.
+
+        Returns:
+            Text with millisecond precision.
+        """
+        return f"{value:.3f}"
