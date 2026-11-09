@@ -24,6 +24,20 @@ __init__(self)
 Build the argument parser.
 ~~~
 
+**`_add_shrink_parsers`**
+
+~~~text
+_add_shrink_parsers(sub: argparse._SubParsersAction) -> None
+
+Define ``shrink`` and the commands around a running shrink.
+
+``stop`` and ``attach`` act on a shrink run in the background;
+``update`` installs a new release.
+
+Args:
+    sub: Sub-parser collection of the main parser.
+~~~
+
 **`_build_parser`**
 
 ~~~text
@@ -136,6 +150,20 @@ Run ``mediatools attach`` (alias ``front``): watch a background shrink.
 
 Returns:
     0 after showing a run, 1 if none runs.
+~~~
+
+**`cmd_update`**
+
+~~~text
+cmd_update(args: argparse.Namespace) -> int
+
+Run ``mediatools update``: apply delivered release patches.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    Exit code of the bundled release script.
 ~~~
 
 **`cmd_progress`**
@@ -1491,7 +1519,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.6')
+__init__(self, package_dir: str | None = None, version: str = '1.2.7')
 
 Locate the imported package.
 
@@ -5452,4 +5480,61 @@ Write the unit file.
 
 Returns:
     Its path.
+~~~
+
+## `mediatools.update`
+
+### `ReleaseUpdater` (`mediatools.update.updater`) {.unnumbered}
+
+~~~text
+Apply delivered patch archives with the bundled ``apply-release.sh``.
+
+The shell script is shipped inside the package, so every installed
+release carries it. It finds the patch archives in the download folder,
+asks up to which version to apply, runs the git-flow hotfix steps in the
+clone, installs the result and tidies the download folder (see the
+script header and the developer documentation).
+
+Example:
+    >>> ReleaseUpdater(["--list"]).run()
+
+Attributes:
+    args: Arguments passed on to the script.
+    script: Path of the bundled script.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, args: list[str]) -> None
+
+Prepare the call.
+
+Args:
+    args: Arguments for the script, e.g. ``["--list"]``.
+~~~
+
+**`command`**
+
+~~~text
+command(self) -> list[str]
+
+Build the command line.
+
+Returns:
+    ``bash <script> <args>``.
+
+Raises:
+    FileNotFoundError: If bash or the bundled script is missing.
+~~~
+
+**`run`**
+
+~~~text
+run(self) -> int
+
+Run the script in this terminal (it may ask questions).
+
+Returns:
+    Exit code of the script.
 ~~~

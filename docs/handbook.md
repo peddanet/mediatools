@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.6 -- Handbook"
+title: "mediatools 1.2.7 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -323,6 +323,9 @@ src/mediatools/
     remover.py        FileRemover      gio trash or permanent delete
     keptlist.py       KeptList         decisions across sessions
     triage.py         Triage           batch workflow
+  update/
+    updater.py        ReleaseUpdater   mediatools update (runs apply-release.sh)
+    apply-release.sh  -                applies delivered patch archives
   flatten/
     namer.py          FlatNamer        names within the byte limit
     flatindex.py      FlatIndex        _flat/_index.tsv
@@ -488,23 +491,23 @@ makes the row taller instead of breaking the frame:
 
 ~~~text
 results (also in reports/shrink_results_<ts>.txt):
-┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬────────────────────────┐
-│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file                   │
-├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
-│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ creator_a/Posts/       │
-│      │       │          │          │         │          │          │        │ Videos/                │
-│      │       │          │          │         │          │          │        │ example_clip_with_a_ra │
-│      │       │          │          │         │          │          │        │ ther_long_descriptive_ │
-│      │       │          │          │         │          │          │        │ name.mp4               │
-├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
-│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ creator_b/video/       │
-│      │       │          │          │         │          │          │        │ another clip.mp4       │
-└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴────────────────────────┘
+┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬──────────┐
+│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file     │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼──────────┤
+│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ unit_a/  │
+│      │       │          │          │         │          │          │        │ Videos/  │
+│      │       │          │          │         │          │          │        │ long     │
+│      │       │          │          │         │          │          │        │ clip     │
+│      │       │          │          │         │          │          │        │ name.mp4 │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼──────────┤
+│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ unit_b/  │
+│      │       │          │          │         │          │          │        │ clip.mp4 │
+└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴──────────┘
 ~~~
 
 | Copy | Width | Where |
 |---|---|---|
-| terminal (and log file) | terminal width, at least 102 columns | rows printed as files finish |
+| terminal (and log file) | terminal width, at least 90 columns | rows printed as files finish |
 | report | 160 columns | `reports/shrink_results_<ts>.txt`, written and flushed per row |
 
 The report is complete up to the last finished file, even after a crash.
@@ -518,7 +521,7 @@ terminal. Errors (e.g. the last lines of a failed ffmpeg run) stay visible.
 wrapping it in `systemd-inhibit --what=sleep:idle`:
 
 ~~~bash
-systemd-inhibit --list        # shows: mediatools  ...  mediatools shrink  sleep:idle  block
+systemd-inhibit --list     # lists: mediatools ... mediatools shrink  sleep:idle  block
 ~~~
 
 The lock is held by a helper process
@@ -1035,6 +1038,7 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
+| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newest copy per version, pending/stale, tidying of the download folder |
 | `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
