@@ -3,6 +3,7 @@ classDiagram
   class Cli {
     +parser
     +init()
+    -_add_shrink_parsers(sub)
     -_build_parser()
     -_add_admin_parsers(sub)
     +main(argv)
@@ -12,6 +13,7 @@ classDiagram
     +cmd_stop(_args)
     +cmd_attach(_args)
     +cmd_front(_args)
+    +cmd_update(args)
     +cmd_progress(args)
     +cmd_triage(args)
     +cmd_flatten(args)

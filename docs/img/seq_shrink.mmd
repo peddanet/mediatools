@@ -2,38 +2,38 @@ sequenceDiagram
   actor U as User
   participant C as Cli
   participant S as Shrinker
-  participant W as TreeWalker
+  participant R as RunControl
   participant D as ShrinkDatabase
-  participant P as MediaProbe
   participant E as HevcEncoder
-  participant F as ffmpeg
+  participant T as ResultTable
+  actor O as Other terminal
   U->>C: mediatools shrink PATH
-  C->>U: confirm replace originals?
-  U-->>C: y
-  C->>S: run()
-  loop every directory
-    S->>W: walk(root) (skips _flat, newShrinkedFiles)
-    S->>D: ensure() (create / migrate)
-    loop every video
-      S->>D: is_done(path)?
-      alt recorded
-        D-->>S: yes -> skip
-      else not recorded
-        S->>P: video_codec(path)
-        alt hevc
-          S->>D: record(path)
-        else other codec
-          S->>E: encode(path, tmp)
-          E->>F: ffmpeg -vcodec libx265 -crf 28
-          F-->>E: exit code
-          E->>P: has_video / duration (validate)
-          E-->>S: ok?
-          opt ok and not keep_copies
-            S->>S: copyfile(tmp, path) same inode
-            S->>D: record(path)
-          end
-        end
-      end
+  C->>S: run(confirm)
+  S->>R: start() (PID + log path)
+  S->>S: plan(): DB, durations, codecs (cached)
+  S->>U: plan, estimates - replace originals?
+  U-->>S: y
+  S->>R: begin_work()
+  R->>R: fork, setsid, console file
+  R-->>U: parent prints attach / stop hints and exits
+  R->>R: child: sleep lock (systemd-inhibit)
+  loop every planned video, largest first
+    S->>R: stop requested?
+    alt stop file present
+      R-->>S: yes - end after this file
     end
+    S->>E: encode(path, tmp) at nice 19
+    E-->>S: ok? (exit code, stream, duration)
+    alt ok
+      S->>S: journalled copy into the original inode
+      S->>D: record(path)
+    else failed
+      S->>S: original kept
+    end
+    S->>T: add(row) -> terminal, log, report file
+    S->>R: status file (2 progress lines)
   end
-  S-->>C: exit code 0 / 1 / 2
+  O->>R: mediatools stop (creates stop file)
+  O->>R: mediatools attach (reads log + status)
+  S->>T: finish()
+  S->>R: finish() (remove PID, release lock)

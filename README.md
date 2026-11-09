@@ -171,6 +171,11 @@ The installer needs `git` and the Python venv module
 4. checks that the installed program reports the version of the tag.
 
 **Update** to the newest release: run `bash install.sh` again.
+Maintainers who receive hotfixes as patch archives
+(`mediatools-hotfix-X.Y.Z-patch.tar.gz` in `~/Downloads`) use
+`mediatools update` instead: it applies the archives in the clone
+(`~/Projects/mediatools`) through pull requests, tags the release, installs
+it and tidies the download folder (details in the developer documentation).
 **Remove**: `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`
 (configuration and logs in `~/scripts/mediatools.d` stay).
 
@@ -246,6 +251,7 @@ original again.
 mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S] [--foreground]
                   [--keep-copies] [--crf 28] [--threads N] [--ext mp4] [-y] [-v]
 mediatools attach        # (alias: front) watch a shrink running in the background
+mediatools update        # apply delivered release patches from ~/Downloads, then install
 mediatools stop          # ask it to finish its current file and end
 ```
 
@@ -279,18 +285,18 @@ Each finished video adds a row to a framed result table (terminal and
 
 ~~~text
 results (also in reports/shrink_results_<ts>.txt):
-┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬────────────────────────┐
-│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file                   │
-├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
-│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ creator_a/Posts/       │
-│      │       │          │          │         │          │          │        │ Videos/                │
-│      │       │          │          │         │          │          │        │ example_clip_with_a_ra │
-│      │       │          │          │         │          │          │        │ ther_long_descriptive_ │
-│      │       │          │          │         │          │          │        │ name.mp4               │
-├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
-│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ creator_b/video/       │
-│      │       │          │          │         │          │          │        │ another clip.mp4       │
-└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴────────────────────────┘
+┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬──────────┐
+│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file     │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼──────────┤
+│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ unit_a/  │
+│      │       │          │          │         │          │          │        │ Videos/  │
+│      │       │          │          │         │          │          │        │ long     │
+│      │       │          │          │         │          │          │        │ clip     │
+│      │       │          │          │         │          │          │        │ name.mp4 │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼──────────┤
+│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ unit_b/  │
+│      │       │          │          │         │          │          │        │ clip.mp4 │
+└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴──────────┘
 ~~~
 
 While shrink runs, sleep and idle actions are blocked by a systemd
