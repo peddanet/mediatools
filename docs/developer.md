@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.9 -- Developer Documentation"
+title: "mediatools 1.2.10 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -166,10 +166,11 @@ directory, configuration -- lives in `core`.
 | `DataDir` | `$MEDIATOOLS_HOME` layout: logs, state, plans, reports |
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
+| `SelfRestart` | switch of a running shrink to the installed release: `--version` probe, command line (`--foreground -y --continue-log`), `os.execv` (same PID) |
 | `DecodeCheck` | trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
 | `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
-| `RunControl` | PID/stop/status files of a running job, refuses a second live job of the same name, background mode (fork, `setsid`), sleep lock in the working process |
+| `RunControl` | PID/stop/restart/status files of a running job, refuses a second live job of the same name, hands its registration over on a release switch, background mode (fork, `setsid`), sleep lock in the working process |
 | `AttachView` | `mediatools attach`: log backlog, new lines, progress lines; Ctrl+C leaves the view |
 | `SleepInhibitor` | systemd sleep/idle inhibitor lock for the lifetime of a job |
 | `TreeWalker` | sorted `os.walk` that never enters reserved/hidden dirs |
@@ -350,6 +351,8 @@ with `surrogateescape`, so they round-trip unchanged.
 | trial decode finds undecodable data | file set aside as BROKEN before encoding, failure row, original kept, run continues, exit code unchanged |
 | video failed in an earlier run, size unchanged | left out in planning unless `--retry-failed` |
 | second `mediatools shrink` while one is alive | refused before planning, exit 3 |
+| `mediatools reload` while a shrink runs | switch after the current file (`Shrinker.RESTART` = 4, internal), process replaced by the installed release; a release that does not start: request dropped, run continues |
+| switch cannot exec | message on stderr, exit 1; the next `mediatools shrink` continues with the files left |
 | Ctrl+C in shrink | flag set; current ffmpeg stops; original untouched; exit 1 |
 | Ctrl+C in triage | all players closed, nothing removed, exit 130 |
 | link creation fails | logged, counted as `error`, flatten exits 1 |
