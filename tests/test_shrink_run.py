@@ -14,6 +14,7 @@ from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.progressbar import ProgressBar
 from mediatools.shrink import ShrinkDatabase, Shrinker, ShrinkOptions, ThroughputLog
+from mediatools.shrink.planner import ShrinkPlanner
 
 LOG = logging.getLogger("test")
 
@@ -445,7 +446,7 @@ def test_plan_saves_probes_at_checkpoints_and_logs_cache_hits(
     videos(tmp_path)
     cache_file = tmp_path / "durations.tsv"
     shrinker, _encoder = build(tmp_path, ShrinkOptions(min_seconds=1))
-    monkeypatch.setattr(Shrinker, "CHECKPOINT", 2)
+    monkeypatch.setattr(ShrinkPlanner, "CHECKPOINT", 2)
     durations = DurationCache(str(cache_file))
     shrinker.state["durations"] = durations
     saved: list[int] = []

@@ -15,6 +15,9 @@ class ShrinkOptions:
         db_name: Database file name; None uses the default name.
         order: ``largest`` (default), ``smallest`` or ``path``.
         min_seconds: Leave out videos shorter than this; 0 processes all.
+        retry_failed: Include videos recorded as failed (``FAILED`` or
+            ``BROKEN``) in an earlier run; by default they are left out
+            while their size is unchanged.
     """
 
     keep_copies: bool = False
@@ -22,6 +25,7 @@ class ShrinkOptions:
     db_name: str | None = None
     order: str = "largest"
     min_seconds: float = 0.0
+    retry_failed: bool = False
 
     ORDERS = ("largest", "smallest", "path")
 
