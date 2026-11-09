@@ -9,7 +9,10 @@ classDiagram
   class TreeWalker { +walk(root) +media_files(root) }
   class Prompt { +yes_no(q) +text(q) }
   class Shrinker { +run() int }
-  class ShrinkDatabase { +ensure() +is_done(p) +record(p) }
+  class ShrinkDatabase { +ensure() +is_done(p) +record(p) +record_failure(p) +failure(p) }
+  class ShrinkPlanner { +plan(stopped) list }
+  class ReplaceJournal { +replace(out,p,db) +recover(dir) int }
+  class DecodeCheck { +unusable(p) int }
   class HevcEncoder { +encode(src,dst) +validate(src,dst) }
   class ProgressReport { +run() int }
   class DatabaseRenamer { +plan() +apply(plan) }
@@ -41,7 +44,13 @@ classDiagram
   Cli --> Syncer
   Shrinker --> ShrinkDatabase
   Shrinker --> HevcEncoder
-  Shrinker --> TreeWalker
+  Shrinker --> ShrinkPlanner
+  Shrinker --> DecodeCheck
+  ShrinkPlanner --> TreeWalker
+  ShrinkPlanner --> ReplaceJournal
+  ShrinkPlanner --> ShrinkDatabase
+  ReplaceJournal --> ShrinkDatabase
+  HevcEncoder --> DecodeCheck
   HevcEncoder --> MediaProbe
   ProgressReport --> ShrinkDatabase
   Triage --> CandidateFinder

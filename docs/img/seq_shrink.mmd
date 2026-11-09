@@ -2,15 +2,22 @@ sequenceDiagram
   actor U as User
   participant C as Cli
   participant S as Shrinker
+  participant P as ShrinkPlanner
   participant R as RunControl
   participant D as ShrinkDatabase
+  participant K as DecodeCheck
   participant E as HevcEncoder
+  participant J as ReplaceJournal
   participant T as ResultTable
   actor O as Other terminal
   U->>C: mediatools shrink PATH
+  C->>R: active_pid()
+  alt another shrink alive
+    R-->>U: already running - exit 3
+  end
   C->>S: run(confirm)
   S->>R: start() (PID + log path)
-  S->>S: plan(): DB, durations, codecs (cached)
+  S->>P: plan(): recover, DB, failures, durations, codecs
   S->>U: plan, estimates - replace originals?
   U-->>S: y
   S->>R: begin_work()
@@ -22,13 +29,19 @@ sequenceDiagram
     alt stop file present
       R-->>S: yes - end after this file
     end
-    S->>E: encode(path, tmp) at nice 19
-    E-->>S: ok? (exit code, stream, duration)
-    alt ok
-      S->>S: journalled copy into the original inode
-      S->>D: record(path)
-    else failed
-      S->>S: original kept
+    S->>K: unusable(path)? (first 10 s)
+    alt not decodable
+      S->>D: record_failure(BROKEN)
+    else decodable
+      S->>E: encode(path, tmp) at nice 19
+      E-->>S: ok? (exit, size >= 2 %, stream, duration, decode)
+      alt ok
+        S->>J: replace(tmp, path)
+        J->>D: record(path), clear_failure(path)
+      else failed
+        S->>D: record_failure(FAILED)
+        S->>S: keep ffmpeg messages in logs/ffmpeg/
+      end
     end
     S->>T: add(row) -> terminal, log, report file
     S->>R: status file (2 progress lines)

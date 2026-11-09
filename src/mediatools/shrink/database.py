@@ -29,10 +29,17 @@ class ShrinkDatabase:
     another name. Databases with an early schema (no PRIMARY KEY) are backed
     up and migrated on first use.
 
+    Videos that could not be shrunk are kept apart in a second table, so
+    ``files`` keeps its meaning ("processed") for every tool that reads it.
+    A failure counts only while the file has the recorded size; a changed
+    file is tried again. Older tools ignore the extra table.
+
     Schema::
 
         CREATE TABLE files (path text NOT NULL PRIMARY KEY,
                             size integer, modified text)
+        CREATE TABLE failures (name text NOT NULL PRIMARY KEY, size integer,
+                               status text, reason text, at text)
 
     Attributes:
         name: File name of the database.
@@ -44,6 +51,8 @@ class ShrinkDatabase:
     NAME = "shrink.db"
     SCHEMA = ("CREATE TABLE IF NOT EXISTS files "
               "(path text NOT NULL PRIMARY KEY, size integer, modified text)")
+    FAILURES = ("CREATE TABLE IF NOT EXISTS failures (name text NOT NULL PRIMARY KEY, "
+                "size integer, status text, reason text, at text)")
 
     def __init__(self, directory: str, logger=None, name: str | None = None):
         """Bind the object to a directory.
@@ -58,6 +67,7 @@ class ShrinkDatabase:
         self.log = logger
         self.migrated_backup: str | None = None
         self._index: dict[str, set[int]] | None = None
+        self._failures: dict[str, tuple[int, str]] | None = None
 
     # -- helpers ---------------------------------------------------------
     @staticmethod
@@ -99,7 +109,13 @@ class ShrinkDatabase:
 
     # -- lifecycle -------------------------------------------------------
     def ensure(self) -> None:
-        """Create the database or migrate an old schema."""
+        """Create the database or migrate an old schema; add the failures table."""
+        self._ensure_files()
+        with self._connect() as conn:
+            conn.execute(self.FAILURES)
+
+    def _ensure_files(self) -> None:
+        """Create the files table or migrate an old schema."""
         if not self.exists():
             with self._connect() as conn:
                 conn.execute(self.SCHEMA)
@@ -195,6 +211,74 @@ class ShrinkDatabase:
             self._index.setdefault(os.path.basename(file_path), set()).add(size)
         if self.log:
             self.log.debug("DB record: %s (size=%i, modified=%s)", file_path, size, mtime)
+
+    def record_failure(self, file_path: str, status: str, reason: str) -> None:
+        """Note that a file could not be shrunk (call :meth:`ensure` first).
+
+        Args:
+            file_path: Absolute path of the video.
+            status: ``FAILED`` or ``BROKEN``.
+            reason: Short cause.
+        """
+        name = os.path.basename(file_path)
+        size = os.path.getsize(file_path)
+        when = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute("INSERT INTO failures (name, size, status, reason, at) "
+                         "VALUES (?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET "
+                         "size=excluded.size, status=excluded.status, "
+                         "reason=excluded.reason, at=excluded.at",
+                         (name, size, status, reason, when))
+        if self._failures is not None:
+            self._failures[name] = (size, status)
+        if self.log:
+            self.log.debug("DB failure: %s (%s, %s)", file_path, status, reason)
+
+    def failure(self, file_path: str) -> str | None:
+        """Return the recorded failure status of a file of unchanged size.
+
+        Args:
+            file_path: Absolute path of a video in this directory.
+
+        Returns:
+            ``FAILED`` or ``BROKEN`` if the file is recorded as failed with
+            its current size, otherwise None.
+        """
+        entry = self.failures().get(os.path.basename(file_path))
+        if entry is None or entry[0] != os.path.getsize(file_path):
+            return None
+        return entry[1]
+
+    def failures(self) -> dict[str, tuple[int, str]]:
+        """Return the recorded failures (cached).
+
+        Returns:
+            Mapping file name to ``(size, status)``; empty if the database
+            or its failures table does not exist.
+        """
+        if self._failures is None:
+            self._failures = {}
+            if self.exists():
+                try:
+                    with self._connect() as conn:
+                        rows = conn.execute("SELECT name, size, status FROM failures").fetchall()
+                except sqlite3.OperationalError:
+                    rows = []                        # database of an older version
+                self._failures = {name: (int(size or 0), status) for name, size, status in rows}
+        return self._failures
+
+    def clear_failure(self, file_path: str) -> None:
+        """Forget a recorded failure, e.g. after a successful retry.
+
+        Args:
+            file_path: Absolute path of the video.
+        """
+        name = os.path.basename(file_path)
+        if name not in self.failures():
+            return
+        with self._connect() as conn:
+            conn.execute("DELETE FROM failures WHERE name = ?", (name,))
+        self.failures().pop(name, None)
 
     def rows(self) -> list[tuple]:
         """Return all rows (for reports and tests).

@@ -20,6 +20,8 @@ class ShrinkState(TypedDict):
         results: Result table of finished videos, or None.
         decode: Trial decode that sets aside undecodable videos, or None
             (no check).
+        ffmpeg_logs: Folder for ffmpeg's messages of failed encodes, or
+            None (they are deleted).
     """
 
     durations: DurationCache | None
@@ -27,3 +29,4 @@ class ShrinkState(TypedDict):
     throughput: ThroughputLog
     results: ResultTable | None
     decode: DecodeCheck | None
+    ffmpeg_logs: str | None

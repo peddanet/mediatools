@@ -1,13 +1,18 @@
 flowchart TD
-  A[next planned video] --> X{stop requested?<br/>mediatools stop / Ctrl+C}
+  P0[planning: walk the tree] --> P1{row in shrink database<br/>same file name?}
+  P1 -- yes --> S[skip - database has precedence]
+  P1 -- no --> P2{recorded as failed,<br/>same size?}
+  P2 -- "yes, no --retry-failed" --> FB[left out<br/>listed as FAILED BEFORE]
+  P2 -- no --> A[planned video]
+  A --> X{stop requested?<br/>mediatools stop / Ctrl+C}
   X -- yes --> END[close result table, summary, exit 1]
-  X -- no --> B{row in shrink database<br/>same file name?}
-  B -- yes --> S[skip - database has precedence]
-  B -- no --> C{video stream<br/>already HEVC?}
+  X -- no --> C{video stream<br/>already HEVC?}
   C -- yes --> R1[record in DB, no re-encode<br/>row: HEVC]
-  C -- no --> E[ffmpeg libx265 at nice 19<br/>into newShrinkedFiles/]
-  E --> V{exit 0, video stream,<br/>duration matches?}
-  V -- no --> F[original kept<br/>row: FAILED, continue]
+  C -- no --> TD{trial decode of the first 10 s:<br/>10 or more decoder errors?}
+  TD -- yes --> BR[not encoded, original kept<br/>failure noted; row: BROKEN]
+  TD -- no --> E[ffmpeg libx265 at nice 19<br/>into newShrinkedFiles/]
+  E --> V{exit 0, output at least 2 %,<br/>video stream, duration matches,<br/>output decodes?}
+  V -- no --> F[original kept, failure noted,<br/>ffmpeg messages kept in logs/ffmpeg/<br/>row: FAILED, continue]
   V -- yes --> K{--keep-copies?}
   K -- yes --> KC[keep copy, record nothing<br/>row: copy]
-  K -- no --> W[journalled copy into the original inode<br/>+ record; row: shrunk]
+  K -- no --> W[ReplaceJournal: copy into the original inode<br/>+ record; row: shrunk]
