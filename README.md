@@ -244,15 +244,17 @@ original again.
 
 ```bash
 mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S]
-                  [--keep-copies] [--crf 28] [--threads 6] [--ext mp4] [-y] [-v]
+                  [--keep-copies] [--crf 28] [--threads N] [--ext mp4] [-y] [-v]
 ```
 
 1. **Plan.** All videos are checked against the database of their
    directory. *The database always has precedence:* a recorded file counts
    as processed, whatever its codec. Matching is by **file name within the
    directory**, so databases written before the collection was moved stay
-   valid. Then the run reports files, volume and the estimated time and
-   asks once.
+   valid. Then the run reports files, volume, the estimated time and the
+   expected size afterwards (both measured on earlier files), lists
+   leftover `newShrinkedFiles/` folders of aborted runs, and asks once.
+   Leftovers are deleted only after a yes.
 2. **Order.** Largest files first by default (most space saved early);
    `--min-seconds 60` leaves short clips for a `triage` session first.
 3. **Per file:** already HEVC → recorded only; otherwise encode into
@@ -266,11 +268,18 @@ time (measured speed of this and earlier runs).
 |---|---|
 | Ctrl+C once | finish the current file, record it, stop |
 | Ctrl+C twice | abort the current file at once - its original stays untouched |
+| terminal closed | like Ctrl+C twice |
 
-The next run continues with the files left. Overwriting an original is
-protected by a marker file: if the machine fails during the copy, the next
-run repeats the copy from the validated output before anything else. A file
-that ffmpeg cannot encode is logged and skipped (exit code 2).
+The next run continues with the files left; a power failure at any moment
+loses no file. Overwriting an original is protected by a journal: the
+validated output and a marker file are flushed to disk before the copy
+starts, so if the machine fails during the copy, the next run repeats it
+from the complete output before anything else. A file that ffmpeg cannot
+encode is logged and skipped (exit code 2).
+
+By default ffmpeg and the x265 encoder use all logical CPUs but one and run
+with the lowest CPU priority (`nice` 19), so the desktop stays responsive
+(`--threads N` to change the thread count).
 
 | Option | Meaning |
 |---|---|
@@ -278,6 +287,7 @@ that ffmpeg cannot encode is logged and skipped (exit code 2).
 | `--min-seconds S` | leave out videos shorter than S seconds (durations cached) |
 | `--keep-copies` | leave originals untouched, keep shrunk copies for review, record nothing |
 | `--crf N` | libx265 constant rate factor, default 28 |
+| `--threads N` | CPU threads for decoding and the x265 pool, default logical CPUs - 1 |
 | `--ext LIST` | extensions to process, default `mp4` |
 | `-y` | skip the confirmation question |
 

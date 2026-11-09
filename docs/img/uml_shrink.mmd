@@ -30,12 +30,14 @@ classDiagram
   class HevcEncoder {
     +crf
     +threads
+    +niceness
     +probe
     +log
     +ffmpeg
     +process
     +aborted
-    +init(crf, threads, probe, logger, ffmpeg)
+    +init(crf, threads, probe, logger, ffmpeg, niceness)
+    +default_threads()
     +command(src, dst)
     +encode(src, dst, on_progress)
     +abort()
@@ -80,7 +82,7 @@ classDiagram
     +flags
     +display
     +stats
-    +failed
+    +found
     +init(root, logger, opts, encoder, probe, durations, throughput, display)
     +install_signal_handlers()
     +on_signal(signum, _frame)
@@ -89,13 +91,18 @@ classDiagram
     -_drop_short(todo)
     -_duration(path)
     +run(confirm)
+    -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
     -_encode_and_replace(path, size, out, database)
     -_show(name, fraction, size)
     -_replace(out, path, database)
     -_recover(dirpath)
-    -_remove_tmp(dirpath)
+    -_note_leftover(dirpath)
+    -_remove_leftovers()
+    -_size_or_none(path)
+    -_fsync_file(path)
+    -_fsync_dir(path)
     -_remove_quietly(path)
     -_finish()
   }
@@ -103,9 +110,13 @@ classDiagram
     +path
     +bytes
     +seconds
+    +ratio_src
+    +ratio_out
+    +files
     +init(path)
     +rate()
-    +add(size, seconds)
+    +ratio()
+    +add(size, seconds, out_size)
     +duration_text(seconds)
   }
   ShrinkOptions ..> Shrinker
