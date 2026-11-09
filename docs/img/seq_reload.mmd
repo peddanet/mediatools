@@ -1,0 +1,26 @@
+sequenceDiagram
+  actor U as User
+  participant A as apply-release.sh
+  participant C as Cli (reload)
+  participant R as RunControl
+  participant S as Shrinker (old release)
+  participant X as SelfRestart
+  participant N as Shrinker (new release, same PID)
+  U->>A: mediatools update
+  A->>A: patch, PR, CI, tag, install.sh
+  A->>C: mediatools reload
+  C->>R: request_restart() - state/shrink.restart
+  Note over S: current file: encode, validate, replace, record
+  S->>R: restart requested? (between two files)
+  S->>X: installed_version() (python -m mediatools --version)
+  alt fails or same version
+    S->>R: clear_restart() - run continues
+  else new version
+    S->>S: close result table, summary
+    S->>R: handover() (PID + status files stay)
+    S->>X: execute() - os.execv
+    X->>N: python -m mediatools shrink ... --foreground -y --continue-log LOG
+    N->>R: start() (own PID: allowed)
+    N->>N: plan again (databases, caches)
+    N->>N: continue with the files left
+  end
