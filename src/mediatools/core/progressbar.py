@@ -1,6 +1,7 @@
 """Two-line terminal progress display with remaining-time estimates."""
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import time
@@ -33,10 +34,14 @@ class ProgressBar:
         enabled: True if the stream is a terminal.
         note: Text shown at the start of the first line, e.g. a pending stop.
         drawn: True while the two lines are on the screen.
+        status_path: If set, both lines are also written to this file (at
+            most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
+        last_status: Monotonic time of the last status file update.
     """
 
     WIDTH = 24
     MIN_ELAPSED = 30.0
+    STATUS_SECONDS = 1.0
 
     def __init__(self, total_bytes: int, total_files: int, initial_rate: float | None = None,
                  stream: TextIO | None = None):
@@ -58,6 +63,8 @@ class ProgressBar:
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
         self.note = ""
         self.drawn = False
+        self.status_path: str | None = None
+        self.last_status = 0.0
 
     def rate(self, current_bytes: float = 0.0) -> float | None:
         """Return the speed used for the estimate.
@@ -139,6 +146,28 @@ class ProgressBar:
             name = name[:keep // 2] + "..." + name[len(name) - (keep - keep // 2):]
         return head + name
 
+    def _write_status(self, name: str, file_fraction: float, file_bytes: int) -> None:
+        """Replace the status file with both lines (rate-limited, atomic).
+
+        Args:
+            name: Name of the current file.
+            file_fraction: Encoded fraction of the current file (0..1).
+            file_bytes: Size of the current file.
+        """
+        now = time.monotonic()
+        if self.status_path is None or now - self.last_status < self.STATUS_SECONDS:
+            return
+        self.last_status = now
+        text = (self.line(name, file_fraction, file_bytes) + "\n"
+                + self.file_line(name, file_fraction, file_bytes) + "\n")
+        tmp = self.status_path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(tmp, self.status_path)
+        except OSError:
+            pass                                 # the display must never stop a run
+
     def show(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0) -> None:
         """Redraw both status lines on a terminal.
 
@@ -147,6 +176,7 @@ class ProgressBar:
             file_fraction: Encoded fraction of the current file (0..1).
             file_bytes: Size of the current file.
         """
+        self._write_status(name, file_fraction, file_bytes)
         if not self.enabled:
             return
         width = max(20, shutil.get_terminal_size().columns - 1)

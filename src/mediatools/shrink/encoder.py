@@ -196,13 +196,13 @@ class HevcEncoder:
         return True
 
     def _info(self, *args) -> None:
-        """Log at INFO level if a logger is set.
+        """Log details at DEBUG level (log file only) if a logger is set.
 
         Args:
-            *args: Format string and arguments for :meth:`logging.Logger.info`.
+            *args: Format string and arguments for :meth:`logging.Logger.debug`.
         """
         if self.log:
-            self.log.info(*args)
+            self.log.debug(*args)
 
     def _error(self, *args) -> None:
         """Log at ERROR level if a logger is set.

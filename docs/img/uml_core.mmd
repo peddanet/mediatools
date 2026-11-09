@@ -1,5 +1,18 @@
 classDiagram
   direction LR
+  class AttachView {
+    +control
+    +stream
+    +poll
+    +drawn
+    +init(control, stream, poll)
+    +run()
+    -_backlog(log)
+    -_follow(log, offset)
+    +terminal_lines(text)
+    -_draw()
+    -_clear()
+  }
   class CodecCache {
     +parse(text)
     +format(value)
@@ -71,11 +84,14 @@ classDiagram
     +enabled
     +note
     +drawn
+    +status_path
+    +last_status
     +init(total_bytes, total_files, initial_rate, stream)
     +rate(current_bytes)
     +remaining_seconds(current_bytes)
     +line(_name, file_fraction, file_bytes)
     +file_line(name, file_fraction, file_bytes, width)
+    -_write_status(name, file_fraction, file_bytes)
     +show(name, file_fraction, file_bytes)
     +file_done(size)
     +file_skipped(size)
@@ -93,12 +109,21 @@ classDiagram
     +name
     +pid_file
     +stop_file
+    +status_file
+    +console_file
     +last_poll
-    +init(name, data)
+    +background
+    +inhibitor
+    +log_path
+    +init(name, data, background, inhibitor, log_path)
     +start()
+    -_register()
+    +begin_work()
+    +detach()
     +finish()
     +stop_requested(force)
     +active_pid()
+    +active_log()
     +request_stop()
     -_remove(path)
   }
@@ -108,6 +133,15 @@ classDiagram
     +logger
     +init(name, verbose, datadir)
     +close()
+  }
+  class SleepInhibitor {
+    +why
+    +log
+    +proc
+    +init(why, log, inhibit)
+    +start()
+    +stop()
+    -_warn(message)
   }
   class VersionInfo {
     +package_dir
@@ -123,9 +157,11 @@ classDiagram
     +files(root)
     +media_files(root, extensions)
   }
+  AttachView --> RunControl
   CodecCache ..> DurationCache
   Config --> DataDir
   RunControl --> DataDir
+  RunControl --> SleepInhibitor
   RunLog --> DataDir
   RunLog --> VersionInfo
   TreeWalker --> MediaTypes

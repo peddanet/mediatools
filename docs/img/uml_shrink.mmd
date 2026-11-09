@@ -46,6 +46,15 @@ classDiagram
     -_info(args)
     -_error(args)
   }
+  class FileResult {
+    +path
+    +status
+    +source
+    +result
+    +length
+    +took
+    +init(path, status, source, result, length, took)
+  }
   class ShrinkOptions {
     +keep_copies
     +extensions
@@ -70,7 +79,25 @@ classDiagram
     +write()
     +run()
   }
-  class ShrinkState {
+  class ResultTable {
+    +root
+    +report
+    +log
+    +width
+    +count
+    +init(root, report, log, width)
+    +add(item)
+    +finish()
+    -_write(lines)
+    +file_width(width)
+    +head(width)
+    +row(cells, path, width)
+    +rule(left, cross, right, width)
+    -_line(cells, path, width)
+    +wrap(path, width)
+    +cells(number, item)
+    +mb(size)
+    +minutes(seconds)
   }
   class Shrinker {
     +root
@@ -103,6 +130,7 @@ classDiagram
     -_record_hevc()
     -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
+    -_result(item)
     -_show(name, fraction, size)
     -_poll_stop(force)
     -_mark_stopping(message)
@@ -115,6 +143,12 @@ classDiagram
     -_fsync_dir(path)
     -_remove_quietly(path)
     -_finish()
+  }
+  class ShrinkState {
+    +durations
+    +codecs
+    +throughput
+    +results
   }
   class ThroughputLog {
     +path
@@ -132,9 +166,12 @@ classDiagram
   ShrinkOptions ..> Shrinker
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
-  ShrinkState ..> ThroughputLog
+  ResultTable ..> FileResult
+  Shrinker ..> FileResult
   Shrinker --> HevcEncoder
   Shrinker --> ShrinkDatabase
   Shrinker --> ShrinkOptions
   Shrinker --> ShrinkState
   Shrinker --> ThroughputLog
+  ShrinkState ..> ResultTable
+  ShrinkState ..> ThroughputLog
