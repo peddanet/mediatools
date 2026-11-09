@@ -5,6 +5,26 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.10] - 2026-11-09
+
+### Added
+- Release switch during a run: `mediatools reload` (also called by
+  `mediatools update` after the installation) asks a running shrink to
+  continue with the newly installed release. Between two files it checks
+  that the release starts (`--version`), closes table and summary and
+  replaces itself (`os.execv`, same PID, session, console and log file)
+  by the new release with the same options plus `--foreground -y`. The new
+  release plans again from databases and caches and continues with the
+  files left. A release that does not start, or the same version, is not
+  switched to.
+- New class `SelfRestart`; `RunControl` restart request, `handover()`;
+  `RunLog` can continue an existing log file (hidden option
+  `--continue-log`).
+
+### Changed
+- Documentation: handbook section "New release during a run", sequence
+  diagram of the switch, class diagram; both PDFs rebuilt.
+
 ## [1.2.9] - 2026-11-09
 
 ### Added

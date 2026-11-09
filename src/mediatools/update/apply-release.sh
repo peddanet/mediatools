@@ -13,7 +13,8 @@
 #      the release before it). Default: all pending versions.
 #   4. Per version (git-flow hotfix): patch -> hotfix branch -> PR into main
 #      -> CI -> merge -> tag vX -> CI of the tag -> back-merge into develop.
-#   5. Installs the newest release (install.sh) and checks --version.
+#   5. Installs the newest release (install.sh), checks --version and asks a
+#      running shrink to switch to it after its current file (mediatools reload).
 #   6. Moves the used archives to ~/scripts/mediatools.d/releases/ and deletes
 #      stale archives, browser copies and old apply scripts from the folder.
 #
@@ -264,6 +265,9 @@ if [ -n "$TARGET" ]; then
   installed=$("$HOME/scripts/mediatools" --version)
   echo "$installed"
   [ "$installed" = "mediatools $TARGET" ]
+  # a shrink running in the background switches to the new release after its
+  # current file (prints "nothing to reload" if none runs)
+  "$HOME/scripts/mediatools" reload || true
 fi
 
 # -- tidy the download folder --------------------------------------------------------
