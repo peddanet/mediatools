@@ -194,7 +194,7 @@ class ShrinkDatabase:
         if self._index is not None:
             self._index.setdefault(os.path.basename(file_path), set()).add(size)
         if self.log:
-            self.log.info("DB record: %s (size=%i, modified=%s)", file_path, size, mtime)
+            self.log.debug("DB record: %s (size=%i, modified=%s)", file_path, size, mtime)
 
     def rows(self) -> list[tuple]:
         """Return all rows (for reports and tests).

@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.5 -- Handbook"
+title: "mediatools 1.2.6 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -299,6 +299,10 @@ src/mediatools/
     config.py         Config           local INI file (paths, names)
     datadir.py        DataDir          location of logs, state, plans, reports
     runlog.py         RunLog           logger to terminal and time-stamped file
+    runcontrol.py     RunControl       PID/stop/status files, background mode
+    attachview.py     AttachView       live view of a background run (attach)
+    sleepinhibitor.py SleepInhibitor   systemd sleep/idle lock during a run
+    progressbar.py    ProgressBar      two progress lines, status file
     mediatypes.py     MediaTypes       extensions, reserved directory names
     probe.py          MediaProbe       ffprobe wrapper (duration, codec)
     walker.py         TreeWalker       sorted os.walk with skip rules
@@ -308,6 +312,9 @@ src/mediatools/
     dbrenamer.py      DatabaseRenamer  one-time renaming of databases
     encoder.py        HevcEncoder      ffmpeg call and result validation
     shrinker.py       Shrinker         per-file decision and copy-back
+    shrinkstate.py    ShrinkState      caches, throughput, result table of a run
+    fileresult.py     FileResult       outcome of one video
+    resulttable.py    ResultTable      framed result table, report file
     progress.py       ProgressReport   read-only done/todo lists
   triage/
     candidates.py     CandidateFinder  lazy search by duration
@@ -319,6 +326,7 @@ src/mediatools/
   flatten/
     namer.py          FlatNamer        names within the byte limit
     flatindex.py      FlatIndex        _flat/_index.tsv
+    planentry.py      PlanEntry        one planned action
     plan.py           FlatPlan         actions, TSV persistence, undo input
     flattener.py      Flattener        analyse / apply / undo
   sync/
@@ -354,6 +362,9 @@ mediatools shrink ~/Pictures/collection                       # largest first
 mediatools shrink ~/Pictures/collection --min-seconds 60      # skip short clips
 mediatools shrink ~/Pictures/collection --order path --keep-copies
 mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
+mediatools shrink ~/Pictures/collection --foreground          # stay in this terminal
+mediatools attach                                             # (alias: front) watch the background run
+mediatools stop                                               # finish the current file, then end
 ~~~
 
 | Option | Default | Meaning |
@@ -466,6 +477,61 @@ of being counted as done, so they do not inflate progress and speed. The
 lines are drawn only on a terminal; the log file receives the normal
 messages.
 
+## Result table
+
+Each finished video adds one row to a framed table: row number, time of
+completion, size before and after, ratio, playing time, wall-clock time
+spent, status (`shrunk`, `copy`, `HEVC`, `FAILED`) and the path relative to
+the shrink root. The figures have fixed columns; the path takes the rest of
+the width and wraps inside its cell, after a `/` or a space, so a long name
+makes the row taller instead of breaking the frame:
+
+~~~text
+results (also in reports/shrink_results_<ts>.txt):
+┌──────┬───────┬──────────┬──────────┬─────────┬──────────┬──────────┬────────┬────────────────────────┐
+│   no │ end   │   source │   result │   ratio │   length │     took │ status │ file                   │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
+│    1 │ 10:25 │  2815 MB │   284 MB │  10.1 % │ 26.5 min │ 21.3 min │ shrunk │ creator_a/Posts/       │
+│      │       │          │          │         │          │          │        │ Videos/                │
+│      │       │          │          │         │          │          │        │ example_clip_with_a_ra │
+│      │       │          │          │         │          │          │        │ ther_long_descriptive_ │
+│      │       │          │          │         │          │          │        │ name.mp4               │
+├──────┼───────┼──────────┼──────────┼─────────┼──────────┼──────────┼────────┼────────────────────────┤
+│    2 │ 10:25 │  2303 MB │        - │       - │ 60.0 min │  0.5 min │ FAILED │ creator_b/video/       │
+│      │       │          │          │         │          │          │        │ another clip.mp4       │
+└──────┴───────┴──────────┴──────────┴─────────┴──────────┴──────────┴────────┴────────────────────────┘
+~~~
+
+| Copy | Width | Where |
+|---|---|---|
+| terminal (and log file) | terminal width, at least 102 columns | rows printed as files finish |
+| report | 160 columns | `reports/shrink_results_<ts>.txt`, written and flushed per row |
+
+The report is complete up to the last finished file, even after a crash.
+The details behind a row (ffmpeg command, validation, database record)
+are written to the log file only; `--verbose` also shows them on the
+terminal. Errors (e.g. the last lines of a failed ffmpeg run) stay visible.
+
+## Sleep and idle lock
+
+`shrink` takes a systemd inhibitor lock for its whole run, the same as
+wrapping it in `systemd-inhibit --what=sleep:idle`:
+
+~~~bash
+systemd-inhibit --list        # shows: mediatools  ...  mediatools shrink  sleep:idle  block
+~~~
+
+The lock is held by a helper process
+(`systemd-inhibit ... tail --pid=<shrink pid> -f /dev/null`) in its own
+session: Ctrl+C in the terminal does not reach it, and it ends at the
+latest when the shrink process ends, even after `kill -9`, so no lock is
+left behind. No root rights are needed in a local session: the polkit
+defaults of systemd allow `org.freedesktop.login1.inhibit-block-sleep` for
+active and inactive local sessions and `-idle` for everyone (see
+`/usr/share/polkit-1/actions/org.freedesktop.login1.policy`). If
+the lock is refused or `systemd-inhibit` is missing, shrink logs a warning
+and runs anyway.
+
 ## Database
 
 ~~~sql
@@ -498,15 +564,41 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 
 | Event | Behaviour |
 |---|---|
-| `mediatools stop` in another terminal | the same as Ctrl+C once (see below) |
-| Ctrl+C (or Ctrl+Z) once | the current file is finished, validated, copied and recorded; then the run stops |
-| Ctrl+C a second time, SIGTERM, SIGHUP (terminal closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
+| `mediatools stop` in any terminal | the current file is finished, validated, copied and recorded; then the run stops |
+| terminal closed (background mode, the default) | nothing - the run has its own session and continues |
+| Ctrl+C (or Ctrl+Z) once, `--foreground` | the same as `mediatools stop` |
+| Ctrl+C a second time, SIGTERM, SIGHUP (terminal of a `--foreground` run closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
 | power failure, kill -9 | see the replacement journal below |
 | ffmpeg cannot encode a file | logged as `FAILED`, run continues, exit code 2 |
 
-**Stopping from another terminal.** A Ctrl+C only reaches the run if its
-terminal window has the keyboard focus. `mediatools stop` does not depend
-on that:
+**Background mode.** Planning and the confirmation happen in the
+terminal. Then (`RunControl.begin_work`) the process forks: the parent
+prints how to follow and stop the run and exits, the prompt returns. The
+child calls `setsid()` - a new session without controlling terminal, so
+closing the window sends it no SIGHUP - reads from `/dev/null`, writes its
+terminal output (normally empty; e.g. a Python traceback after a crash) to
+`state/shrink.console` and registers its PID in `state/shrink.pid`
+together with the log file path. Only then does it take the sleep lock,
+so the lock belongs to the process that does the work.
+
+~~~text
+shrink continues in the background (pid 12345); the terminal may be closed.
+  watch: mediatools attach   (Ctrl+C leaves the view)
+  stop:  mediatools stop     (after the current file)
+  log:   /home/user/scripts/mediatools.d/logs/shrink_2026-11-09_11-30-00.log
+~~~
+
+`mediatools attach` (alias `front`) prints the last 30 log lines, then
+every new line, and redraws the two progress lines, which the run writes
+to `state/shrink.status` once per second. Ctrl+C leaves the view; the run
+continues. The view ends by itself when the run ends. `--foreground`
+keeps the previous behaviour (run bound to the terminal, Ctrl+C stops).
+
+`time mediatools shrink` measures only the part until the run moves into
+the background; the log file has the times of the whole run.
+
+**Stopping.** `mediatools stop` works from any terminal and does not
+depend on keyboard focus:
 
 ~~~bash
 mediatools stop
@@ -940,6 +1032,10 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_cli.py` | end-to-end runs of flatten, progress, sync and reverse sync |
 | `test_config.py` | defaults, values and error messages of the INI file, commands without path, database renaming with conflicts |
 | `test_snapshot.py` | settings validation, probe parsing, level schedule, generated rsnapshot.conf, systemd unit, refusal of a wrong directory, adoption without copying, deletion limit, removed files kept in `stand0`, hard links shared between snapshots, rotation of `beta` |
+| `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
+| `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
+| `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
+| `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
 gates (`tools/check.sh`: format, lint, types, security, tests) on Python
