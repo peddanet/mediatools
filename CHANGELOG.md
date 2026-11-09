@@ -5,6 +5,31 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-11-09
+
+### Added
+- `shrink` blocks sleep and idle actions itself for the length of the run
+  (systemd inhibitor lock via a helper that ends with the run, even after
+  `kill -9`); the `systemd-inhibit` wrapper is no longer needed. Without
+  systemd-inhibit or permission it warns and runs anyway.
+- Framed result table: one row per finished video (end time, size before
+  and after, ratio, playing time, time spent, status, path). Long paths
+  wrap inside their cell. Written to the terminal and to
+  `reports/shrink_results_<ts>.txt` (160 columns, flushed per row).
+
+- `shrink` moves into the background after the confirmation: the prompt
+  returns, closing the terminal no longer ends the run.
+  `mediatools attach` (alias `front`) shows the log and the progress lines
+  of the background run; Ctrl+C leaves the view. `--foreground` keeps the
+  run in the terminal.
+
+### Changed
+- One class per module also for `PlanEntry` (`flatten/planentry.py`) and
+  `ShrinkState` (`shrink/shrinkstate.py`); `FileResult` has its own module.
+- ffmpeg command, validation and database record of each file are written
+  to the log file only (DEBUG); `--verbose` shows them on the terminal as
+  well. Log files now always contain DEBUG details.
+
 ## [1.2.5] - 2026-11-09
 
 ### Added

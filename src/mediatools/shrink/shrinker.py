@@ -8,7 +8,6 @@ import shutil
 import signal
 import time
 from collections.abc import Callable
-from typing import TypedDict
 
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
@@ -20,15 +19,9 @@ from mediatools.core.walker import TreeWalker
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.shrink.encoder import HevcEncoder
 from mediatools.shrink.options import ShrinkOptions
+from mediatools.shrink.fileresult import FileResult
+from mediatools.shrink.shrinkstate import ShrinkState
 from mediatools.shrink.throughput import ThroughputLog
-
-
-class ShrinkState(TypedDict):
-    """Persistent helpers of a run: probe caches and measured throughput."""
-
-    durations: DurationCache | None
-    codecs: CodecCache | None
-    throughput: ThroughputLog
 
 
 class Shrinker:
@@ -118,7 +111,8 @@ class Shrinker:
         self.probe = probe or MediaProbe()
         self.encoder = encoder or HevcEncoder(probe=self.probe, logger=logger)
         self.state: ShrinkState = {"durations": durations, "codecs": codecs,
-                                   "throughput": throughput or ThroughputLog()}
+                                   "throughput": throughput or ThroughputLog(),
+                                   "results": None}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False}
@@ -326,6 +320,8 @@ class Shrinker:
         finally:
             if self.control is not None:
                 self.control.finish()
+            if self.state["results"] is not None:
+                self.state["results"].finish()
 
     def _run(self, confirm: Callable[[], bool] | None) -> int:
         """Body of :meth:`run`.
@@ -348,10 +344,14 @@ class Shrinker:
                 self.log.info("leftover work folders kept")
             self._finish()
             return 0
+        if self.control is not None and todo:
+            self.control.begin_work()                # background, sleep lock
         self._remove_leftovers()
         self._record_hevc()
         if self.display is None:
             self.display = ProgressBar(total, len(todo), rate)
+        if self.control is not None:
+            self.display.status_path = self.control.status_file
         self._attach_bar_filter()
         for path, size in todo:
             self._poll_stop(force=True)
@@ -362,6 +362,8 @@ class Shrinker:
             else:
                 self.display.file_skipped(size)
         self.display.clear()
+        if self.state["results"] is not None:
+            self.state["results"].finish()           # close the table before the summary
         self._finish()
         if self.flags["stop"]:
             return 1
@@ -468,11 +470,12 @@ class Shrinker:
         Args:
             path: Video file.
         """
-        self.log.info("already HEVC, recorded without re-encoding: %s", path)
+        self.log.debug("already HEVC, recorded without re-encoding: %s", path)
         database = self.database(os.path.dirname(path))
         database.ensure()
         database.record(path)
         self.stats["hevc"] += 1
+        self._result(FileResult(path, "HEVC", os.path.getsize(path)))
 
     def _encode_and_replace(self, path: str, size: int, out: str,
                             database: ShrinkDatabase) -> None:
@@ -484,8 +487,10 @@ class Shrinker:
             out: Output path in ``newShrinkedFiles/``.
             database: Database of its directory.
         """
-        self.log.info("shrinking (%.0f MB): %s", size / 1e6, path)
+        self.log.debug("shrinking (%.0f MB): %s", size / 1e6, path)
         name = os.path.basename(path)
+        length = (self.state["durations"].get(path, os.stat(path))
+                  if self.state["durations"] is not None else None)
         started = time.monotonic()
         ok = self.encoder.encode(path, out, lambda fraction: self._show(name, fraction, size))
         if self.flags["abort"]:
@@ -497,13 +502,32 @@ class Shrinker:
             self.stats["failed"] += 1
             self._remove_quietly(out)
             self._remove_quietly(out + ".ffmpeg.log")      # its tail is in the log
+            self._result(FileResult(path, "FAILED", size, None, length,
+                                    time.monotonic() - started))
             return
-        self.state["throughput"].add(size, time.monotonic() - started, self._size_or_none(out))
+        out_size = self._size_or_none(out)
+        took = time.monotonic() - started
+        self.state["throughput"].add(size, took, out_size)
         if self.opts.keep_copies:
             self.stats["copies"] += 1
+            self._result(FileResult(path, "copy", size, out_size, length, took))
             return
         self._replace(out, path, database)
         self.stats["shrunk"] += 1
+        self._result(FileResult(path, "shrunk", size, out_size, length, took))
+
+    def _result(self, item: FileResult) -> None:
+        """Add a row to the result table, if one is set.
+
+        Args:
+            item: Outcome of one video.
+        """
+        table = self.state["results"]
+        if table is None:
+            return
+        if self.display:
+            self.display.clear()
+        table.add(item)
 
     def _show(self, name: str, fraction: float, size: int) -> None:
         """Forward encoder progress to the display.

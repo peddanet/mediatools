@@ -116,6 +116,28 @@ Returns:
     0 if a running shrink was asked to stop, 1 if none runs.
 ~~~
 
+**`cmd_attach`**
+
+~~~text
+cmd_attach(_args: argparse.Namespace) -> int
+
+Run ``mediatools attach`` (alias ``front``): watch a background shrink.
+
+Returns:
+    0 after showing a run, 1 if none runs.
+~~~
+
+**`cmd_front`**
+
+~~~text
+cmd_front(_args: argparse.Namespace) -> int
+
+Run ``mediatools attach`` (alias ``front``): watch a background shrink.
+
+Returns:
+    0 after showing a run, 1 if none runs.
+~~~
+
 **`cmd_progress`**
 
 ~~~text
@@ -258,6 +280,117 @@ Returns:
 ~~~
 
 ## `mediatools.core`
+
+### `AttachView` (`mediatools.core.attachview`) {.unnumbered}
+
+~~~text
+Follow the log and the progress lines of a running job.
+
+Shows the last :attr:`BACKLOG` lines of the job's log file, then every
+new line as it is written - like the terminal of the run: DEBUG lines
+are left out, INFO lines without time stamp and level - and below them
+the two progress lines from the status file, redrawn in place. Ctrl+C
+only leaves the view; the job keeps running. The view ends by itself
+when the job ends.
+
+Example:
+    >>> AttachView(RunControl("shrink")).run()
+
+Attributes:
+    control: Control files of the job.
+    stream: Output stream (the terminal).
+    poll: Seconds between two updates.
+    drawn: True while the progress lines are on the screen.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    control: RunControl,
+    stream: TextIO | None = None,
+    poll: float = 1.0,
+) -> None
+
+Configure the view.
+
+Args:
+    control: Control files of the job.
+    stream: Output stream; stdout if None.
+    poll: Seconds between two updates.
+~~~
+
+**`run`**
+
+~~~text
+run(self) -> int
+
+Show the job until it ends or the user presses Ctrl+C.
+
+Returns:
+    0 after showing a job, 1 if none runs.
+~~~
+
+**`_backlog`**
+
+~~~text
+_backlog(self, log: str | None) -> int
+
+Print the last lines of the log.
+
+Args:
+    log: Log file, or None.
+
+Returns:
+    Offset after the printed part.
+~~~
+
+**`_follow`**
+
+~~~text
+_follow(self, log: str | None, offset: int) -> int
+
+Print log lines written since ``offset``.
+
+Args:
+    log: Log file, or None.
+    offset: Position after the last printed line.
+
+Returns:
+    New position.
+~~~
+
+**`terminal_lines`**
+
+~~~text
+terminal_lines(cls, text: str) -> list[str]
+
+Turn log file lines into what the terminal of the run shows.
+
+Args:
+    text: Complete log lines.
+
+Returns:
+    Lines with line break: DEBUG dropped, INFO without prefix,
+    other levels as ``LEVEL message``; foreign lines unchanged.
+~~~
+
+**`_draw`**
+
+~~~text
+_draw(self) -> None
+
+Redraw the two progress lines from the status file.
+~~~
+
+**`_clear`**
+
+~~~text
+_clear(self) -> None
+
+Remove the progress lines before new log lines are printed.
+~~~
 
 ### `CodecCache` (`mediatools.core.codeccache`) {.unnumbered}
 
@@ -838,6 +971,9 @@ Attributes:
     enabled: True if the stream is a terminal.
     note: Text shown at the start of the first line, e.g. a pending stop.
     drawn: True while the two lines are on the screen.
+    status_path: If set, both lines are also written to this file (at
+        most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
+    last_status: Monotonic time of the last status file update.
 ~~~
 
 **`__init__`**
@@ -929,6 +1065,19 @@ Args:
 Returns:
     Text without line break, e.g.
     ``file  35 % of 2.40 GiB (0.84 GiB encoded) | 12m left | clip.mp4``.
+~~~
+
+**`_write_status`**
+
+~~~text
+_write_status(self, name: str, file_fraction: float, file_bytes: int) -> None
+
+Replace the status file with both lines (rate-limited, atomic).
+
+Args:
+    name: Name of the current file.
+    file_fraction: Encoded fraction of the current file (0..1).
+    file_bytes: Size of the current file.
 ~~~
 
 **`show`**
@@ -1059,23 +1208,47 @@ the first Ctrl+C, but independent of which window has the keyboard
 focus. Both files are removed when the job ends; a stop file found at
 start (left by a crash) is removed as well.
 
+The PID file also names the log file, and the job writes its progress
+lines to ``<data>/state/<name>.status``; ``mediatools attach`` shows
+both. With ``background`` the job moves into the background when the
+real work begins (:meth:`begin_work`, after the confirmation): it forks,
+the terminal gets its prompt back, and the job continues in a new
+session, independent of the terminal - closing the window does not end
+it. Its terminal output goes to ``<data>/state/<name>.console``. The
+optional sleep lock is taken in the process that does the work.
+
 Attributes:
     name: Job name, e.g. ``shrink``.
-    pid_file: Path of the PID file.
+    pid_file: Path of the PID file (PID and log file path).
     stop_file: Path of the stop-request file.
+    status_file: Path of the progress status file.
+    console_file: Terminal output of a job in the background.
     last_poll: Monotonic time of the last check for the stop file.
+    background: Move into the background in :meth:`begin_work`.
+    inhibitor: Sleep lock held while the work runs, or None.
+    log_path: Log file of the job, or None.
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, name: str, data: DataDir | None = None)
+__init__(
+    self,
+    name: str,
+    data: DataDir | None = None,
+    background: bool = False,
+    inhibitor: SleepInhibitor | None = None,
+    log_path: str | None = None,
+)
 
 Locate the control files.
 
 Args:
     name: Job name, e.g. ``shrink``.
     data: Data directory; the default one if None.
+    background: Move into the background in :meth:`begin_work`.
+    inhibitor: Sleep lock held while the work runs, or None.
+    log_path: Log file of the job, or None.
 ~~~
 
 **`start`**
@@ -1086,12 +1259,43 @@ start(self) -> None
 Register the current process and drop a stale stop request.
 ~~~
 
+**`_register`**
+
+~~~text
+_register(self) -> None
+
+Write PID and log file path of the current process.
+~~~
+
+**`begin_work`**
+
+~~~text
+begin_work(self) -> None
+
+Enter the work phase: background (if set), then the sleep lock.
+~~~
+
+**`detach`**
+
+~~~text
+detach(self) -> None
+
+Continue in a background process; the calling process exits.
+
+The parent prints how to follow and stop the job, then ends at
+once with ``os._exit(0)`` - without cleanup, which belongs to the
+child. The child starts a new session (no controlling terminal, so
+closing the window sends it no SIGHUP), reads from /dev/null,
+writes its terminal output to :attr:`console_file` and registers
+its own PID.
+~~~
+
 **`finish`**
 
 ~~~text
 finish(self) -> None
 
-Unregister the current process.
+Unregister the current process and release the sleep lock.
 ~~~
 
 **`stop_requested`**
@@ -1117,6 +1321,17 @@ Return the process ID of the running job, if it is alive.
 
 Returns:
     PID, or None if no job of this name runs.
+~~~
+
+**`active_log`**
+
+~~~text
+active_log(self) -> str | None
+
+Return the log file of the running job.
+
+Returns:
+    Path from the PID file, or None if no job runs or none is named.
 ~~~
 
 **`request_stop`**
@@ -1148,7 +1363,9 @@ Args:
 Logger that writes to stdout and to a time-stamped log file.
 
 The terminal shows plain messages; the file additionally contains
-timestamp and level of every line. The first two lines name the log
+timestamp and level of every line, and always the DEBUG details
+(e.g. ffmpeg commands, database records) that the terminal shows only
+with ``verbose``. The first two lines name the log
 file and the running version with its process ID, so every log tells
 which release produced it.
 
@@ -1183,6 +1400,78 @@ close(self) -> None
 Flush and close all handlers (important in tests).
 ~~~
 
+### `SleepInhibitor` (`mediatools.core.sleepinhibitor`) {.unnumbered}
+
+~~~text
+Hold a systemd sleep/idle inhibitor lock for the lifetime of a job.
+
+Runs ``systemd-inhibit --what=sleep:idle --mode=block tail
+--pid=<own pid> -f /dev/null`` in its own session: the lock lives as
+long as the helper; ``tail --pid`` ends it at the latest when this
+process dies, even after SIGKILL, so no lock is left behind. Ctrl+C in
+the terminal does not reach the helper (own session). If systemd-inhibit
+is missing or refuses the lock, the job runs without it and a warning
+is logged.
+
+Example:
+    >>> lock = SleepInhibitor("mediatools shrink")
+    >>> lock.start()
+    >>> lock.stop()
+
+Attributes:
+    why: Reason shown by ``systemd-inhibit --list``.
+    log: Optional logger.
+    proc: The helper process while the lock is held, else None.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    why: str,
+    log: logging.Logger | None = None,
+    inhibit: str = 'systemd-inhibit',
+) -> None
+
+Configure the lock.
+
+Args:
+    why: Reason shown by ``systemd-inhibit --list``.
+    log: Optional logger.
+    inhibit: Name or path of the systemd-inhibit program.
+~~~
+
+**`start`**
+
+~~~text
+start(self) -> bool
+
+Take the lock.
+
+Returns:
+    True if the lock is held.
+~~~
+
+**`stop`**
+
+~~~text
+stop(self) -> None
+
+Release the lock (no-op if none is held).
+~~~
+
+**`_warn`**
+
+~~~text
+_warn(self, message: str) -> None
+
+Log a warning if a logger is set.
+
+Args:
+    message: Warning text.
+~~~
+
 ### `VersionInfo` (`mediatools.core.versioninfo`) {.unnumbered}
 
 ~~~text
@@ -1202,7 +1491,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.5')
+__init__(self, package_dir: str | None = None, version: str = '1.2.6')
 
 Locate the imported package.
 
@@ -1683,10 +1972,10 @@ Returns:
 ~~~text
 _info(self, *args) -> None
 
-Log at INFO level if a logger is set.
+Log details at DEBUG level (log file only) if a logger is set.
 
 Args:
-    *args: Format string and arguments for :meth:`logging.Logger.info`.
+    *args: Format string and arguments for :meth:`logging.Logger.debug`.
 ~~~
 
 **`_error`**
@@ -1698,6 +1987,61 @@ Log at ERROR level if a logger is set.
 
 Args:
     *args: Format string and arguments for :meth:`logging.Logger.error`.
+~~~
+
+### `FileResult` (`mediatools.shrink.fileresult`) {.unnumbered}
+
+~~~text
+Outcome of one video.
+
+Attributes:
+    path: Absolute path of the video.
+    status: ``shrunk``, ``copy`` (review mode), ``HEVC`` (recorded
+        without encoding) or ``FAILED``.
+    source: Size before, in bytes.
+    result: Size after, in bytes, or None (failed, HEVC).
+    length: Playing time in seconds, or None if unknown.
+    took: Wall-clock seconds spent on the file.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    path: str,
+    status: str,
+    source: int,
+    result: int | None = None,
+    length: float | None = None,
+    took: float = 0.0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
 ~~~
 
 ### `ShrinkOptions` (`mediatools.shrink.options`) {.unnumbered}
@@ -1867,10 +2211,216 @@ Returns:
     Always 0.
 ~~~
 
-### `ShrinkState` (`mediatools.shrink.shrinker`) {.unnumbered}
+### `ResultTable` (`mediatools.shrink.resulttable`) {.unnumbered}
 
 ~~~text
-Persistent helpers of a run: probe caches and measured throughput.
+Write one boxed table row per finished video.
+
+Fixed-width columns hold the figures; the last column holds the path
+relative to the shrink root and takes the remaining width. A longer
+path is wrapped inside its cell at ``/`` boundaries, so the row grows in
+height instead of breaking the frame. Rows are separated by horizontal
+rules::
+
+    ┌──────┬───────┬─────────┬─────────┬─────────┬──────────┬──────────┬────────┬──────────┐
+    │   no │ end   │  source │  result │   ratio │   length │     took │ status │ file     │
+    ├──────┼───────┼─────────┼─────────┼─────────┼──────────┼──────────┼────────┼──────────┤
+    │    1 │ 06:54 │ 2860 MB │  510 MB │  17.8 % │ 44.3 min │ 27.9 min │ shrunk │ a/b/     │
+    │      │       │         │         │         │          │          │        │ clip.mp4 │
+    └──────┴───────┴─────────┴─────────┴─────────┴──────────┴──────────┴────────┴──────────┘
+
+The terminal copy uses the terminal width; the report file uses
+:attr:`REPORT_WIDTH` and is written row by row and flushed, so it is
+complete up to the last finished file even after a crash.
+
+Attributes:
+    root: Shrink root; paths are shown relative to it.
+    report: Path of the report file.
+    log: Logger for the terminal and log file copy.
+    width: Total width of the terminal copy.
+    count: Number of rows written so far.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: str, report: str, log: logging.Logger, width: int = 120) -> None
+
+Create the table; the header is written with the first row.
+
+Args:
+    root: Shrink root.
+    report: Path of the report file (created on the first row).
+    log: Logger for the terminal and log file copy.
+    width: Total width of the terminal copy.
+~~~
+
+**`add`**
+
+~~~text
+add(self, item: FileResult) -> None
+
+Write the row of one finished video.
+
+Args:
+    item: Outcome of the video.
+~~~
+
+**`finish`**
+
+~~~text
+finish(self) -> None
+
+Close the frame (only if rows were written since the last call).
+~~~
+
+**`_write`**
+
+~~~text
+_write(self, lines: list[str]) -> None
+
+Append lines to the report file and flush them.
+
+Args:
+    lines: Lines without line break.
+~~~
+
+**`file_width`**
+
+~~~text
+file_width(self, width: int) -> int
+
+Width of the file column for a total table width.
+
+Args:
+    width: Total width of the table.
+
+Returns:
+    Characters available for the path (at least :attr:`MIN_FILE`).
+~~~
+
+**`head`**
+
+~~~text
+head(self, width: int) -> list[str]
+
+Opening rule, column titles and the rule below them.
+
+Args:
+    width: Total width of the table.
+
+Returns:
+    Three lines.
+~~~
+
+**`row`**
+
+~~~text
+row(self, cells: list[str], path: str, width: int) -> list[str]
+
+Lines of one row; the path is wrapped inside its cell.
+
+Args:
+    cells: Texts of the fixed columns.
+    path: Relative path of the video.
+    width: Total width of the table.
+
+Returns:
+    One line per path piece; figures only on the first.
+~~~
+
+**`rule`**
+
+~~~text
+rule(self, left: str, cross: str, right: str, width: int) -> str
+
+Horizontal rule matching the columns.
+
+Args:
+    left: Left corner or tee.
+    cross: Crossing between columns.
+    right: Right corner or tee.
+    width: Total width of the table.
+
+Returns:
+    The rule.
+~~~
+
+**`_line`**
+
+~~~text
+_line(self, cells: list[str], path: str, width: int) -> str
+
+One framed text line.
+
+Args:
+    cells: Texts of the fixed columns.
+    path: Text of the file column.
+    width: Total width of the table.
+
+Returns:
+    The line.
+~~~
+
+**`wrap`**
+
+~~~text
+wrap(path: str, width: int) -> list[str]
+
+Split a path into pieces of at most ``width`` characters.
+
+Breaks after a ``/`` or a space where possible; only a single word
+longer than ``width`` is cut hard.
+
+Args:
+    path: Relative path.
+    width: Maximum piece length.
+
+Returns:
+    At least one piece.
+~~~
+
+**`cells`**
+
+~~~text
+cells(self, number: int, item: FileResult) -> list[str]
+
+Texts of the fixed columns.
+
+Args:
+    number: Row number.
+    item: Outcome of the video.
+
+Returns:
+    One text per entry of :attr:`COLUMNS`.
+~~~
+
+**`mb`**
+
+~~~text
+mb(size: int | None) -> str
+
+Format a size in MB (10^6 bytes).
+
+Args:
+    size: Size in bytes, or None.
+
+Returns:
+    Text such as ``2860 MB`` or ``-``.
+~~~
+
+**`minutes`**
+
+~~~text
+minutes(seconds: float | None) -> str
+
+Format a duration in minutes.
+
+Args:
+    seconds: Duration in seconds, or None.
+
+Returns:
+    Text such as ``44.3 min`` or ``-``.
 ~~~
 
 ### `Shrinker` (`mediatools.shrink.shrinker`) {.unnumbered}
@@ -2201,6 +2751,17 @@ Args:
     database: Database of its directory.
 ~~~
 
+**`_result`**
+
+~~~text
+_result(self, item: FileResult) -> None
+
+Add a row to the result table, if one is set.
+
+Args:
+    item: Outcome of one video.
+~~~
+
 **`_show`**
 
 ~~~text
@@ -2339,6 +2900,18 @@ Args:
 _finish(self) -> None
 
 Log the summary.
+~~~
+
+### `ShrinkState` (`mediatools.shrink.shrinkstate`) {.unnumbered}
+
+~~~text
+Helpers of a shrink run, kept together in one attribute.
+
+Attributes:
+    durations: Cache of playing times (for ``min_seconds``), or None.
+    codecs: Cache of video codecs (HEVC check of the plan), or None.
+    throughput: Measured speed and size ratio for the estimates.
+    results: Result table of finished videos, or None.
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}
@@ -3512,7 +4085,7 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
-### `PlanEntry` (`mediatools.flatten.plan`) {.unnumbered}
+### `PlanEntry` (`mediatools.flatten.planentry`) {.unnumbered}
 
 ~~~text
 One action of a flatten run.
