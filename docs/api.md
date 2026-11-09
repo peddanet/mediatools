@@ -248,6 +248,50 @@ Returns:
 
 ## `mediatools.core`
 
+### `CodecCache` (`mediatools.core.codeccache`) {.unnumbered}
+
+~~~text
+Remembers the video codec of files keyed by path, size and mtime.
+
+The shrink plan asks for the codec of every candidate, so that videos
+which are already HEVC can be reported (and left out of volume and time
+estimates) before the start question. Probing costs one ffprobe process
+per file; the cache answers repeated plans almost instantly. An entry is
+used only while size and modification time are unchanged, so a file
+that was shrunk in place is probed again. Storage and lookup are those
+of :class:`DurationCache`; only the value is a codec name.
+
+Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>codec``.
+~~~
+
+**`parse`**
+
+~~~text
+parse(text: str) -> Any
+
+Convert a stored value.
+
+Args:
+    text: Value column of the TSV file.
+
+Returns:
+    Codec name.
+~~~
+
+**`format`**
+
+~~~text
+format(value: Any) -> str
+
+Convert a value for storage.
+
+Args:
+    value: Codec name.
+
+Returns:
+    The codec name.
+~~~
+
 ### `Config` (`mediatools.core.config`) {.unnumbered}
 
 ~~~text
@@ -526,7 +570,7 @@ Args:
 **`get`**
 
 ~~~text
-get(self, file_path: str, st: os.stat_result) -> float | None
+get(self, file_path: str, st: os.stat_result) -> Any
 
 Return the cached duration if the file is unchanged.
 
@@ -541,7 +585,7 @@ Returns:
 **`put`**
 
 ~~~text
-put(self, file_path: str, st: os.stat_result, duration: float) -> None
+put(self, file_path: str, st: os.stat_result, duration: Any) -> None
 
 Store a duration.
 
@@ -557,6 +601,34 @@ Args:
 save(self) -> None
 
 Write the cache atomically (temporary file, then rename).
+~~~
+
+**`parse`**
+
+~~~text
+parse(text: str) -> Any
+
+Convert a stored value.
+
+Args:
+    text: Value column of the TSV file.
+
+Returns:
+    Duration in seconds.
+~~~
+
+**`format`**
+
+~~~text
+format(value: Any) -> str
+
+Convert a value for storage.
+
+Args:
+    value: Duration in seconds.
+
+Returns:
+    Text with millisecond precision.
 ~~~
 
 ### `MediaTypes` (`mediatools.core.mediatypes`) {.unnumbered}
@@ -839,6 +911,20 @@ Args:
     size: Its source size in bytes.
 ~~~
 
+**`file_skipped`**
+
+~~~text
+file_skipped(self, size: int) -> None
+
+Remove a file that needed no encoding from the totals.
+
+Such files (already HEVC, recorded meanwhile) cost no encoding time;
+counting them as done would inflate progress and speed.
+
+Args:
+    size: Its source size in bytes.
+~~~
+
 **`clear`**
 
 ~~~text
@@ -974,7 +1060,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.1')
+__init__(self, package_dir: str | None = None, version: str = '1.2.2')
 
 Locate the imported package.
 
@@ -1651,7 +1737,9 @@ A run has two phases:
    earlier aborted runs, and collect every video that is not yet
    recorded in its directory's database. The database always has
    precedence: a recorded file counts as processed, whatever its codec.
-   Optionally drop videos shorter than ``min_seconds`` and sort the rest
+   Optionally drop videos shorter than ``min_seconds``, set aside videos
+   that are already HEVC (recorded after the start question, never
+   encoded, not counted in volume and time) and sort the rest
    (``largest`` first, ``smallest`` first or walk order ``path``).
 2. **Encode** - per file: already HEVC -> record only; otherwise
    :class:`HevcEncoder` writes to ``newShrinkedFiles/``; only a validated
@@ -1683,7 +1771,8 @@ Attributes:
     opts: What is processed and how (:class:`ShrinkOptions`).
     probe: Probe for codec and duration checks.
     encoder: Encoder for new files.
-    durations: Duration cache for ``min_seconds``.
+    caches: ``durations`` (for ``min_seconds``) and ``codecs`` (for the
+        HEVC check of the plan); a value of None probes without caching.
     throughput: Speed measurements for the time estimate.
     databases: Open databases per directory.
     flags: ``stop`` (finish the current file, then stop) and ``abort``
@@ -1692,7 +1781,8 @@ Attributes:
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
         ``failed``, ``copies``, ``recovered``.
     found: ``failed`` - paths that could not be encoded; ``leftovers`` -
-        ``(folder, files, bytes)`` of leftover work folders.
+        ``(folder, files, bytes)`` of leftover work folders; ``hevc`` -
+        ``(path, size)`` of planned videos that are already HEVC.
 ~~~
 
 **`__init__`**
@@ -1708,6 +1798,7 @@ __init__(
     durations: DurationCache | None = None,
     throughput: ThroughputLog | None = None,
     display: ProgressBar | None = None,
+    codecs: CodecCache | None = None,
 )
 
 Configure a run.
@@ -1721,6 +1812,7 @@ Args:
     durations: Duration cache; None probes without caching.
     throughput: Speed measurements; a default one if None.
     display: Progress display; created for the encode phase if None.
+    codecs: Codec cache for the plan; None probes without caching.
 ~~~
 
 **`install_signal_handlers`**
@@ -1786,6 +1878,35 @@ Returns:
     (unknown durations are kept).
 ~~~
 
+**`_set_aside_hevc`**
+
+~~~text
+_set_aside_hevc(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]
+
+Move videos that are already HEVC out of the encode list.
+
+Args:
+    todo: Candidates.
+
+Returns:
+    Candidates that need encoding; the others go to
+    ``found["hevc"]``.
+~~~
+
+**`_codec`**
+
+~~~text
+_codec(self, path: str) -> str | None
+
+Return a video's codec, from the cache if possible.
+
+Args:
+    path: Video file.
+
+Returns:
+    Codec name, or None if unknown.
+~~~
+
 **`_duration`**
 
 ~~~text
@@ -1840,13 +1961,37 @@ Clear the progress line before each console log message.
 **`_process`**
 
 ~~~text
-_process(self, path: str, size: int) -> None
+_process(self, path: str, size: int) -> bool
 
 Handle one planned video.
 
 Args:
     path: Absolute path of the video.
     size: Its size when planned.
+
+Returns:
+    True if an encode was attempted, False if the file needed none
+    (removed, recorded meanwhile, or HEVC by now - e.g. a hard link
+    of a file shrunk earlier in this run).
+~~~
+
+**`_record_hevc`**
+
+~~~text
+_record_hevc(self) -> None
+
+Record the videos set aside as HEVC during planning.
+~~~
+
+**`_record_one_hevc`**
+
+~~~text
+_record_one_hevc(self, path: str) -> None
+
+Record a video that is already HEVC, without encoding it.
+
+Args:
+    path: Video file.
 ~~~
 
 **`_encode_and_replace`**
