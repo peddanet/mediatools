@@ -5,6 +5,7 @@ import os
 import shutil
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 
 from mediatools.core.decodecheck import DecodeCheck
@@ -18,7 +19,9 @@ class HevcEncoder:
     empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
     a video stream, its duration matches the input within
     ``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
-    :class:`DecodeCheck` set - its start decodes without errors. A
+    :class:`DecodeCheck` set - the whole output decodes without a single
+    error (:meth:`DecodeCheck.verify`; time limit
+    ``max(VERIFY_MIN, duration * VERIFY_FACTOR)``). A
     suspiciously small output is typical of an input whose data could not
     be decoded: the encoder then writes almost nothing but grey frames.
 
@@ -53,6 +56,8 @@ class HevcEncoder:
     TOL_ABS = 1.0
     TOL_REL = 0.02
     MIN_RATIO = 0.02
+    VERIFY_MIN = 600.0
+    VERIFY_FACTOR = 2.0
 
     NICENESS = 19
 
@@ -192,7 +197,7 @@ class HevcEncoder:
             True if the output is at least :attr:`MIN_RATIO` of the input,
             has a video stream, a matching duration (or the duration of
             either file cannot be determined) and - with a decode check -
-            decodes without errors.
+            decodes completely without errors.
         """
         try:
             in_size, out_size = os.path.getsize(src), os.path.getsize(dst)
@@ -213,10 +218,14 @@ class HevcEncoder:
                         d_in, d_out, src)
             return False
         if self.decode is not None:
-            errors = self.decode.unusable(dst)
-            if errors is not None:
-                self._error("output does not decode (%i errors), original kept: %s", errors, src)
+            limit = max(self.VERIFY_MIN, (d_out or 0.0) * self.VERIFY_FACTOR)
+            started = time.monotonic()
+            problem = self.decode.verify(dst, limit, self.niceness)
+            if problem is not None:
+                self._error("output failed the full decode (%s), original kept: %s", problem, src)
                 return False
+            self._info("output decoded completely without errors in %.0f s",
+                       time.monotonic() - started)
         self._info("output validated (in=%s s, out=%s s)", d_in, d_out)
         return True
 

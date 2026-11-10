@@ -752,6 +752,10 @@ healthy video decodes without errors, an unusable one produces errors
 from the first frame on (``decode_slice_header error``, ``no frame!``,
 ``non-existing PPS``, AAC ``channel element ... is not allocated``).
 
+:meth:`verify` decodes a whole file and accepts it only without a
+single error; ``shrink`` uses it on every encoded output before the
+original is replaced.
+
 The check reads only; it never writes or changes the file.
 
 Attributes:
@@ -800,6 +804,27 @@ Args:
 
 Returns:
     Argument list for :func:`subprocess.run`.
+~~~
+
+**`verify`**
+
+~~~text
+verify(self, path: str, timeout: float, niceness: int = 19) -> str | None
+
+Decode a whole file and report the first problem.
+
+Unlike :meth:`unusable`, an unknown result is a failure here: the
+caller keeps the original unless the file decoded completely and
+without any error line.
+
+Args:
+    path: Video file.
+    timeout: Seconds after which the decode is abandoned.
+    niceness: Scheduling priority (0 normal, 19 lowest), as for the
+        encoder.
+
+Returns:
+    None if every stream decoded without error, otherwise the reason.
 ~~~
 
 **`errors`**
@@ -1779,7 +1804,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.11')
+__init__(self, package_dir: str | None = None, version: str = '1.2.12')
 
 Locate the imported package.
 
@@ -2191,7 +2216,9 @@ The output is accepted only if ffmpeg exits with 0, the file is not
 empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
 a video stream, its duration matches the input within
 ``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
-:class:`DecodeCheck` set - its start decodes without errors. A
+:class:`DecodeCheck` set - the whole output decodes without a single
+error (:meth:`DecodeCheck.verify`; time limit
+``max(VERIFY_MIN, duration * VERIFY_FACTOR)``). A
 suspiciously small output is typical of an input whose data could not
 be decoded: the encoder then writes almost nothing but grey frames.
 
@@ -2333,7 +2360,7 @@ Returns:
     True if the output is at least :attr:`MIN_RATIO` of the input,
     has a video stream, a matching duration (or the duration of
     either file cannot be determined) and - with a decode check -
-    decodes without errors.
+    decodes completely without errors.
 ~~~
 
 **`_info`**
