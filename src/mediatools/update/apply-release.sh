@@ -13,6 +13,15 @@
 #      the release before it). Default: all pending versions.
 #   4. Per version (git-flow hotfix): patch -> hotfix branch -> PR into main
 #      -> CI -> merge -> tag vX -> CI of the tag -> back-merge into develop.
+#      Each version causes two local gate runs (pre-push hook) and three CI
+#      runs on GitHub; each is announced with its purpose and URL, and a
+#      summary table of all CI runs closes the output:
+#        local  push hotfix/X           gates on this PC, one Python version
+#        CI 1   PR hotfix/X -> main     merge result; required check for the merge
+#        CI 2   tag vX                  released commit + release-check
+#        local  push merge/hotfix-X     gates on this PC, one Python version
+#        CI 3   PR merge/hotfix-X -> develop   merge result; required check
+#      Merges into main and develop start no further run (no push trigger).
 #   5. Installs the newest release (install.sh), checks --version and asks a
 #      running shrink to switch to it after its current file (mediatools reload).
 #   6. Moves the used archives to ~/scripts/mediatools.d/releases/ and deletes
@@ -77,6 +86,52 @@ NAME_RE='^mediatools-hotfix-([0-9]+\.[0-9]+\.[0-9]+)-patch( \([0-9]+\))?\.tar\.g
 STEP="start"
 
 step() { STEP="$1"; echo; echo "=== $STEP"; }
+
+# announce the local gate run of the pre-push hook before a branch push
+local_gates() {
+  echo "--- local gates (pre-push hook): tools/check.sh on this PC with $(python3 --version 2>&1);"
+  echo "    GitHub starts no run for this push ($1 has no push trigger)"
+}
+
+# CI runs of this invocation, one line each for the summary table
+declare -a CI_ROWS=()
+
+# announce a CI run, wait for GitHub to register it, follow it, record the result
+#   $1 label (e.g. "1.2.13 CI 1/3")  $2 ref  $3 event  $4 commit  $5 what  $6 why
+#   $7 PR url (empty: follow the run itself)
+ci_run() {
+  local label="$1" ref="$2" event="$3" sha="$4" what="$5" why="$6" pr="${7:-}" id url
+  echo "--- $label: $event on $ref (commit ${sha:0:7})"
+  echo "    checks:  $what"
+  echo "    purpose: $why"
+  wait_for_run "$ref" "$event" "$sha"
+  id=$(gh run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
+         --json databaseId --jq '.[0].databaseId')
+  url=$(gh run view "$id" --json url --jq .url)
+  echo "    run:     $url"
+  CI_ROWS+=("$label|$event $ref|running|$url")
+  local rc=0
+  if [ -n "$pr" ]; then
+    gh pr checks "$pr" --watch || rc=$?
+  else
+    gh run watch "$id" --exit-status || rc=$?
+  fi
+  CI_ROWS[-1]="$label|$event $ref|$(gh run view "$id" --json conclusion --jq .conclusion)|$url"
+  return "$rc"
+}
+
+# table of all CI runs of this invocation (also printed when a step fails)
+ci_summary() {
+  [ ${#CI_ROWS[@]} -gt 0 ] || return 0
+  echo
+  echo "CI runs on GitHub:"
+  printf '  %-16s %-42s %-10s %s\n' "run" "trigger" "result" "url"
+  local row label trigger result url
+  for row in "${CI_ROWS[@]}"; do
+    IFS='|' read -r label trigger result url <<< "$row"
+    printf '  %-16s %-42s %-10s %s\n' "$label" "$trigger" "$result" "$url"
+  done
+}
 version_of() { basename "$1" | sed -E 's/^[a-z-]*-([0-9]+\.[0-9]+\.[0-9]+).*/\1/'; }
 # true if version $1 is lower than version $2
 version_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
@@ -125,7 +180,8 @@ if [ "$LIST" -eq 0 ]; then
   mkdir -p "$LOG_DIR"
   LOG="$LOG_DIR/apply-release_$(date +%Y-%m-%d_%H-%M-%S).log"
   exec > >(tee -a "$LOG") 2>&1
-  trap 'echo; echo "FAILED in step: $STEP (line $LINENO, exit code $?)"; echo "log: $LOG"' ERR
+  # shellcheck disable=SC2154  # rc is assigned inside the trap string
+  trap 'rc=$?; ci_summary; echo; echo "FAILED in step: $STEP (line $LINENO, exit code $rc)"; echo "log: $LOG"' ERR
   git -C "$REPO" fetch -q origin
 fi
 CURRENT=$(released_version)
@@ -198,6 +254,7 @@ apply_one() {
   git log --oneline -1
 
   step "$VERSION: 3 push (pre-push hook runs all quality gates)"
+  local_gates "hotfix/$VERSION"
   git fetch origin
   git push -u --force-with-lease origin "hotfix/$VERSION"
 
@@ -208,8 +265,9 @@ apply_one() {
   [ -n "$pr" ] || pr=$(gh pr create --base main --title "Hotfix $VERSION" --fill)
   echo "PR: $pr"
   sleep 15                                   # let GitHub register the new push
-  wait_for_run "hotfix/$VERSION" pull_request "$(git rev-parse HEAD)"
-  gh pr checks "$pr" --watch
+  ci_run "$VERSION CI 1/3" "hotfix/$VERSION" pull_request "$(git rev-parse HEAD)" \
+    "merge result of hotfix/$VERSION and main, Python 3.10/3.12/3.13/3.14" \
+    "required check: branch protection allows the merge into main only when green" "$pr"
 
   step "$VERSION: 5 merge into main"
   gh pr merge "$pr" --merge --delete-branch
@@ -219,24 +277,24 @@ apply_one() {
 
   step "$VERSION: 6 tag v$VERSION"
   git tag -a "v$VERSION" -m "mediatools $VERSION"
-  git push origin "v$VERSION"
-  wait_for_run "v$VERSION" push
-  local run_id
-  run_id=$(gh run list --branch "v$VERSION" --event push --limit 1 --json databaseId \
-             --jq '.[0].databaseId')
-  gh run watch "$run_id" --exit-status
+  git push origin "v$VERSION"                # tag push: the hook skips the gates
+  ci_run "$VERSION CI 2/3" "v$VERSION" push "$(git rev-parse HEAD)" \
+    "the released commit on main, all versions, then release-check (tag on main, tag = version)" \
+    "release gate: the back-merge into develop starts only after it is green"
 
   step "$VERSION: 7 back-merge into develop (helper branch)"
   git switch -C "merge/hotfix-$VERSION"
   git fetch origin
   git merge --no-ff origin/develop -m "Merge develop into merge/hotfix-$VERSION"
+  local_gates "merge/hotfix-$VERSION"
   git push -u --force-with-lease origin "merge/hotfix-$VERSION"
   pr=$(gh pr list --head "merge/hotfix-$VERSION" --base develop --state open --json url \
          --jq '.[0].url // empty')
   [ -n "$pr" ] || pr=$(gh pr create --base develop --title "Merge hotfix $VERSION into develop" --fill)
   echo "PR: $pr"
-  wait_for_run "merge/hotfix-$VERSION" pull_request
-  gh pr checks "$pr" --watch
+  ci_run "$VERSION CI 3/3" "merge/hotfix-$VERSION" pull_request "$(git rev-parse HEAD)" \
+    "merge result of the release and develop, Python 3.10/3.12/3.13/3.14" \
+    "required check: branch protection allows the merge into develop only when green" "$pr"
   gh pr merge "$pr" --merge --delete-branch
   git switch develop
   git pull --ff-only
@@ -288,6 +346,7 @@ if [ "$(dirname "$APPLY_RELEASE_ORIGIN")" = "$(readlink -f "$DL")" ] \
 fi
 
 step "done"
+ci_summary
 if [ ${#APPLIED[@]} -gt 0 ]; then
   echo "applied: $(for i in "${APPLIED[@]}"; do printf '%s ' "${PENDING[$i]}"; done)- installed $TARGET"
 else

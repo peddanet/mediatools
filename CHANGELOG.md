@@ -5,6 +5,26 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.13] - 2026-11-10
+
+### Changed
+- `mediatools update` announces every run of the quality gates before it
+  waits for it: local run of the pre-push hook (branch, Python version)
+  and CI run on GitHub (`CI 1/3` ... `CI 3/3`, trigger, commit, what it
+  checks, why, URL). A table of all CI runs with their result closes the
+  output, also when a step fails.
+- CI starts only for pull requests into `main`/`develop` and for release
+  tags. The runs on every push to `main` and `develop` are gone: they
+  tested trees already tested by the pull request (5 instead of 3 runs per
+  hotfix before).
+- CI matrix extended by Python 3.14; `actions/setup-python` v5 -> v6.
+  Python 3.10 (end of life October 2026) stays as long as
+  `requires-python >= 3.10` holds.
+
+### Documentation
+- New section "CI runs: which run checks what" in `docs/developer.md`
+  with a diagram of the feature, release and hotfix flows.
+
 ## [1.2.12] - 2026-11-10
 
 ### Changed

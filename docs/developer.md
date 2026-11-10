@@ -57,7 +57,7 @@ mediatools/
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
   install.sh                installs a release tag into a venv (~/scripts/mediatools)
-  .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13
+  .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13, 3.14
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
   tests/                    pytest suite
@@ -476,6 +476,66 @@ The pre-push hook (`.githooks/pre-push`) runs only when branches are
 pushed, not for tag-only pushes. `git push --no-verify` bypasses it in an
 emergency; CI still enforces all gates.
 
+# CI runs: which run checks what
+
+The same `tools/check.sh` runs in two places: **locally** in the pre-push
+hook (one Python version, the working tree of this PC) and **on GitHub**
+(fresh virtual machine per job, one job per Python version 3.10, 3.12,
+3.13, 3.14, only committed files). Only the GitHub result counts for branch
+protection. Since 1.2.13 GitHub starts a run for exactly two events:
+
+| Event | Run on GitHub | Checks | Purpose |
+|---|---|---|---|
+| pull request into `main` or `develop` | `gates (3.10)` ... `gates (3.14)` | the **merge result** of the PR branch and its target | required check: the merge button stays locked until all are green |
+| push of a tag `v*` | the gates plus `release-check` | the tagged commit; tag on `main`, tag = `__version__` | release gate |
+| push of a branch (any) | none | - | work branches are checked through their PR; a merge into `main`/`develop` has the tree its PR already tested (`strict` protection, no direct pushes) |
+| `gh workflow run quality-gates --ref BRANCH` | the gates | that branch | manual run for a branch without PR |
+
+The two diagrams show the branches as parallel lanes (`main` = former
+`master`). Time runs downwards. A solid arrow is a git operation from one
+branch to another (create a branch, merge); a dashed arrow is a pull
+request, i.e. the proposal to merge, which GitHub tests before the merge
+is allowed. The badge on the right names the gate run of the step:
+**LOCAL** = pre-push hook on this PC (one Python version), **CI** = run on
+GitHub (Python 3.10 to 3.14; for a tag also `release-check`), **none** =
+nothing is tested at this step because the pull request tested the same
+tree before. The numbers in the hotfix diagram are the steps of
+`apply-release.sh` (shown as `=== 1.2.13: 4 pull request into main` in
+the output).
+
+![Feature and release: which branch goes where, and which run tests it](img/lanes_release.png){width=100%}
+
+![Hotfix with `mediatools update` (steps of `apply-release.sh`): CI 1/3 to CI 3/3](img/lanes_hotfix.png){width=100%}
+
+Count per flow:
+
+| Flow | Local runs | CI runs on GitHub |
+|---|---|---|
+| feature | 1 (push `feature/x`) | 1 (PR into `develop`) |
+| release | 1 (push `release/X`) | 3 (PR into `main`, tag, PR `main` -> `develop`) |
+| hotfix with `mediatools update` | 2 (push `hotfix/X`, push `merge/hotfix-X`) | 3, shown as `CI 1/3` ... `CI 3/3` |
+
+`mediatools update` announces every run before it waits for it and prints
+a table of all CI runs at the end (also when a step fails):
+
+~~~text
+--- 1.2.13 CI 1/3: pull_request on hotfix/1.2.13 (commit 3f2a9c1)
+    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.12/3.13/3.14
+    purpose: required check: branch protection allows the merge into main only when green
+    run:     https://github.com/peddanet/mediatools/actions/runs/<id>
+
+CI runs on GitHub:
+  run              trigger                                    result     url
+  1.2.13 CI 1/3    pull_request hotfix/1.2.13                 success    https://...
+  1.2.13 CI 2/3    push v1.2.13                               success    https://...
+  1.2.13 CI 3/3    pull_request merge/hotfix-1.2.13           success    https://...
+~~~
+
+Before 1.2.13 the workflow also ran on every push to `main` and `develop`.
+These two runs per release tested a tree already tested by the pull request
+(and, on `main`, the very commit the tag run tests a minute later); nobody
+waited for them, they only made the Actions list harder to read.
+
 # Branching model
 
 ![Branching model (illustrative): feature branches merge into develop; a release branch goes into main by pull request, is tagged there and merged back into develop](img/gitflow.png){width=95%}
@@ -488,23 +548,28 @@ emergency; CI still enforces all gates.
 | `release/<x>` | version, CHANGELOG and PDFs           | `develop` | `main` (PR)        |
 | `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` |
 
+**`main` is the branch called `master` in older git-flow texts.** git-flow
+(Driessen, 2010) names the release branch `master`; GitHub creates new
+repositories with the default branch `main` since 1 October 2020. Name and
+role are the same: `main` holds only released states, every one tagged
+`vX.Y.Z`. There is no separate `master` in this repository.
+
 Roles: developers work on `feature/*` and open pull requests into
 `develop`. The **integrator** reviews and merges them, checks `develop` as
 a whole and decides when a release is cut.
 
 CI (`.github/workflows/tests.yml`) runs the gates on pull requests into
-`main` and `develop`, on pushes to `main` and `develop` (the merges) and on
-tags `v*`. Work branches are checked through their pull request only; a
-push trigger for them as well would run every gate twice. A branch without
-a pull request can be checked on demand:
-`gh workflow run quality-gates --ref BRANCH`. For a tag, the extra job
+`main` and `develop` and on tags `v*` (section "CI runs" shows every run
+per branch). Branch pushes start no run. A branch without a pull request
+can be checked on demand: `gh workflow run quality-gates --ref BRANCH`.
+For a tag, the extra job
 `release-check` verifies that the tagged commit lies on `main` and that the
 tag equals `v` + `__version__`.
 
 ## Branch protection
 
 `main` and `develop` are protected on GitHub: changes only by pull request,
-merge only with all three `gates` jobs green and the branch up to date, the
+merge only with all four `gates` jobs green and the branch up to date, the
 rule applies to administrators too, no force push, no deletion. Set once
 per branch by the repository owner (normal user; `gh` acts with the owner's
 token):
@@ -515,7 +580,7 @@ gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - 
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)"]
+    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)", "gates (3.14)"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },
@@ -526,6 +591,11 @@ gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - 
 EOF
 done
 ~~~
+
+The `contexts` must name exactly the jobs the workflow produces: a name no
+job produces any more blocks every merge, a new matrix entry is not
+required until it is listed. After a change of the Python matrix the
+command above is run again with the new list.
 
 `required_approving_review_count: 0` demands a pull request but no second
 person's approval (single maintainer). Tags are not affected by branch
@@ -549,7 +619,7 @@ git push origin --delete feature/<name>
 # Building the documentation
 
 ~~~bash
-sudo apt install pandoc texlive-xetex texlive-latex-extra fonts-dejavu
+sudo apt install pandoc texlive-xetex texlive-latex-extra fonts-dejavu librsvg2-bin
 npm install -g @mermaid-js/mermaid-cli
 ~~~
 
@@ -559,7 +629,9 @@ directories. The build itself runs as normal user:
 ~~~bash
 cd ~/Projects/mediatools
 python3 tools/gen_docs.py
+python3 tools/gen_lanes.py
 cd docs/img && for f in *.mmd; do mmdc -i "$f" -o "${f%.mmd}.png" -s 2 -b white; done
+for f in lanes_*.svg; do rsvg-convert -z 2 "$f" -o "${f%.svg}.png"; done
 cd .. && pandoc developer.md api.md -o developer.pdf --pdf-engine=xelatex \
   --highlight-style=tango --resource-path=.
 pandoc handbook.md -o handbook.pdf --pdf-engine=xelatex --highlight-style=tango \
@@ -631,7 +703,7 @@ mediatools update -y         # all pending versions, no question
 | inventory | archives in `~/Downloads` (`--downloads DIR`); per version the most recently saved copy (browser copies `... (1).tar.gz`) |
 | classification | versions above the release on `main` are *pending*, the rest and older copies are *stale* |
 | choice | a version means "all pending versions up to it, in ascending order", because each patch builds on the release before it; Enter = all |
-| per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (pre-push gates) -> PR into `main` -> CI -> merge -> tag `vX` -> CI of the tag -> back-merge into `develop` via `merge/hotfix-X` |
+| per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (local gates) -> PR into `main` -> CI 1/3 -> merge -> tag `vX` -> CI 2/3 -> back-merge into `develop` via `merge/hotfix-X` (local gates) -> CI 3/3 -> merge; see "CI runs" |
 | install | `install.sh` (newest tag), then `mediatools --version` must name the last applied version |
 | tidying | used archives to `~/scripts/mediatools.d/releases/` (plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
 
@@ -712,6 +784,8 @@ collaborator.
 | [pylint extensions (docparams)](https://pylint.readthedocs.io/en/latest/user_guide/checkers/extensions.html) | standard reference; behaviour checked with pylint 4.1.3 |
 | [Google Python Style Guide, section 3.8 Comments and Docstrings](https://google.github.io/styleguide/pyguide.html) | standard reference, not retrieved in this session |
 | [Mermaid documentation](https://mermaid.js.org/) | standard reference; diagrams rendered with mermaid-cli |
+| [GitHub changelog 2020-08-26: default branch for new repositories](https://github.blog/changelog/2020-08-26-set-the-default-branch-for-newly-created-repositories/) | `master` -> `main` for new repositories from 1 October 2020; found via search 2026-11-10 |
+| [About protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) | strict checks, unique job names; found via search 2026-11-10 |
 | [UML specification (OMG)](https://www.omg.org/spec/UML/) | standard reference, not retrieved in this session |
 | [V. Driessen: A successful Git branching model (2010)](https://nvie.com/posts/a-successful-git-branching-model/) | found via search 2026-11-03; original domain not fetchable from the build sandbox, content confirmed through mirrors |
 | [GitHub Docs: About protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) | found via search 2026-11-03; required status checks and PR requirement confirmed |
