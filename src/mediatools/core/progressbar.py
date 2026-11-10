@@ -19,9 +19,14 @@ class ProgressBar:
 
     Two lines are drawn: the overall progress (:meth:`line`) and the
     current file (:meth:`file_line`: its percentage, size, encoded part and
-    remaining time). On a terminal both are redrawn in place and cut to the
-    terminal width, so they never wrap; otherwise (output redirected to a
-    file) nothing is drawn and only the log is written.
+    remaining time). A caller may add a third line (``extra`` of
+    :meth:`show`), e.g. the space read, written and freed. On a terminal the
+    lines are redrawn in place and cut to the terminal width, so they never
+    wrap; otherwise (output redirected to a file) nothing is drawn and only
+    the log is written.
+
+    The GiB figures of the overall line are *source* bytes (read and
+    encoded), not the space freed on disk; they count this run only.
 
     Attributes:
         total_bytes: Bytes of all files of the run.
@@ -33,7 +38,7 @@ class ProgressBar:
         started: Start time (monotonic seconds).
         enabled: True if the stream is a terminal.
         note: Text shown at the start of the first line, e.g. a pending stop.
-        drawn: True while the two lines are on the screen.
+        drawn: Number of lines on the screen (0: nothing drawn).
         status_path: If set, both lines are also written to this file (at
             most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
         last_status: Monotonic time of the last status file update.
@@ -62,7 +67,7 @@ class ProgressBar:
         self.started = time.monotonic()
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
         self.note = ""
-        self.drawn = False
+        self.drawn = 0
         self.status_path: str | None = None
         self.last_status = 0.0
 
@@ -118,7 +123,7 @@ class ProgressBar:
         return (f"{prefix}total [{gauge}] {fraction * 100:5.1f} % | "
                 f"{self.done_files}/{self.total_files} files | "
                 f"{(self.done_bytes + current) / 1024 ** 3:.1f}/"
-                f"{self.total_bytes / 1024 ** 3:.1f} GiB | ETA {eta}")
+                f"{self.total_bytes / 1024 ** 3:.1f} GiB source | ETA {eta}")
 
     def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
                   width: int | None = None) -> str:
@@ -146,20 +151,23 @@ class ProgressBar:
             name = name[:keep // 2] + "..." + name[len(name) - (keep - keep // 2):]
         return head + name
 
-    def _write_status(self, name: str, file_fraction: float, file_bytes: int) -> None:
-        """Replace the status file with both lines (rate-limited, atomic).
+    def _write_status(self, name: str, file_fraction: float, file_bytes: int,
+                      extra: str = "") -> None:
+        """Replace the status file with all lines (rate-limited, atomic).
 
         Args:
             name: Name of the current file.
             file_fraction: Encoded fraction of the current file (0..1).
             file_bytes: Size of the current file.
+            extra: Optional third line; empty for none.
         """
         now = time.monotonic()
         if self.status_path is None or now - self.last_status < self.STATUS_SECONDS:
             return
         self.last_status = now
         text = (self.line(name, file_fraction, file_bytes) + "\n"
-                + self.file_line(name, file_fraction, file_bytes) + "\n")
+                + self.file_line(name, file_fraction, file_bytes) + "\n"
+                + (extra + "\n" if extra else ""))
         tmp = self.status_path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as handle:
@@ -168,24 +176,31 @@ class ProgressBar:
         except OSError:
             pass                                 # the display must never stop a run
 
-    def show(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0) -> None:
-        """Redraw both status lines on a terminal.
+    def show(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
+             extra: str = "") -> None:
+        """Redraw the status lines on a terminal.
 
         Args:
             name: Name of the current file.
             file_fraction: Encoded fraction of the current file (0..1).
             file_bytes: Size of the current file.
+            extra: Optional third line; empty for none.
         """
-        self._write_status(name, file_fraction, file_bytes)
+        self._write_status(name, file_fraction, file_bytes, extra)
         if not self.enabled:
             return
         width = max(20, shutil.get_terminal_size().columns - 1)
-        first = self.line(name, file_fraction, file_bytes)[:width]
-        second = self.file_line(name, file_fraction, file_bytes, width)[:width]
-        up = "\033[1A" if self.drawn else ""     # back to the first line
-        self.stream.write(f"\r{up}\033[K{first}\n\033[K{second}")
+        lines = [self.line(name, file_fraction, file_bytes)[:width],
+                 self.file_line(name, file_fraction, file_bytes, width)[:width]]
+        if extra:
+            lines.append(extra[:width])
+        up = "\033[1A" * (self.drawn - 1) if self.drawn > 1 else ""   # back to line 1
+        if len(lines) < self.drawn:              # fewer lines than before: clear first
+            self.clear()
+            up = ""
+        self.stream.write("\r" + up + "\n".join("\033[K" + text for text in lines))
         self.stream.flush()
-        self.drawn = True
+        self.drawn = len(lines)
 
     def file_done(self, size: int) -> None:
         """Count a finished (or skipped) file.
@@ -209,11 +224,11 @@ class ProgressBar:
         self.total_bytes = max(1, self.total_bytes - size)
 
     def clear(self) -> None:
-        """Remove both status lines before a log message is printed."""
+        """Remove the status lines before a log message is printed."""
         if self.enabled and self.drawn:
-            self.stream.write("\r\033[K\033[1A\r\033[K")
+            self.stream.write("\r\033[K" + "\033[1A\r\033[K" * (self.drawn - 1))
             self.stream.flush()
-            self.drawn = False
+            self.drawn = 0
 
     @staticmethod
     def duration_text(seconds: float) -> str:
