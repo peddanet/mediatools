@@ -150,6 +150,15 @@ classDiagram
     +init(name, verbose, datadir, continue_path)
     +close()
   }
+  class RunStatus {
+    +control
+    +installed
+    +init(control, installed)
+    +version_tuple(version)
+    +running_version(log)
+    +advice(running)
+    +lines()
+  }
   class SelfRestart {
     +argv
     +log_path
@@ -190,4 +199,5 @@ classDiagram
   RunControl --> SleepInhibitor
   RunLog --> DataDir
   RunLog --> VersionInfo
+  RunStatus --> RunControl
   TreeWalker --> MediaTypes
