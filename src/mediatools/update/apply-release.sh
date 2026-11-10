@@ -358,6 +358,7 @@ if [ -n "$TARGET" ]; then
   # a shrink running in the background switches to the new release after its
   # current file (prints "nothing to reload" if none runs)
   "$HOME/scripts/mediatools" reload || true
+  "$HOME/scripts/mediatools" status || true  # which release runs, and whether it switches
 fi
 
 # -- tidy the download folder --------------------------------------------------------
