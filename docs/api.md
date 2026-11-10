@@ -1804,7 +1804,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.12')
+__init__(self, package_dir: str | None = None, version: str = '1.2.13')
 
 Locate the imported package.
 
