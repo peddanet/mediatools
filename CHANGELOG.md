@@ -5,6 +5,23 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.14] - 2026-11-10
+
+### Fixed
+- `mediatools update` no longer stops at a short loss of the connection
+  to GitHub (seen as "error connecting to api.github.com" while waiting
+  for CI 1/3). Reading `gh` calls are repeated up to five times, 10 s
+  apart; an interrupted watch of a CI run is resumed until GitHub reports
+  the run as completed. A red run still stops the update at once.
+- The failure message of the script named exit code 0 instead of the
+  real one (already corrected in 1.2.13; listed for completeness).
+
+### Documentation
+- The CI guide is part of the repository: `docs/ci-guide.md` and
+  `docs/ci-guide.pdf` (workflow, runners, Python versions, containers,
+  `gh` and the GitHub API, branch protection, lane diagrams). It is built
+  with the other documents and checked by the quality gates.
+
 ## [1.2.13] - 2026-11-10
 
 ### Changed

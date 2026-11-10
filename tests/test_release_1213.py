@@ -19,7 +19,7 @@ case "$*" in
   *"--jq length"*) echo 1 ;;
   "run list"*) echo 4711 ;;
   *"--json url"*) echo https://example.invalid/runs/4711 ;;
-  *"--json conclusion"*) echo "$FAKE_CONCLUSION" ;;
+  *"status,conclusion"*) echo "completed $FAKE_CONCLUSION" ;;
   "run watch"*|"pr checks"*) exit "$FAKE_RC" ;;
 esac
 """
@@ -54,7 +54,7 @@ def bash(tmp_path: Path, body: str, conclusion: str = "success", rc: int = 0) ->
     fake.write_text(FAKE_GH, encoding="utf-8")
     fake.chmod(0o755)
     env = dict(os.environ, PATH=f"{fake.parent}{os.pathsep}{os.environ['PATH']}",
-               FAKE_CONCLUSION=conclusion, FAKE_RC=str(rc))
+               FAKE_CONCLUSION=conclusion, FAKE_RC=str(rc), GH_PAUSE="0")
     result = subprocess.run(["bash", "-c", functions() + "\n" + body], env=env,
                             capture_output=True, text=True, check=False, timeout=60)
     return result.returncode, result.stdout + result.stderr
