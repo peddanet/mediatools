@@ -253,6 +253,7 @@ mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S] [--fo
 mediatools attach        # (alias: front) watch a shrink running in the background
 mediatools update        # apply delivered release patches from ~/Downloads, then install
 mediatools stop          # ask it to finish its current file and end
+mediatools status        # running? which release, current or not, which log
 ```
 
 1. **Plan.** All videos are checked against the database of their
