@@ -17,6 +17,10 @@ class DecodeCheck:
     from the first frame on (``decode_slice_header error``, ``no frame!``,
     ``non-existing PPS``, AAC ``channel element ... is not allocated``).
 
+    :meth:`verify` decodes a whole file and accepts it only without a
+    single error; ``shrink`` uses it on every encoded output before the
+    original is replaced.
+
     The check reads only; it never writes or changes the file.
 
     Attributes:
@@ -65,6 +69,40 @@ class DecodeCheck:
         """
         return [self.ffmpeg, "-hide_banner", "-nostdin", "-v", "error",
                 "-t", f"{self.seconds:g}", "-i", path, "-f", "null", "-"]
+
+    def verify(self, path: str, timeout: float, niceness: int = 19) -> str | None:
+        """Decode a whole file and report the first problem.
+
+        Unlike :meth:`unusable`, an unknown result is a failure here: the
+        caller keeps the original unless the file decoded completely and
+        without any error line.
+
+        Args:
+            path: Video file.
+            timeout: Seconds after which the decode is abandoned.
+            niceness: Scheduling priority (0 normal, 19 lowest), as for the
+                encoder.
+
+        Returns:
+            None if every stream decoded without error, otherwise the reason.
+        """
+        if shutil.which(self.ffmpeg) is None:
+            return f"{self.ffmpeg} not found"
+        cmd = [self.ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-i", path,
+               "-f", "null", "-"]
+        if shutil.which("nice") is not None:
+            cmd = ["nice", "-n", str(niceness), *cmd]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                                 check=False, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return f"full decode did not finish within {timeout:.0f} s"
+        lines = [line.strip() for line in res.stderr.splitlines() if line.strip()]
+        if lines:
+            return f"{len(lines)} decoder error line(s), first: {lines[0][:200]}"
+        if res.returncode != 0:
+            return f"ffmpeg exit code {res.returncode}"
+        return None
 
     def errors(self, path: str) -> int | None:
         """Count the error lines of a trial decode.
