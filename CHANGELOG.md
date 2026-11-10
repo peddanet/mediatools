@@ -5,6 +5,17 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.12] - 2026-11-10
+
+### Changed
+- Every encoded output is decoded **completely** before it replaces the
+  original (`DecodeCheck.verify`, `ffmpeg -v error -i OUT -f null -` at
+  nice 19). A single error line, a non-zero exit, a missing ffmpeg or a
+  timeout (`max(600 s, 2 x duration)`) makes the file FAILED and keeps the
+  original. Before, only the first 10 s of the output were decoded.
+  Measured cost: 4.0 s full decode against 52.3 s encode for a 30 s
+  1080p clip (7.7 %; 5.2 % more than the former 10-s check).
+
 ## [1.2.11] - 2026-11-10
 
 ### Fixed
