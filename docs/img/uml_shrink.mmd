@@ -182,6 +182,20 @@ classDiagram
     +decode
     +ffmpeg_logs
     +restart
+    +space
+  }
+  class SpaceTally {
+    +earlier_src
+    +earlier_out
+    +run_src
+    +run_out
+    +init(earlier_src, earlier_out)
+    +from_throughput(throughput)
+    +add(src, out)
+    +overall()
+    +part(src, out)
+    +line()
+    +summary()
   }
   class ThroughputLog {
     +path
@@ -213,6 +227,9 @@ classDiagram
   Shrinker --> ShrinkOptions
   Shrinker --> ShrinkPlanner
   Shrinker --> ShrinkState
+  Shrinker --> SpaceTally
   Shrinker --> ThroughputLog
   ShrinkState ..> ResultTable
+  ShrinkState ..> SpaceTally
   ShrinkState ..> ThroughputLog
+  SpaceTally ..> ThroughputLog

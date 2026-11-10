@@ -5,6 +5,21 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.16] - 2026-11-10
+
+### Added
+- Third progress line `space`: GiB read (source of the replaced
+  originals), written (their shrunk versions) and freed (the difference),
+  for this run and overall. Overall adds the totals of
+  `state/shrink_throughput.json` (kept since 1.2.1). `mediatools attach`
+  shows the line as well; the end of a run logs both views with the output
+  share in percent.
+
+### Changed
+- The GiB of the first progress line are labelled `GiB source`. They are
+  the volume read and encoded in this run, not the space freed, and start
+  at zero after every start, restart or `mediatools reload`.
+
 ## [1.2.15] - 2026-11-10
 
 ### Added

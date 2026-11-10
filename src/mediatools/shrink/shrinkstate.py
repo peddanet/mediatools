@@ -8,6 +8,7 @@ from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.durationcache import DurationCache
 from mediatools.shrink.resulttable import ResultTable
+from mediatools.shrink.spacetally import SpaceTally
 from mediatools.shrink.throughput import ThroughputLog
 
 
@@ -25,6 +26,7 @@ class ShrinkState(TypedDict):
             None (they are deleted).
         restart: Switch to a newly installed release on request, or None
             (requests are ignored).
+        space: Space read, written and freed, this run and overall.
     """
 
     durations: DurationCache | None
@@ -34,3 +36,4 @@ class ShrinkState(TypedDict):
     decode: DecodeCheck | None
     ffmpeg_logs: str | None
     restart: SelfRestart | None
+    space: SpaceTally
