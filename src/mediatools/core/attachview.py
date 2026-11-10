@@ -17,7 +17,8 @@ class AttachView:
     Shows the last :attr:`BACKLOG` lines of the job's log file, then every
     new line as it is written - like the terminal of the run: DEBUG lines
     are left out, INFO lines without time stamp and level - and below them
-    the two progress lines from the status file, redrawn in place. Ctrl+C
+    the progress lines (two, or three with the space line) from the status
+    file, redrawn in place. Ctrl+C
     only leaves the view; the job keeps running. The view ends by itself
     when the job ends.
 
@@ -28,7 +29,7 @@ class AttachView:
         control: Control files of the job.
         stream: Output stream (the terminal).
         poll: Seconds between two updates.
-        drawn: True while the progress lines are on the screen.
+        drawn: Number of progress lines on the screen (0: none).
     """
 
     BACKLOG = 30
@@ -46,7 +47,7 @@ class AttachView:
         self.control = control
         self.stream = stream or sys.stdout
         self.poll = poll
-        self.drawn = False
+        self.drawn = 0
 
     def run(self) -> int:
         """Show the job until it ends or the user presses Ctrl+C.
@@ -143,23 +144,25 @@ class AttachView:
         return shown
 
     def _draw(self) -> None:
-        """Redraw the two progress lines from the status file."""
+        """Redraw the progress lines from the status file."""
         try:
             with open(self.control.status_file, encoding="utf-8") as handle:
-                lines = handle.read().splitlines()[:2]
+                lines = handle.read().splitlines()[:3]
         except FileNotFoundError:
             return
         if len(lines) < 2 or not self.stream.isatty():
             return
         width = max(20, shutil.get_terminal_size().columns - 1)
-        up = "\033[1A" if self.drawn else ""
-        self.stream.write(f"\r{up}\033[K{lines[0][:width]}\n\033[K{lines[1][:width]}")
+        if len(lines) < self.drawn:              # fewer lines than before: clear first
+            self._clear()
+        up = "\033[1A" * (self.drawn - 1) if self.drawn > 1 else ""
+        self.stream.write("\r" + up + "\n".join("\033[K" + line[:width] for line in lines))
         self.stream.flush()
-        self.drawn = True
+        self.drawn = len(lines)
 
     def _clear(self) -> None:
         """Remove the progress lines before new log lines are printed."""
         if self.drawn:
-            self.stream.write("\r\033[K\033[1A\r\033[K")
+            self.stream.write("\r\033[K" + "\033[1A\r\033[K" * (self.drawn - 1))
             self.stream.flush()
-            self.drawn = False
+            self.drawn = 0

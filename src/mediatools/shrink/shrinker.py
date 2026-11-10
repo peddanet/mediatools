@@ -24,6 +24,7 @@ from mediatools.shrink.journal import ReplaceJournal
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.planner import ShrinkPlanner
 from mediatools.shrink.shrinkstate import ShrinkState
+from mediatools.shrink.spacetally import SpaceTally
 from mediatools.shrink.throughput import ThroughputLog
 
 
@@ -128,10 +129,12 @@ class Shrinker:
         self.opts = opts or ShrinkOptions()
         probe = probe or MediaProbe()
         self.encoder = encoder or HevcEncoder(probe=probe, logger=logger)
+        throughput = throughput or ThroughputLog()
         self.state: ShrinkState = {"durations": durations, "codecs": codecs,
-                                   "throughput": throughput or ThroughputLog(),
+                                   "throughput": throughput,
                                    "results": None, "decode": None, "ffmpeg_logs": None,
-                                   "restart": None}
+                                   "restart": None,
+                                   "space": SpaceTally.from_throughput(throughput)}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False, "restart": False}
@@ -486,6 +489,8 @@ class Shrinker:
             return
         self.planner.journal.replace(out, path, database)
         self.stats["shrunk"] += 1
+        if out_size is not None:
+            self.state["space"].add(size, out_size)
         self._result(FileResult(path, "shrunk", size, out_size, length, took))
 
     def _result(self, item: FileResult) -> None:
@@ -511,7 +516,7 @@ class Shrinker:
         """
         self._poll_stop()
         if self.display:
-            self.display.show(name, fraction, size)
+            self.display.show(name, fraction, size, self.state["space"].line())
 
     def _poll_stop(self, force: bool = False) -> None:
         """Turn a request of ``mediatools stop`` into a stop after this file.
@@ -601,6 +606,8 @@ class Shrinker:
                       counts["shrunk"], counts["hevc"], counts["skipped"], counts["short"],
                       counts["copies"], counts["recovered"], counts["failed"],
                       counts["broken"], counts["failed_before"])
+        for line in self.state["space"].summary():
+            self.log.info("%s", line)
         if self.flags["stop"]:
             self.log.info("stopped by the user - the next run continues with the files left")
         for path in self.found["failed"]:

@@ -303,7 +303,7 @@ src/mediatools/
     runstatus.py      RunStatus        mediatools status: running release, advice, log
     attachview.py     AttachView       live view of a background run (attach)
     sleepinhibitor.py SleepInhibitor   systemd sleep/idle lock during a run
-    progressbar.py    ProgressBar      two progress lines, status file
+    progressbar.py    ProgressBar      progress lines, status file
     mediatypes.py     MediaTypes       extensions, reserved directory names
     probe.py          MediaProbe       ffprobe wrapper (duration, codec)
     decodecheck.py    DecodeCheck      trial decode: finds videos that cannot be decoded
@@ -488,15 +488,35 @@ them.
 (numbers illustrative)
 
 ~~~text
-total [#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB | ETA 2d21h
+total [#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB source | ETA 2d21h
 file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
+space  this run: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | overall: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
 ~~~
 
 The first line covers the whole run, the second the file being encoded:
 its percentage, its size, the part already encoded and its remaining time
-at the current speed. Both lines are redrawn in place and cut to the
-terminal width (a long file name is shortened in the middle), so a narrow
-window does not fill up with lines.
+at the current speed. The third line (since 1.2.16) shows the disk space.
+All lines are redrawn in place and cut to the terminal width (a long file
+name is shortened in the middle), so a narrow window does not fill up with
+lines.
+
+**Read, written, freed.** The GiB of the first line are *source* bytes:
+how much was read and encoded, not how much space became free. The space
+line keeps the three quantities apart:
+
+| Quantity | Meaning |
+|---|---|
+| read | source size of the replaced originals |
+| written | size of their shrunk versions |
+| freed | read minus written: the space returned to the file system |
+
+`this run` starts at zero with every start, restart and
+`mediatools reload`, because the plan of a run contains only the files
+still to do. `overall` adds the totals of all earlier runs, taken from
+`state/shrink_throughput.json` (recorded since 1.2.1; files of older runs
+are missing). Copies kept with `--keep-copies` free no space and are not
+counted for this run. At the end of a run both views are written to the
+log, with the output share in percent of the source.
 
 Percentage, volume and remaining time are measured in source bytes,
 because the encoding time grows with the file size, not with the number of
@@ -631,7 +651,7 @@ shrink continues in the background (pid 12345); the terminal may be closed.
 ~~~
 
 `mediatools attach` (alias `front`) prints the last 30 log lines, then
-every new line, and redraws the two progress lines, which the run writes
+every new line, and redraws the progress lines, which the run writes
 to `state/shrink.status` once per second. Ctrl+C leaves the view; the run
 continues. The view ends by itself when the run ends. `--foreground`
 keeps the previous behaviour (run bound to the terminal, Ctrl+C stops).

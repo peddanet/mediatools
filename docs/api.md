@@ -355,7 +355,8 @@ Follow the log and the progress lines of a running job.
 Shows the last :attr:`BACKLOG` lines of the job's log file, then every
 new line as it is written - like the terminal of the run: DEBUG lines
 are left out, INFO lines without time stamp and level - and below them
-the two progress lines from the status file, redrawn in place. Ctrl+C
+the progress lines (two, or three with the space line) from the status
+file, redrawn in place. Ctrl+C
 only leaves the view; the job keeps running. The view ends by itself
 when the job ends.
 
@@ -366,7 +367,7 @@ Attributes:
     control: Control files of the job.
     stream: Output stream (the terminal).
     poll: Seconds between two updates.
-    drawn: True while the progress lines are on the screen.
+    drawn: Number of progress lines on the screen (0: none).
 ~~~
 
 **`__init__`**
@@ -447,7 +448,7 @@ Returns:
 ~~~text
 _draw(self) -> None
 
-Redraw the two progress lines from the status file.
+Redraw the progress lines from the status file.
 ~~~
 
 **`_clear`**
@@ -1142,9 +1143,14 @@ files are done or 30 s have passed, before that from earlier runs
 
 Two lines are drawn: the overall progress (:meth:`line`) and the
 current file (:meth:`file_line`: its percentage, size, encoded part and
-remaining time). On a terminal both are redrawn in place and cut to the
-terminal width, so they never wrap; otherwise (output redirected to a
-file) nothing is drawn and only the log is written.
+remaining time). A caller may add a third line (``extra`` of
+:meth:`show`), e.g. the space read, written and freed. On a terminal the
+lines are redrawn in place and cut to the terminal width, so they never
+wrap; otherwise (output redirected to a file) nothing is drawn and only
+the log is written.
+
+The GiB figures of the overall line are *source* bytes (read and
+encoded), not the space freed on disk; they count this run only.
 
 Attributes:
     total_bytes: Bytes of all files of the run.
@@ -1156,7 +1162,7 @@ Attributes:
     started: Start time (monotonic seconds).
     enabled: True if the stream is a terminal.
     note: Text shown at the start of the first line, e.g. a pending stop.
-    drawn: True while the two lines are on the screen.
+    drawn: Number of lines on the screen (0: nothing drawn).
     status_path: If set, both lines are also written to this file (at
         most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
     last_status: Monotonic time of the last status file update.
@@ -1256,27 +1262,41 @@ Returns:
 **`_write_status`**
 
 ~~~text
-_write_status(self, name: str, file_fraction: float, file_bytes: int) -> None
+_write_status(
+    self,
+    name: str,
+    file_fraction: float,
+    file_bytes: int,
+    extra: str = '',
+) -> None
 
-Replace the status file with both lines (rate-limited, atomic).
+Replace the status file with all lines (rate-limited, atomic).
 
 Args:
     name: Name of the current file.
     file_fraction: Encoded fraction of the current file (0..1).
     file_bytes: Size of the current file.
+    extra: Optional third line; empty for none.
 ~~~
 
 **`show`**
 
 ~~~text
-show(self, name: str = '', file_fraction: float = 0.0, file_bytes: int = 0) -> None
+show(
+    self,
+    name: str = '',
+    file_fraction: float = 0.0,
+    file_bytes: int = 0,
+    extra: str = '',
+) -> None
 
-Redraw both status lines on a terminal.
+Redraw the status lines on a terminal.
 
 Args:
     name: Name of the current file.
     file_fraction: Encoded fraction of the current file (0..1).
     file_bytes: Size of the current file.
+    extra: Optional third line; empty for none.
 ~~~
 
 **`file_done`**
@@ -1309,7 +1329,7 @@ Args:
 ~~~text
 clear(self) -> None
 
-Remove both status lines before a log message is printed.
+Remove the status lines before a log message is printed.
 ~~~
 
 **`duration_text`**
@@ -1667,7 +1687,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.2.15') -> None
+__init__(self, control: RunControl, installed: str = '1.2.16') -> None
 
 Remember the job and the installed release.
 
@@ -1897,7 +1917,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.15')
+__init__(self, package_dir: str | None = None, version: str = '1.2.16')
 
 Locate the imported package.
 
@@ -3626,6 +3646,119 @@ Attributes:
         None (they are deleted).
     restart: Switch to a newly installed release on request, or None
         (requests are ignored).
+    space: Space read, written and freed, this run and overall.
+~~~
+
+### `SpaceTally` (`mediatools.shrink.spacetally`) {.unnumbered}
+
+~~~text
+Counts how much was read, written and freed by shrinking.
+
+The overall progress line counts *source* bytes, i.e. how much was read
+and encoded. The space freed on disk is the source size minus the size of
+the shrunk file, and the counts of a run start at zero after every start,
+restart or ``mediatools reload``. This class keeps both views apart:
+
+* this run: files replaced by their shrunk version since the start;
+* overall: all encoded files recorded in ``shrink_throughput.json``
+  (kept since 1.2.1), i.e. the state before this run plus this run.
+
+Copies kept with ``--keep-copies`` free no space; they are not counted
+for this run. The overall figure contains them if earlier runs used that
+option, because ``shrink_throughput.json`` does not tell them apart.
+
+Attributes:
+    earlier_src: Source bytes of all encoded files before this run.
+    earlier_out: Output bytes of those files.
+    run_src: Source bytes of the files replaced in this run.
+    run_out: Output bytes of those files.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, earlier_src: int = 0, earlier_out: int = 0)
+
+Start with the overall state before this run.
+
+Args:
+    earlier_src: Source bytes of all encoded files before this run.
+    earlier_out: Output bytes of those files.
+~~~
+
+**`from_throughput`**
+
+~~~text
+from_throughput(cls, throughput: ThroughputLog) -> SpaceTally
+
+Start from the totals recorded in the throughput log.
+
+Args:
+    throughput: Measured speed and size ratio of earlier runs.
+
+Returns:
+    A tally with these totals as the state before this run.
+~~~
+
+**`add`**
+
+~~~text
+add(self, src: int, out: int) -> None
+
+Count one original replaced by its shrunk version.
+
+Args:
+    src: Source size in bytes.
+    out: Size of the shrunk file in bytes.
+~~~
+
+**`overall`**
+
+~~~text
+overall(self) -> tuple[int, int]
+
+Return the overall totals including this run.
+
+Returns:
+    Source bytes and output bytes.
+~~~
+
+**`part`**
+
+~~~text
+part(src: int, out: int) -> str
+
+Format read, written and freed space of one view.
+
+Args:
+    src: Source bytes (read).
+    out: Output bytes (written).
+
+Returns:
+    Text such as ``59.3 GiB read -> 9.1 GiB written = 50.2 GiB freed``.
+~~~
+
+**`line`**
+
+~~~text
+line(self) -> str
+
+Build the space line of the progress display.
+
+Returns:
+    Text without line break, this run first, then overall.
+~~~
+
+**`summary`**
+
+~~~text
+summary(self) -> list[str]
+
+Build the log lines for the end of a run.
+
+Returns:
+    Two lines: this run and overall, with the output share; none if
+    nothing was ever encoded.
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}
