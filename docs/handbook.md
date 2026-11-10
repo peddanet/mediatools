@@ -1121,13 +1121,15 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newest copy per version, pending/stale, tidying of the download folder |
 | `test_release_1213.py` | `apply-release.sh`: announcement of each CI run, summary table, failed run recorded; workflow triggers and Python matrix |
+| `test_release_1214.py` | `apply-release.sh`: reading GitHub calls retried and given up after five attempts, interrupted watch resumed, red run not retried |
 | `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
 gates (`tools/check.sh`: format, lint, types, security, tests) on Python
 3.10, 3.12, 3.13 and 3.14, for pull requests into `main` and `develop`
 and for release tags. Which run checks what is shown in
-`docs/developer.md`, section "CI runs".
+`docs/developer.md`, section "CI runs"; the background is in
+`docs/ci-guide.md`.
 Architecture, UML diagrams and the API reference are in
 `docs/developer.md`.
 

@@ -478,6 +478,10 @@ emergency; CI still enforces all gates.
 
 # CI runs: which run checks what
 
+The background (runner machines, Python versions, containers, `gh` and the
+GitHub API, branch protection, costs) is explained in `docs/ci-guide.md`
+(PDF next to it); this section is the short reference.
+
 The same `tools/check.sh` runs in two places: **locally** in the pre-push
 hook (one Python version, the working tree of this PC) and **on GitHub**
 (fresh virtual machine per job, one job per Python version 3.10, 3.12,
@@ -636,6 +640,7 @@ cd .. && pandoc developer.md api.md -o developer.pdf --pdf-engine=xelatex \
   --highlight-style=tango --resource-path=.
 pandoc handbook.md -o handbook.pdf --pdf-engine=xelatex --highlight-style=tango \
   --resource-path=.
+pandoc ci-guide.md -o ci-guide.pdf --pdf-engine=xelatex --resource-path=.
 ~~~
 
 # Release procedure
@@ -706,6 +711,11 @@ mediatools update -y         # all pending versions, no question
 | per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (local gates) -> PR into `main` -> CI 1/3 -> merge -> tag `vX` -> CI 2/3 -> back-merge into `develop` via `merge/hotfix-X` (local gates) -> CI 3/3 -> merge; see "CI runs" |
 | install | `install.sh` (newest tag), then `mediatools --version` must name the last applied version |
 | tidying | used archives to `~/scripts/mediatools.d/releases/` (plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
+
+Reading GitHub calls (`gh run list`, `gh run view`, `gh pr list`) are
+repeated up to five times, 10 s apart; an interrupted watch of a CI run is
+resumed until GitHub reports the run as completed. A short network loss
+therefore does not stop the update; a red run does.
 
 The script copies itself to `/tmp` and runs from there, because switching
 branches and the installation rewrite the script while bash is still
