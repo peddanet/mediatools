@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.10 -- Handbook"
+title: "mediatools 1.2.11 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -395,7 +395,12 @@ Before anything is encoded, the whole tree is walked once:
    `newShrinkedFiles/` folders are noted as leftovers of aborted runs.
 2. Every video is checked against the database of its directory; recorded
    files are counted as processed and left out. 0-byte placeholders are
-   ignored. A video recorded as failed in an earlier run (`FAILED` or
+   ignored. **Exception -- regrown:** a recorded video that is now at least
+   1.2 times as large as every size recorded for its name, and whose video
+   stream is not HEVC, is planned again. This is what happens when an
+   original is copied back over its shrunk version, e.g. by a sync from the
+   backup disk in the wrong direction; the plan summary reports the
+   number (`recorded as shrunk, but larger again and not HEVC`). A video recorded as failed in an earlier run (`FAILED` or
    `BROKEN`, table `failures`) is left out while its size is unchanged;
    the plan summary and the end of the run list it as `FAILED BEFORE`.
    `--retry-failed` includes these videos again; a successful retry
@@ -566,7 +571,8 @@ CREATE TABLE failures (name text NOT NULL PRIMARY KEY, size integer,
   points to wherever the collection was when the row was written. A row
   whose size differs from the file today is reported by `progress` as
   "size changed since" and still counts as processed -- nothing is encoded
-  twice.
+  twice. Only a file that is at least 1.2 times as large as recorded
+  (**regrown**) and not HEVC is encoded again.
 * `path` and `modified` (mtime after shrinking, `YYYY-MM-DD HH:MM:SS`) are
   still written for compatibility and traceability.
 * `failures` holds videos that could not be shrunk (`FAILED`, `BROKEN`)
@@ -721,7 +727,7 @@ mediatools progress ~/Pictures/collection
 
 ~~~text
 videos: 20000 | processed: 12000 (of which size changed since: 12) |
-todo: 8000 (640.0 GiB)
+regrown: 40 | todo: 7960 | to encode: 640.0 GiB
 databases: 900 | rows without a matching file: 40
 estimated encoding time at the measured 1.5 MB/s: about 5 d 7 h
 ~~~
@@ -729,11 +735,15 @@ estimated encoding time at the measured 1.5 MB/s: about 5 d 7 h
 * **processed** -- the file name is recorded in the database of its
   directory; **size changed since** -- recorded, but the file has another
   size today (still counted as processed);
-* **todo** -- not recorded, with the total volume;
+* **regrown** -- recorded, but now at least 1.2 times as large (an
+  original restored over its shrunk version); `shrink` encodes it again
+  unless it is already HEVC;
+* **todo** -- not recorded; **to encode** is the volume of todo and
+  regrown together;
 * **rows without a matching file** -- the file was deleted or renamed
   after it was recorded.
 
-The three lists go to `reports/progress_{done,changed,todo}_<ts>.txt`. The
+The four lists go to `reports/progress_{done,changed,regrown,todo}_<ts>.txt`. The
 command creates no database and changes nothing.
 
 # triage

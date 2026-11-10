@@ -1779,7 +1779,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.10')
+__init__(self, package_dir: str | None = None, version: str = '1.2.11')
 
 Locate the imported package.
 
@@ -2024,8 +2024,11 @@ Args:
     file_path: Absolute path of a video in this directory.
 
 Returns:
-    ``done`` (name and size recorded), ``changed`` (name recorded
-    with another size; still counts as processed) or ``todo``.
+    ``done`` (name and size recorded), ``regrown`` (name recorded,
+    but the file is now at least :attr:`GROWTH` times as large as
+    every recorded size - typically an original restored over its
+    shrunk version), ``changed`` (name recorded with another size;
+    counts as processed) or ``todo``.
 ~~~
 
 **`is_done`**
@@ -2039,7 +2042,9 @@ Args:
     file_path: Absolute path of the video.
 
 Returns:
-    True if its name is recorded (see :meth:`status`).
+    True if its name is recorded (see :meth:`status`); a ``regrown``
+    file counts as processed here - the planner decides with a codec
+    check whether it is encoded again.
 ~~~
 
 **`record`**
@@ -2596,9 +2601,12 @@ Per directory: finish replacements interrupted by a crash
 (:class:`ReplaceJournal`), note leftover ``newShrinkedFiles/`` folders
 of earlier aborted runs, and collect every video that is not yet
 recorded in its directory's database. The database always has
-precedence: a recorded file counts as processed, whatever its codec.
-A video recorded as failed (``FAILED`` or ``BROKEN``) with unchanged
-size is left out unless ``retry_failed`` is set. Then optionally drop
+precedence: a recorded file counts as processed - with one exception:
+a file that is now clearly larger than recorded (``regrown``, e.g. an
+original restored from a backup over its shrunk version) and whose
+video is not HEVC is planned again. A video recorded as failed
+(``FAILED`` or ``BROKEN``) with unchanged size is left out unless
+``retry_failed`` is set. Then optionally drop
 videos shorter than ``min_seconds``, set aside videos that are already
 HEVC and sort the rest (``largest`` first, ``smallest`` first or walk
 order ``path``).
@@ -2615,7 +2623,7 @@ Attributes:
     database_of: Returns the database of a directory.
     journal: Completes interrupted replacements.
     stats: Shared counters ``skipped``, ``short``, ``recovered``,
-        ``failed_before``.
+        ``failed_before``, ``regrown``.
     found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
 ~~~
 
@@ -2674,6 +2682,21 @@ Args:
 Returns:
     ``(path, size)`` if it is to be encoded, else None (other
     extension, link, placeholder, recorded or recorded as failed).
+~~~
+
+**`_video_size`**
+
+~~~text
+_video_size(self, path: str) -> int | None
+
+Return the size of a regular, non-empty video with a planned extension.
+
+Args:
+    path: File in the tree.
+
+Returns:
+    Size in bytes, or None for another extension, a link, a missing
+    file or a 0-byte triage placeholder.
 ~~~
 
 **`_drop_short`**
@@ -2776,9 +2799,12 @@ Reports which videos are recorded in their shrink database and which not.
 Strictly read-only: no database is created and nothing is changed.
 Matching follows :meth:`ShrinkDatabase.status` (file name within the
 directory), so databases written at an earlier location of the
-collection are evaluated correctly. Three lists are written to
+collection are evaluated correctly. Four lists are written to
 ``<data>/reports/``: ``progress_done``, ``progress_changed`` (recorded,
-size differs - counts as processed) and ``progress_todo``.
+size differs - counts as processed), ``progress_regrown`` (recorded,
+but at least 20 % larger again - ``shrink`` encodes it again unless it
+is HEVC) and ``progress_todo``. Regrown videos count towards the bytes
+still to do.
 
 Attributes:
     root: Absolute start directory.
@@ -2787,8 +2813,8 @@ Attributes:
     extensions: Extensions that are counted.
     db_name: Database file name (None: default name).
     throughput: Measured encoding speed for the time estimate.
-    lists: Paths per status ``done``, ``changed``, ``todo``.
-    todo_bytes: Total size of the videos still to do.
+    lists: Paths per status ``done``, ``changed``, ``regrown``, ``todo``.
+    todo_bytes: Total size of the videos still to do (todo and regrown).
     databases: Number of databases found.
     orphan_rows: Database rows without a matching file.
 ~~~
@@ -2830,7 +2856,7 @@ Fill :attr:`lists` by walking the tree.
 ~~~text
 write(self) -> dict[str, str]
 
-Write the three lists to the reports directory.
+Write the four lists to the reports directory.
 
 Returns:
     Report path per status.
@@ -3128,7 +3154,8 @@ Attributes:
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
         ``failed``, ``broken``, ``failed_before`` (left out: recorded as
-        failed), ``copies``, ``recovered``.
+        failed), ``regrown`` (recorded, but larger again: planned),
+        ``copies``, ``recovered``.
     found: ``failed`` - paths that could not be encoded; ``broken`` -
         paths whose data could not be decoded; ``failed_before`` - paths
         left out as recorded failures; ``leftovers`` -

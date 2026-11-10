@@ -21,14 +21,17 @@ def test_database_record_and_lookup(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory (fixture).
     """
-    path = make_file(tmp_path / "a.mp4", b"abc")
+    path = make_file(tmp_path / "a.mp4", b"0123456789")
     database = ShrinkDatabase(str(tmp_path))
     database.ensure()
     assert not database.is_done(path)
     database.record(path)
     assert database.is_done(path)
-    make_file(tmp_path / "a.mp4", b"changed size")
+    make_file(tmp_path / "a.mp4", b"0123456789a")          # 10 % larger: changed
     assert database.status(path) == "changed" and database.is_done(path)
+    make_file(tmp_path / "a.mp4", b"0123456789ab")         # 20 % larger: regrown
+    assert ShrinkDatabase(str(tmp_path)).status(path) == "regrown"
+    assert ShrinkDatabase(str(tmp_path)).is_done(path)
 
 
 def test_database_matches_by_name_after_move(tmp_path: Path) -> None:
