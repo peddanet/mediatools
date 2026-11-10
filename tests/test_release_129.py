@@ -64,6 +64,18 @@ class CountingCheck:
         self.paths.append(path)
         return self.errors
 
+    def verify(self, path: str, _timeout: float, _niceness: int = 19) -> str | None:
+        """Report the stored verdict as a full decode.
+
+        Args:
+            path: Video file (remembered).
+
+        Returns:
+            None for "usable", otherwise a reason.
+        """
+        self.paths.append(path)
+        return None if self.errors is None else f"{self.errors} decoder error line(s)"
+
 
 class FailingEncoder(FakeEncoder):
     """Encoder double that fails for one name and leaves an ffmpeg message file."""

@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.11 -- Developer Documentation"
+title: "mediatools 1.2.12 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -167,7 +167,7 @@ directory, configuration -- lives in `core`.
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
 | `SelfRestart` | switch of a running shrink to the installed release: `--version` probe, command line (`--foreground -y --continue-log`), `os.execv` (same PID) |
-| `DecodeCheck` | trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
+| `DecodeCheck` | `verify()`: full decode of an output, any error line or timeout = failure; `unusable()`: trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
 | `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
 | `RunControl` | PID/stop/restart/status files of a running job, refuses a second live job of the same name, hands its registration over on a release switch, background mode (fork, `setsid`), sleep lock in the working process |
@@ -184,7 +184,7 @@ directory, configuration -- lives in `core`.
 |---|---|
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
-| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and decodability; message file kept on failure |
+| `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and full decode of the output (`DecodeCheck.verify`); message file kept on failure |
 | `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, regrown originals (larger than recorded, not HEVC: planned again), minimum duration, HEVC set-aside, order |
 | `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |
 | `Shrinker` | per-file decision (HEVC, trial decode, encode), failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |

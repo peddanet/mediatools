@@ -149,3 +149,44 @@ def test_shrinker_sets_broken_videos_aside(tmp_path: Path,
     assert shrinker.stats["broken"] == 1 and shrinker.found["broken"] == [paths["medium.mp4"]]
     assert [row.status for row in rows if row.path == paths["medium.mp4"]] == ["BROKEN"]
     assert "not decodable: 1" in caplog.text and "BROKEN (not decodable, kept)" in caplog.text
+
+
+def test_full_decode_accepts_a_clean_file(clips: dict[str, str]) -> None:
+    """A healthy clip decodes completely without an error line.
+
+    Args:
+        clips: Test clips (fixture).
+    """
+    assert DecodeCheck().verify(clips["good"], 60) is None
+
+
+def test_full_decode_rejects_undecodable_data(clips: dict[str, str]) -> None:
+    """Undecodable data anywhere in the file is reported with the first error.
+
+    Args:
+        clips: Test clips (fixture).
+    """
+    problem = DecodeCheck().verify(clips["encrypted"], 60)
+    assert problem is not None and "decoder error line" in problem
+
+
+def test_full_decode_unknown_result_is_a_failure(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing ffmpeg, a timeout or a silent non-zero exit never pass.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: pytest fixture.
+    """
+    path = make_file(tmp_path / "v.mp4", b"x")
+    assert "not found" in str(DecodeCheck(ffmpeg="no-such-ffmpeg").verify(path, 5))
+    silent = tmp_path / "ff"
+    silent.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    silent.chmod(0o755)
+    assert DecodeCheck(ffmpeg=str(silent)).verify(path, 5) == "ffmpeg exit code 3"
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("ffmpeg", 1)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    assert "did not finish" in str(DecodeCheck().verify(path, 1))
