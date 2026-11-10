@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.10 -- Developer Documentation"
+title: "mediatools 1.2.11 -- Developer Documentation"
 subtitle: "Architecture, UML, dynamic behaviour, data formats, quality gates and API reference"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -185,7 +185,7 @@ directory, configuration -- lives in `core`.
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
 | `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and decodability; message file kept on failure |
-| `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, minimum duration, HEVC set-aside, order |
+| `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, regrown originals (larger than recorded, not HEVC: planned again), minimum duration, HEVC set-aside, order |
 | `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |
 | `Shrinker` | per-file decision (HEVC, trial decode, encode), failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
