@@ -1,0 +1,14 @@
+flowchart TD
+  S[job queued with label ubuntu-24.04] --> V["GitHub provisions a fresh VM<br/>4 vCPU, 16 GB RAM, 14 GB SSD (public repo)<br/>runner agent, GITHUB_TOKEN for this job"]
+  V --> C1["actions/checkout<br/>clone commit GITHUB_SHA into workspace"]
+  C1 --> P{"actions/setup-python<br/>python-version from matrix"}
+  P -->|"version in toolcache<br/>of the image"| T[use preinstalled build, seconds]
+  P -->|"not cached but listed in<br/>actions/python-versions manifest"| D["download prebuilt tarball<br/>from GitHub Releases"]
+  P -->|"neither"| X[step fails: version not found]
+  T & D --> AP["sudo apt-get install ffmpeg rsync rsnapshot<br/>(passwordless sudo on hosted runners)"]
+  AP --> PI["pip install -e .[dev]"]
+  PI --> CK["tools/check.sh<br/>privacy, format, lint, types, security, tests"]
+  CK --> E{exit code}
+  E -->|0| OK[check run: success]
+  E -->|"not 0"| NO[check run: failure]
+  OK & NO --> DEL[VM is destroyed]
