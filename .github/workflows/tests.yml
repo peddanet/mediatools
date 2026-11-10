@@ -5,13 +5,15 @@ name: quality-gates
 #   develop    -> integration; release merge into main
 #   main       -> releases only, every release is an annotated tag vX.Y.Z
 #
-# Work branches (feature/*, release/*, ...) are checked through their pull
-# request; a push trigger for them would run every gate twice. Pushes to
-# develop and main (the merges) and release tags are checked as well.
+# Which event runs what (see docs/developer.md, "CI runs"):
+#   pull_request into main/develop  gates on the merge result; required check
+#   push of a tag v*                 gates on the released commit + release-check
+# Branch pushes start no run: work branches are checked through their pull
+# request, and a merge into main/develop has the tree its pull request
+# already tested (branch protection: strict, no direct pushes).
 # A branch without a pull request: gh workflow run quality-gates --ref BRANCH
 on:
   push:
-    branches: [main, develop]
     tags: ["v*"]
   pull_request:
     branches: [main, develop]
@@ -23,10 +25,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.12", "3.13"]
+        python: ["3.10", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: system tools
