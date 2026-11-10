@@ -17,6 +17,7 @@ from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.prompt import Prompt
 from mediatools.core.runcontrol import RunControl
+from mediatools.core.runstatus import RunStatus
 from mediatools.core.sleepinhibitor import SleepInhibitor
 from mediatools.core.runlog import RunLog
 from mediatools.core.selfrestart import SelfRestart
@@ -81,6 +82,8 @@ class Cli:
 
         sub.add_parser("reload", help="ask a running shrink to switch to the newly installed "
                                       "release after its current file; returns at once")
+        sub.add_parser("status", help="show whether a shrink runs, with which release, "
+                                      "whether it is current, and its log")
         sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
                                     "after its current file; returns at once")
         cmd = sub.add_parser("update", help="apply delivered release patches from the download "
@@ -331,6 +334,17 @@ class Cli:
         print(f"reload requested: shrink (pid {pid}) switches to the installed release "
               f"after its current file")
         return 0
+
+    @staticmethod
+    def cmd_status(_args: argparse.Namespace) -> int:
+        """Run ``mediatools status``: running shrink, its release and log.
+
+        Returns:
+            0 if a shrink runs, 1 if none runs.
+        """
+        control = RunControl("shrink")
+        print("\n".join(RunStatus(control).lines()))
+        return 0 if control.active_pid() is not None else 1
 
     @staticmethod
     def cmd_stop(_args: argparse.Namespace) -> int:

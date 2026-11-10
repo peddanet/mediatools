@@ -170,6 +170,7 @@ directory, configuration -- lives in `core`.
 | `DecodeCheck` | `verify()`: full decode of an output, any error line or timeout = failure; `unusable()`: trial decode of the first 10 s (`ffmpeg -t 10 -i FILE -f null -`); 10 or more error lines = data not decodable; no verdict if ffmpeg is missing or times out |
 | `DurationCache` | ffprobe durations keyed by path, size and mtime (shared by triage and shrink) |
 | `ProgressBar` | two-line terminal display (run and current file), pending stop, status file for `attach` |
+| `RunStatus` | `mediatools status`: running release from the last version line of the job's log, installed release, advice (up to date / reload / restart), pending requests |
 | `RunControl` | PID/stop/restart/status files of a running job, refuses a second live job of the same name, hands its registration over on a release switch, background mode (fork, `setsid`), sleep lock in the working process |
 | `AttachView` | `mediatools attach`: log backlog, new lines, progress lines; Ctrl+C leaves the view |
 | `SleepInhibitor` | systemd sleep/idle inhibitor lock for the lifetime of a job |

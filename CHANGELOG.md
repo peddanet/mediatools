@@ -5,6 +5,16 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.15] - 2026-11-10
+
+### Added
+- `mediatools status`: whether a shrink runs (PID), the release it runs
+  with (last `mediatools X (pid N)` line of its own log) and since when,
+  the installed release, what to do (`up to date`, `mediatools reload`,
+  or stop and restart for releases before 1.2.10), the log path and
+  pending reload/stop requests. Exit code 0 while a shrink runs, 1
+  otherwise. `mediatools update` prints it after installing.
+
 ## [1.2.14] - 2026-11-10
 
 ### Fixed
