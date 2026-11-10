@@ -22,6 +22,8 @@
 #        local  push merge/hotfix-X     gates on this PC, one Python version
 #        CI 3   PR merge/hotfix-X -> develop   merge result; required check
 #      Merges into main and develop start no further run (no push trigger).
+#      Reading GitHub calls are retried (5 attempts, 10 s apart), so a short
+#      network loss does not stop the update; a red CI run still does.
 #   5. Installs the newest release (install.sh), checks --version and asks a
 #      running shrink to switch to it after its current file (mediatools reload).
 #   6. Moves the used archives to ~/scripts/mediatools.d/releases/ and deletes
@@ -93,6 +95,24 @@ local_gates() {
   echo "    GitHub starts no run for this push ($1 has no push trigger)"
 }
 
+# run a reading gh command; a failed attempt (network, API hiccup) is retried
+# up to GH_TRIES times, GH_PAUSE seconds apart; output only of the good attempt
+GH_TRIES=5
+GH_PAUSE="${GH_PAUSE:-10}"
+gh_read() {
+  local attempt out
+  for attempt in $(seq 1 "$GH_TRIES"); do
+    if out=$(gh "$@"); then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    echo "    gh $1 $2 failed (attempt $attempt/$GH_TRIES), retry in $GH_PAUSE s" >&2
+    sleep "$GH_PAUSE"
+  done
+  echo "    gh $1 $2 failed $GH_TRIES times, giving up" >&2
+  return 1
+}
+
 # CI runs of this invocation, one line each for the summary table
 declare -a CI_ROWS=()
 
@@ -105,18 +125,29 @@ ci_run() {
   echo "    checks:  $what"
   echo "    purpose: $why"
   wait_for_run "$ref" "$event" "$sha"
-  id=$(gh run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
+  id=$(gh_read run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
          --json databaseId --jq '.[0].databaseId')
-  url=$(gh run view "$id" --json url --jq .url)
+  url=$(gh_read run view "$id" --json url --jq .url)
   echo "    run:     $url"
   CI_ROWS+=("$label|$event $ref|running|$url")
-  local rc=0
-  if [ -n "$pr" ]; then
-    gh pr checks "$pr" --watch || rc=$?
-  else
-    gh run watch "$id" --exit-status || rc=$?
-  fi
-  CI_ROWS[-1]="$label|$event $ref|$(gh run view "$id" --json conclusion --jq .conclusion)|$url"
+  # Watching ends with a non-zero code both for a red run and for a lost
+  # connection; the state of the run on GitHub decides which one it was.
+  local rc=1 attempt state
+  for attempt in $(seq 1 "$GH_TRIES"); do
+    if [ -n "$pr" ]; then
+      gh pr checks "$pr" --watch || true
+    else
+      gh run watch "$id" --exit-status || true
+    fi
+    state=$(gh_read run view "$id" --json status,conclusion --jq '.status + " " + .conclusion')
+    case "$state" in
+      "completed success") rc=0; break ;;
+      completed*) rc=1; break ;;
+    esac
+    echo "    watching interrupted, run is '$state' (attempt $attempt/$GH_TRIES), retry in $GH_PAUSE s"
+    sleep "$GH_PAUSE"
+  done
+  CI_ROWS[-1]="$label|$event $ref|${state#completed }|$url"
   return "$rc"
 }
 
@@ -159,10 +190,11 @@ wait_for_run() {
   local ref="$1" event="$2" sha="${3:-}" n
   for _ in $(seq 1 30); do
     if [ -n "$sha" ]; then
-      n=$(gh run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
+      n=$(gh_read run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
             --json databaseId --jq length)
     else
-      n=$(gh run list --branch "$ref" --event "$event" --limit 1 --json databaseId --jq length)
+      n=$(gh_read run list --branch "$ref" --event "$event" --limit 1 --json databaseId \
+            --jq length)
     fi
     [ "$n" -ge 1 ] && return 0
     sleep 10
@@ -260,7 +292,7 @@ apply_one() {
 
   step "$VERSION: 4 pull request into main"
   local pr
-  pr=$(gh pr list --head "hotfix/$VERSION" --base main --state open --json url \
+  pr=$(gh_read pr list --head "hotfix/$VERSION" --base main --state open --json url \
          --jq '.[0].url // empty')
   [ -n "$pr" ] || pr=$(gh pr create --base main --title "Hotfix $VERSION" --fill)
   echo "PR: $pr"
@@ -288,7 +320,7 @@ apply_one() {
   git merge --no-ff origin/develop -m "Merge develop into merge/hotfix-$VERSION"
   local_gates "merge/hotfix-$VERSION"
   git push -u --force-with-lease origin "merge/hotfix-$VERSION"
-  pr=$(gh pr list --head "merge/hotfix-$VERSION" --base develop --state open --json url \
+  pr=$(gh_read pr list --head "merge/hotfix-$VERSION" --base develop --state open --json url \
          --jq '.[0].url // empty')
   [ -n "$pr" ] || pr=$(gh pr create --base develop --title "Merge hotfix $VERSION into develop" --fill)
   echo "PR: $pr"

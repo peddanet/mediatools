@@ -1,0 +1,25 @@
+sequenceDiagram
+  autonumber
+  participant U as User shell
+  participant G as gh (token from keyring)
+  participant API as api.github.com
+  participant ACT as Actions service
+  participant R as Runner VMs
+  U->>G: git push origin hotfix/1.2.12
+  Note over U,API: plain git transport, not the API
+  U->>G: gh pr create --base main --fill
+  G->>API: POST /repos/{owner}/{repo}/pulls
+  API-->>G: 201 Created, PR URL
+  API->>ACT: event pull_request (opened)
+  ACT->>R: queue 4 matrix jobs (gates 3.10/3.12/3.13/3.14)
+  U->>G: gh pr checks URL --watch
+  loop every --interval seconds (default 10)
+    G->>API: query check states of the PR head
+    API-->>G: pending / success / failure per check
+  end
+  R-->>ACT: job results (exit codes of steps)
+  ACT-->>API: check runs completed
+  G-->>U: exit 0 (all passed) or 1 (failed)
+  U->>G: gh pr merge URL --merge --delete-branch
+  G->>API: merge request for the PR
+  API-->>G: merged (only if branch protection satisfied)
