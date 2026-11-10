@@ -21,9 +21,12 @@ class ShrinkPlanner:
     (:class:`ReplaceJournal`), note leftover ``newShrinkedFiles/`` folders
     of earlier aborted runs, and collect every video that is not yet
     recorded in its directory's database. The database always has
-    precedence: a recorded file counts as processed, whatever its codec.
-    A video recorded as failed (``FAILED`` or ``BROKEN``) with unchanged
-    size is left out unless ``retry_failed`` is set. Then optionally drop
+    precedence: a recorded file counts as processed - with one exception:
+    a file that is now clearly larger than recorded (``regrown``, e.g. an
+    original restored from a backup over its shrunk version) and whose
+    video is not HEVC is planned again. A video recorded as failed
+    (``FAILED`` or ``BROKEN``) with unchanged size is left out unless
+    ``retry_failed`` is set. Then optionally drop
     videos shorter than ``min_seconds``, set aside videos that are already
     HEVC and sort the rest (``largest`` first, ``smallest`` first or walk
     order ``path``).
@@ -40,7 +43,7 @@ class ShrinkPlanner:
         database_of: Returns the database of a directory.
         journal: Completes interrupted replacements.
         stats: Shared counters ``skipped``, ``short``, ``recovered``,
-            ``failed_before``.
+            ``failed_before``, ``regrown``.
         found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
     """
 
@@ -109,15 +112,16 @@ class ShrinkPlanner:
             ``(path, size)`` if it is to be encoded, else None (other
             extension, link, placeholder, recorded or recorded as failed).
         """
-        if MediaTypes.extension(os.path.basename(path)) not in self.opts.extensions:
+        size = self._video_size(path)
+        if size is None:
             return None
-        if os.path.islink(path) or not os.path.isfile(path):
-            return None
-        size = os.path.getsize(path)
-        if size == 0:
-            return None                              # triage placeholder
         database = self.database_of(os.path.dirname(path))
-        if database.is_done(path):
+        state = database.status(path)
+        if state == "regrown" and self._codec(path) != "hevc":
+            self.stats["regrown"] += 1
+            self.log.debug("recorded, but larger again and not HEVC - planned: %s", path)
+            return path, size
+        if state != "todo":
             self.stats["skipped"] += 1
             return None
         if not self.opts.retry_failed and database.failure(path) is not None:
@@ -125,6 +129,23 @@ class ShrinkPlanner:
             self.found["failed_before"].append(path)
             return None
         return path, size
+
+    def _video_size(self, path: str) -> int | None:
+        """Return the size of a regular, non-empty video with a planned extension.
+
+        Args:
+            path: File in the tree.
+
+        Returns:
+            Size in bytes, or None for another extension, a link, a missing
+            file or a 0-byte triage placeholder.
+        """
+        if MediaTypes.extension(os.path.basename(path)) not in self.opts.extensions:
+            return None
+        if os.path.islink(path) or not os.path.isfile(path):
+            return None
+        size = os.path.getsize(path)
+        return size or None                          # 0 bytes: triage placeholder
 
     def _drop_short(self, todo: list[tuple[str, int]]) -> list[tuple[str, int]]:
         """Remove videos shorter than ``min_seconds``.

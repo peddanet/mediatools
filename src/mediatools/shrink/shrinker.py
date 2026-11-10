@@ -94,7 +94,8 @@ class Shrinker:
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
             ``failed``, ``broken``, ``failed_before`` (left out: recorded as
-            failed), ``copies``, ``recovered``.
+            failed), ``regrown`` (recorded, but larger again: planned),
+            ``copies``, ``recovered``.
         found: ``failed`` - paths that could not be encoded; ``broken`` -
             paths whose data could not be decoded; ``failed_before`` - paths
             left out as recorded failures; ``leftovers`` -
@@ -136,7 +137,8 @@ class Shrinker:
         self.flags = {"stop": False, "abort": False, "restart": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
-                      "broken": 0, "failed_before": 0, "copies": 0, "recovered": 0}
+                      "broken": 0, "failed_before": 0, "regrown": 0, "copies": 0,
+                      "recovered": 0}
         self.found: dict[str, list] = {"failed": [], "broken": [], "failed_before": [],
                                        "leftovers": [], "hevc": []}
         self.planner = ShrinkPlanner(self.root, logger, self.opts, probe, self.state,
@@ -284,6 +286,9 @@ class Shrinker:
                       "already HEVC, recorded without encoding: %i files, %.1f GiB",
                       self.stats["skipped"], self.opts.min_seconds, self.stats["short"],
                       len(hevc), sum(size for _path, size in hevc) / 1024 ** 3)
+        if self.stats["regrown"]:
+            self.log.info("recorded as shrunk, but larger again and not HEVC (e.g. restored "
+                          "from a backup): %i - planned again", self.stats["regrown"])
         if self.stats["failed_before"]:
             self.log.info("left out, failed in an earlier run (FAILED/BROKEN, size unchanged): "
                           "%i - retry with --retry-failed", self.stats["failed_before"])
@@ -342,7 +347,9 @@ class Shrinker:
         """
         dirpath = os.path.dirname(path)
         database = self.database(dirpath)
-        if not os.path.isfile(path) or database.is_done(path):
+        # recorded meanwhile (e.g. a hard link shrunk earlier in this run); a
+        # regrown file was planned on purpose and is checked for HEVC below
+        if not os.path.isfile(path) or database.status(path) not in ("todo", "regrown"):
             return False                             # removed or recorded meanwhile
         if self.planner.probe.video_codec(path) == "hevc":
             self._record_one_hevc(path)

@@ -51,6 +51,7 @@ class ShrinkDatabase:
     NAME = "shrink.db"
     SCHEMA = ("CREATE TABLE IF NOT EXISTS files "
               "(path text NOT NULL PRIMARY KEY, size integer, modified text)")
+    GROWTH = 1.2
     FAILURES = ("CREATE TABLE IF NOT EXISTS failures (name text NOT NULL PRIMARY KEY, "
                 "size integer, status text, reason text, at text)")
 
@@ -176,13 +177,19 @@ class ShrinkDatabase:
             file_path: Absolute path of a video in this directory.
 
         Returns:
-            ``done`` (name and size recorded), ``changed`` (name recorded
-            with another size; still counts as processed) or ``todo``.
+            ``done`` (name and size recorded), ``regrown`` (name recorded,
+            but the file is now at least :attr:`GROWTH` times as large as
+            every recorded size - typically an original restored over its
+            shrunk version), ``changed`` (name recorded with another size;
+            counts as processed) or ``todo``.
         """
         sizes = self.index().get(os.path.basename(file_path))
         if sizes is None:
             return "todo"
-        return "done" if os.path.getsize(file_path) in sizes else "changed"
+        size = os.path.getsize(file_path)
+        if size in sizes:
+            return "done"
+        return "regrown" if size >= self.GROWTH * max(sizes) else "changed"
 
     def is_done(self, file_path: str) -> bool:
         """Tell whether a file counts as processed.
@@ -191,7 +198,9 @@ class ShrinkDatabase:
             file_path: Absolute path of the video.
 
         Returns:
-            True if its name is recorded (see :meth:`status`).
+            True if its name is recorded (see :meth:`status`); a ``regrown``
+            file counts as processed here - the planner decides with a codec
+            check whether it is encoded again.
         """
         return self.status(file_path) != "todo"
 
