@@ -5,6 +5,17 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.2.11] - 2026-11-10
+
+### Fixed
+- Originals restored over their shrunk version (e.g. by a sync from the
+  backup disk in the wrong direction) were never encoded again, because
+  the database matches by file name. A recorded video that is now at least
+  1.2 times as large as every recorded size (`ShrinkDatabase.status` =
+  `regrown`) and whose video is not HEVC is planned again; the plan
+  summary reports the number. `progress` lists such videos separately
+  (`progress_regrown_*.txt`) and adds them to the volume to encode.
+
 ## [1.2.10] - 2026-11-09
 
 ### Added
