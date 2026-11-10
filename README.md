@@ -272,14 +272,19 @@ mediatools status        # running? which release, current or not, which log
    `newShrinkedFiles/`, validate, copy over the original *in place* (same
    inode, so `_flat` links see the new content), record.
 
-Two progress lines show the whole run (percentage by volume, files, GiB,
-remaining time) and the current file (percentage, size, encoded part,
-remaining time); the speed is measured in this and earlier runs:
+Three progress lines show the whole run (percentage by volume, files,
+source GiB, remaining time), the current file (percentage, size, encoded
+part, remaining time) and the disk space (read, written and freed, for this
+run and overall); the speed is measured in this and earlier runs:
 
 ~~~text
-total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB | ETA 9d23h
+total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB source | ETA 9d23h
 file   35 % of 2.40 GiB (0.84 GiB encoded) | 17m left | example_clip.mp4
+space  this run: 189.2 GiB read -> 30.3 GiB written = 158.9 GiB freed | overall: ...
 ~~~
+
+The GiB of the first line are what was *read*, not what was freed, and
+they count this run only; the space line tells the two apart.
 
 Each finished video adds a row to a framed result table (terminal and
 `reports/shrink_results_<ts>.txt`); long paths wrap inside their cell:
@@ -315,7 +320,7 @@ ends - no wrapper command is needed.
 **Background mode.** After the confirmation, `shrink` moves into the
 background: the prompt returns, the terminal may be closed, and the run
 continues in a session of its own. `mediatools attach` (alias `front`)
-shows the last log lines, every new line and the two progress lines;
+shows the last log lines, every new line and the progress lines;
 Ctrl+C leaves the view. `--foreground` keeps the run in the terminal as
 before.
 
