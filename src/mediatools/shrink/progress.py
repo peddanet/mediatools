@@ -16,9 +16,12 @@ class ProgressReport:
     Strictly read-only: no database is created and nothing is changed.
     Matching follows :meth:`ShrinkDatabase.status` (file name within the
     directory), so databases written at an earlier location of the
-    collection are evaluated correctly. Three lists are written to
+    collection are evaluated correctly. Four lists are written to
     ``<data>/reports/``: ``progress_done``, ``progress_changed`` (recorded,
-    size differs - counts as processed) and ``progress_todo``.
+    size differs - counts as processed), ``progress_regrown`` (recorded,
+    but at least 20 % larger again - ``shrink`` encodes it again unless it
+    is HEVC) and ``progress_todo``. Regrown videos count towards the bytes
+    still to do.
 
     Attributes:
         root: Absolute start directory.
@@ -27,13 +30,13 @@ class ProgressReport:
         extensions: Extensions that are counted.
         db_name: Database file name (None: default name).
         throughput: Measured encoding speed for the time estimate.
-        lists: Paths per status ``done``, ``changed``, ``todo``.
-        todo_bytes: Total size of the videos still to do.
+        lists: Paths per status ``done``, ``changed``, ``regrown``, ``todo``.
+        todo_bytes: Total size of the videos still to do (todo and regrown).
         databases: Number of databases found.
         orphan_rows: Database rows without a matching file.
     """
 
-    STATES = ("done", "changed", "todo")
+    STATES = ("done", "changed", "regrown", "todo")
 
     def __init__(self, root: str, logger, datadir: DataDir | None = None,
                  extensions: frozenset = frozenset({".mp4"}), db_name: str | None = None,
@@ -76,12 +79,12 @@ class ProgressReport:
                 present.add(name)
                 state = database.status(path)
                 self.lists[state].append(path)
-                if state == "todo":
+                if state in ("todo", "regrown"):
                     self.todo_bytes += os.path.getsize(path)
             self.orphan_rows += sum(1 for name in database.index() if name not in present)
 
     def write(self) -> dict[str, str]:
-        """Write the three lists to the reports directory.
+        """Write the four lists to the reports directory.
 
         Returns:
             Report path per status.
@@ -102,13 +105,15 @@ class ProgressReport:
         """
         self.scan()
         paths = self.write()
-        done, changed, todo = (len(self.lists[s]) for s in self.STATES)
+        done, changed, regrown, todo = (len(self.lists[s]) for s in self.STATES)
         self.log.info("videos: %i | processed: %i (of which size changed since: %i) | "
-                      "todo: %i (%.1f GiB)", done + changed + todo, done + changed, changed,
+                      "regrown: %i | todo: %i | to encode: %.1f GiB",
+                      done + changed + regrown + todo, done + changed, changed, regrown,
                       todo, self.todo_bytes / 1024 ** 3)
         self.log.info("databases: %i | rows without a matching file: %i", self.databases,
                       self.orphan_rows)
         rate = self.throughput.rate()
+        todo += regrown
         if rate and todo:
             self.log.info("estimated encoding time at the measured %.1f MB/s: about %s",
                           rate / 1e6, ThroughputLog.duration_text(self.todo_bytes / rate))
