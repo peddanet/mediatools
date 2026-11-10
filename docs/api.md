@@ -146,6 +146,17 @@ Returns:
     0 if a running shrink was asked, 1 if none runs.
 ~~~
 
+**`cmd_status`**
+
+~~~text
+cmd_status(_args: argparse.Namespace) -> int
+
+Run ``mediatools status``: running shrink, its release and log.
+
+Returns:
+    0 if a shrink runs, 1 if none runs.
+~~~
+
 **`cmd_stop`**
 
 ~~~text
@@ -1637,6 +1648,88 @@ close(self) -> None
 Flush and close all handlers (important in tests).
 ~~~
 
+### `RunStatus` (`mediatools.core.runstatus`) {.unnumbered}
+
+~~~text
+Collects what is known about a running job and how to bring it up to date.
+
+The version a process runs with is the one it wrote into its log when it
+started (``mediatools X (pid N)``). After a release switch the new
+process appends a further such line to the same log, so the last line
+counts. The installed version is the version of this code, because
+``mediatools status`` itself is started from the installation.
+
+Attributes:
+    control: Run control of the job (PID file, request files).
+    installed: Installed release, e.g. ``1.2.15``.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, control: RunControl, installed: str = '1.2.15') -> None
+
+Remember the job and the installed release.
+
+Args:
+    control: Run control of the job.
+    installed: Installed release.
+~~~
+
+**`version_tuple`**
+
+~~~text
+version_tuple(version: str) -> tuple[int, ...]
+
+Turn ``1.2.10`` into ``(1, 2, 10)`` for comparisons.
+
+Args:
+    version: Version string.
+
+Returns:
+    Numeric parts; non-numeric parts end the tuple.
+~~~
+
+**`running_version`**
+
+~~~text
+running_version(self, log: str | None) -> tuple[str, str] | None
+
+Read the version the job runs with from its log.
+
+Args:
+    log: Log file of the job.
+
+Returns:
+    ``(version, start time)`` of the last version line, or None if the
+    log is missing or has none.
+~~~
+
+**`advice`**
+
+~~~text
+advice(self, running: str | None) -> str
+
+Say whether the running process is current and how to change it.
+
+Args:
+    running: Version of the process, or None if unknown.
+
+Returns:
+    One line of advice.
+~~~
+
+**`lines`**
+
+~~~text
+lines(self) -> list[str]
+
+Return the report printed by ``mediatools status``.
+
+Returns:
+    Text lines; the first one says whether the job runs.
+~~~
+
 ### `SelfRestart` (`mediatools.core.selfrestart`) {.unnumbered}
 
 ~~~text
@@ -1804,7 +1897,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.14')
+__init__(self, package_dir: str | None = None, version: str = '1.2.15')
 
 Locate the imported package.
 
