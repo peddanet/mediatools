@@ -300,6 +300,7 @@ src/mediatools/
     datadir.py        DataDir          location of logs, state, plans, reports
     runlog.py         RunLog           logger to terminal and time-stamped file
     runcontrol.py     RunControl       PID/stop/status files, background mode
+    runstatus.py      RunStatus        mediatools status: running release, advice, log
     attachview.py     AttachView       live view of a background run (attach)
     sleepinhibitor.py SleepInhibitor   systemd sleep/idle lock during a run
     progressbar.py    ProgressBar      two progress lines, status file
@@ -373,6 +374,7 @@ mediatools shrink ~/Pictures/collection --foreground          # stay in this ter
 mediatools attach                                             # (alias: front) watch the background run
 mediatools stop                                               # finish the current file, then end
 mediatools reload                                             # switch a running shrink to the installed release
+mediatools status                                             # running? release, current or not, log
 ~~~
 
 | Option | Default | Meaning |
@@ -692,6 +694,27 @@ release does not know the request and simply finishes with its own code
 
 `mediatools reload` without a running shrink prints `no shrink run is
 active - nothing to reload` and returns 1.
+
+**Which release is running?** `mediatools status` answers it in one
+command (normal user, reads only):
+
+~~~text
+shrink: running (pid 459729)
+running:   1.2.12  (started 2026-11-10 03:21:47)
+installed: 1.2.15
+status:    'mediatools reload' switches to the installed release after the current file
+log:       /home/<user>/scripts/mediatools.d/logs/shrink_2026-11-10_03-21-47.log
+pending:   reload requested, takes effect after the current file
+~~~
+
+The running release is the last line `mediatools X (pid N)` in the log
+of the running job, the one the PID file names; a switch appends such a
+line to the same log. Older log files keep the release of their own run
+and say nothing about the current one. The status line says what to do:
+`up to date`, `'mediatools reload' ...` (running release 1.2.10 or newer),
+or `X cannot switch releases: 'mediatools stop', ...` (older than 1.2.10).
+Exit code 0 while a shrink runs, 1 otherwise. `mediatools update` prints
+this report at its end.
 
 Because ffmpeg runs in its own process group, a Ctrl+C in the terminal
 reaches only mediatools, which decides what happens. The signal handler only
@@ -1121,6 +1144,7 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newest copy per version, pending/stale, tidying of the download folder |
 | `test_release_1213.py` | `apply-release.sh`: announcement of each CI run, summary table, failed run recorded; workflow triggers and Python matrix |
+| `test_release_1215.py` | `mediatools status`: advice per version pair, last version line counts, pending reload/stop, missing log, source checkout, exit codes |
 | `test_release_1214.py` | `apply-release.sh`: reading GitHub calls retried and given up after five attempts, interrupted watch resumed, red run not retried |
 | `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |
 
