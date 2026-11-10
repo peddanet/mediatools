@@ -1,5 +1,5 @@
 ---
-title: "mediatools 1.2.11 -- Handbook"
+title: "mediatools 1.2.12 -- Handbook"
 subtitle: "Architecture, operation and safety design of shrink, progress, triage, flatten, sync and snapshot"
 author: "Peter Wein"
 date: "2026-11-09"
@@ -466,7 +466,11 @@ them.
    in its own process group and accepts the result only if the exit code
    is 0, the output is not empty and at least 2 % of the input's size, has
    a video stream, its duration equals the input within `max(1 s, 2 %)`,
-   and its first 10 s decode without errors. A tiny or undecodable output
+   and **the whole output decodes without a single error line**
+   (`ffmpeg -v error -i OUT -f null -` at `nice` 19; time limit
+   `max(600 s, 2 × duration)`; a timeout or a missing ffmpeg counts as
+   failure). Measured cost: a full decode takes about 5--10 % of the encode
+   time of the same file. A tiny or undecodable output
    is typical of an input whose data the decoder could not use -- the
    encoder then writes little more than grey frames. ffmpeg's messages go
    to `TMP.ffmpeg.log`; on failure its last lines are logged and the
