@@ -78,6 +78,7 @@ a test folder, back up, then work (section "First steps").
 | `snapshot` | versioned backups with rsnapshot | snapshot root on the backup disk |
 | `config` | show or create the configuration file | data directory only |
 | `rename-db` | rename shrink databases to the configured name | database files only |
+| `gui` | window with a tab per task; runs the commands above | `state/gui.json`, optional menu entry |
 
 Shared rules, implemented once in `mediatools.core`:
 
@@ -96,7 +97,7 @@ Everything except the system packages runs as a **normal user**.
 ## Prerequisites
 
 ~~~bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv python3-tk
 ffmpeg -hide_banner -encoders | grep libx265
 ~~~
 
@@ -1140,6 +1141,81 @@ idle I/O priority. Check afterwards:
 systemctl --user status mediatools-snapshot.service
 journalctl --user -u mediatools-snapshot.service -n 50
 ~~~
+
+# gui
+
+## Purpose and layout
+
+`mediatools gui` opens one window with a tab per task. It adds no function
+of its own: every action is a command of the command line, run as a child
+process, or a request file that the command line uses as well (stop,
+reload). Command line and window therefore always behave the same.
+
+![The shrink tab: state of the run, progress, space, log end, start form](img/gui_shrink.png){width=100%}
+
+| Tab | Content |
+|---|---|
+| shrink | state of the running shrink (`status`), progress lines and bar, space of all runs, log end, *Stop*, *Reload*, *Open log*; start form |
+| update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
+| config | editor of `mediatools.ini` (checked before saving) and the effective values |
+| files | `logs/`, `reports/`, `plans/`, `state/`, newest first; viewer; undo plan for flatten |
+
+`status`, `stop` and `reload` are buttons of the shrink tab; `attach` is
+replaced by the tab itself; `config --init/--path/--set` are covered by the
+editor.
+
+![A form: one field per option, the command line, Run and Preview](img/gui_sync.png){width=100%}
+
+## How a command runs
+
+1. The form is built from the argument parser of `mediatools`
+   (`CommandCatalog`): a check box per on/off option, a list for fixed
+   values, an entry for text and numbers with a browse button for files and
+   folders, a text box for options that may be repeated (`--set`).
+2. The command line of the current values is shown; *Copy command* copies
+   it, e.g. to run it later in a terminal.
+3. *Run* checks required fields and numbers. If the command may change
+   files (all except `progress`, `status` and the previews `--dry-run`,
+   `--list`, `--report-only`), a dialog shows the command line and asks.
+4. The command starts as `python -m mediatools ...` with the interpreter of
+   the GUI, i.e. the same release, in its own process group
+   (`JobRunner`). Its output appears live, including questions without a
+   line end (`Continue? [y/N]:`); the *Answer* line sends the reply.
+5. *Cancel* sends SIGINT (like Ctrl+C: the command finishes its current
+   step cleanly); a second click sends SIGTERM.
+6. The exit code is shown at the end; the values are kept in
+   `state/gui.json` for the next start.
+
+`--yes` is an ordinary check box. Without it, the questions of a command
+appear in the output pane and wait for an answer - the GUI never answers
+them by itself.
+
+A shrink started from the GUI moves into the background like on the
+command line (unless `--foreground` is ticked); closing the window does not
+stop it. Commands still running in a tab are interrupted when the window is
+closed, after a question.
+
+## Requirements
+
+| Requirement | Why | Remedy shown by `mediatools gui` |
+|---|---|---|
+| graphical session (`DISPLAY` or `WAYLAND_DISPLAY`) | a window needs a display | start it in a terminal of the desktop, not over SSH |
+| Tk for Python | Debian/Ubuntu ship `tkinter` separately | `sudo apt install python3-tk` |
+
+`sudo` is needed for the package only (apt writes to `/usr`); the GUI runs
+as normal user.
+
+## Application menu
+
+~~~bash
+mediatools gui --install-desktop
+mediatools gui --remove-desktop
+~~~
+
+The entry is `~/.local/share/applications/mediatools.desktop`, the place
+where desktops following the freedesktop.org Desktop Entry Specification
+look for user applications; it starts `~/scripts/mediatools gui`. Both
+commands run as normal user and touch only that file.
 
 # Testing
 

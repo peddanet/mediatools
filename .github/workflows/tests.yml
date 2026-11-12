@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: system tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb
       - name: python tools
         run: pip install -e ".[dev]"
       - name: quality gates (format, lint, types, security, tests)
