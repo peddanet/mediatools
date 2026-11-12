@@ -5,6 +5,17 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-12
+
+### Added
+- Own icon (`gui/icons/mediatools.svg`, PNG 64 and 256 px): window icon of
+  the GUI, and with `mediatools gui --install-desktop` (or the GUI menu
+  *mediatools > Add to application menu*) copied to
+  `~/.local/share/icons/hicolor` (scalable and 256x256). The menu entry
+  uses `Icon=mediatools` and `StartupWMClass=Mediatools`, so the dock or
+  panel shows the running window under the entry; `--remove-desktop`
+  removes entry and icons.
+
 ## [1.4.0] - 2026-11-12
 
 ### Added

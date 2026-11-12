@@ -305,9 +305,16 @@ def test_desktop_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     entry = DesktopEntry('/home/x/scripts/media"tools')
     assert entry.path == str(tmp_path / "share" / "applications" / "mediatools.desktop")
     assert 'Exec="/home/x/scripts/media\\"tools" gui' in entry.text()
+    assert "Icon=mediatools\n" in entry.text() and "StartupWMClass=Mediatools\n" in entry.text()
     assert entry.install() == entry.path and "Type=Application" in \
         Path(entry.path).read_text(encoding="utf-8")
-    assert entry.remove() and not entry.remove()
+    icons = tmp_path / "share" / "icons" / "hicolor"
+    svg = icons / "scalable" / "apps" / "mediatools.svg"
+    png = icons / "256x256" / "apps" / "mediatools.png"
+    assert svg.read_text(encoding="utf-8").startswith("<svg")
+    assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    assert entry.remove() and not svg.exists() and not png.exists()
+    assert not entry.remove()
 
 
 def test_opener(tmp_path: Path) -> None:
