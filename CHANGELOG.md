@@ -5,6 +5,29 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-12
+
+### Added
+- `mediatools gui`: graphical interface (Tk) with a tab per task. The shrink
+  tab shows the running shrink (state, release, progress lines with a
+  progress bar, space of all runs, log end) with *Stop* and *Reload*, and
+  starts new runs. Every other command has a form with a field per option,
+  the command line to copy, *Run* and *Preview* (`--dry-run`, `--list`,
+  `--report-only`), and a live output pane in which questions are
+  answered; *Cancel* acts like Ctrl+C. A configuration editor checks
+  `mediatools.ini` before saving; a file browser shows logs, reports and
+  plans and hands a plan to flatten for an undo. Forms are read from the
+  argument parser, so the GUI always offers the same options as the
+  command line; commands that may change files ask for a confirmation
+  first; the last values per form are kept in `state/gui.json`.
+- `mediatools gui --install-desktop` / `--remove-desktop`: entry in the
+  application menu (`~/.local/share/applications/mediatools.desktop`).
+
+### Changed
+- Test environment: the GUI tests need `python3-tk` and a display;
+  `tools/check.sh` starts itself under `xvfb-run` when no display is
+  available, and the CI installs `xvfb`.
+
 ## [1.2.16] - 2026-11-10
 
 ### Added
