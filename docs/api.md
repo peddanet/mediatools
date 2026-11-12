@@ -60,6 +60,20 @@ Args:
     sub: Sub-parser collection of the main parser.
 ~~~
 
+**`cmd_gui`**
+
+~~~text
+cmd_gui(self, args: argparse.Namespace) -> int
+
+Run ``mediatools gui``: open the window or manage its menu entry.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0 on success, 2 if no window can open.
+~~~
+
 **`main`**
 
 ~~~text
@@ -1687,7 +1701,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.2.16') -> None
+__init__(self, control: RunControl, installed: str = '1.3.0') -> None
 
 Remember the job and the installed release.
 
@@ -1917,7 +1931,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.2.16')
+__init__(self, package_dir: str | None = None, version: str = '1.3.0')
 
 Locate the imported package.
 
@@ -2514,14 +2528,6 @@ Attributes:
     took: Wall-clock seconds spent on the file.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -2668,22 +2674,6 @@ Raises:
     ValueError: If ``order`` is unknown or ``min_seconds`` negative.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -2730,6 +2720,14 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
 ~~~
 
 ### `ShrinkPlanner` (`mediatools.shrink.planner`) {.unnumbered}
@@ -4900,14 +4898,6 @@ Returns:
     The reconstructed plan.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -4946,14 +4936,6 @@ Attributes:
     source: Absolute path of the source file.
     level: Naming level 0..3 of the link name.
     note: Free text, e.g. the reason for ``skip``.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -5749,22 +5731,6 @@ Returns:
     Absolute path of the mirrored source inside ``base``.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -5811,6 +5777,14 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
 ~~~
 
 ### `Snapshotter` (`mediatools.snapshot.snapshotter`) {.unnumbered}
@@ -6356,4 +6330,1409 @@ Run the script in this terminal (it may ask questions).
 
 Returns:
     Exit code of the script.
+~~~
+
+## `mediatools.gui`
+
+### `MediaToolsApp` (`mediatools.gui.app`) {.unnumbered}
+
+~~~text
+One window with a tab per task; every command of the command line.
+
+Tabs: *shrink* (dashboard of the running shrink and the form to start
+one), one tab per further subcommand, *config* (editor of
+``mediatools.ini``) and *files* (logs, reports, plans). ``status``,
+``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
+is replaced by the dashboard. Every command runs as a child process
+with the same interpreter as the GUI; one command per tab may run at a
+time, different tabs may run at the same time.
+
+Attributes:
+    root: Tk main window.
+    catalog: Subcommands read from the argument parser.
+    store: Remembered form values.
+    forms: Command forms by subcommand.
+    tabs: Tab of each command form by subcommand.
+    consoles: Output panes of all tabs.
+    notebook: The tabs.
+    ask: Confirmation dialog, replaceable in tests.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    root: tk.Tk,
+    catalog: CommandCatalog,
+    store: FormStore | None = None,
+    ask: Callable[[str, str], bool] = askyesno,
+    refresh_ms: int = 2000,
+)
+
+Build the window.
+
+Args:
+    root: Tk main window.
+    catalog: Subcommands of the command line.
+    store: Remembered form values; the default file if None.
+    ask: Confirmation dialog (title, text) -> yes.
+    refresh_ms: Refresh interval of the shrink dashboard (0: manual).
+~~~
+
+**`_menu`**
+
+~~~text
+_menu(self) -> None
+
+Build the menu bar.
+~~~
+
+**`program_path`**
+
+~~~text
+program_path() -> str
+
+Return the program the application menu entry starts.
+
+Returns:
+    ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+    the search path, else this interpreter's script.
+~~~
+
+**`about_text`**
+
+~~~text
+about_text(self) -> str
+
+Return the text of the About dialog.
+
+Returns:
+    Version, data folder and interpreter.
+~~~
+
+**`about`**
+
+~~~text
+about(self) -> None
+
+Show version and locations.
+~~~
+
+**`install_desktop`**
+
+~~~text
+install_desktop(self) -> None
+
+Write the application menu entry.
+~~~
+
+**`remove_desktop`**
+
+~~~text
+remove_desktop(self) -> None
+
+Remove the application menu entry.
+~~~
+
+**`undo_plan`**
+
+~~~text
+undo_plan(self, plan: str) -> None
+
+Put a plan file into the flatten form and show that tab.
+
+Args:
+    plan: Plan file in ``plans/``.
+~~~
+
+**`running`**
+
+~~~text
+running(self) -> list[ConsoleView]
+
+Return the panes whose command still runs.
+
+Returns:
+    Output panes with a running command.
+~~~
+
+**`close`**
+
+~~~text
+close(self) -> bool
+
+Close the window; running commands are interrupted after a question.
+
+A shrink in the background is not affected: it is not a child of
+the GUI once it has moved into the background.
+
+Returns:
+    True if the window was closed.
+~~~
+
+### `CommandCatalog` (`mediatools.gui.catalog`) {.unnumbered}
+
+~~~text
+Reads the subcommands and their options from the argument parser.
+
+The GUI does not repeat any option of the command line: it reads them
+from the parser that ``mediatools`` itself uses. A new option in the
+command line therefore appears in the GUI without a change here.
+argparse offers no public interface for this, so the reading relies on
+its long-stable attributes ``_actions`` and ``_choices_actions``; the
+tests check every subcommand, so a change in argparse is noticed.
+
+Attributes:
+    parser: The argument parser of ``mediatools``.
+    program: Words that start a command line.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, parser: argparse.ArgumentParser, program: list[str] | None = None)
+
+Remember the parser.
+
+Args:
+    parser: The argument parser of ``mediatools``.
+    program: Words that start a command line; ``["mediatools"]`` if None.
+~~~
+
+**`_subparsers`**
+
+~~~text
+_subparsers(parser: argparse.ArgumentParser) -> argparse.Action
+
+Return the subcommand action of a parser.
+
+Args:
+    parser: Main parser.
+
+Returns:
+    The action that holds the subcommand parsers.
+
+Raises:
+    ValueError: If the parser has no subcommands.
+~~~
+
+**`option`**
+
+~~~text
+option(action: argparse.Action) -> OptionSpec | None
+
+Describe one parser action as a form field.
+
+Args:
+    action: Action of a subcommand parser.
+
+Returns:
+    The description, or None for help and hidden options.
+~~~
+
+**`commands`**
+
+~~~text
+commands(self) -> list[CommandSpec]
+
+Return all subcommands in the order of ``mediatools --help``.
+
+Returns:
+    One description per subcommand; aliases and :attr:`SKIP` left out.
+~~~
+
+**`command`**
+
+~~~text
+command(self, name: str) -> CommandSpec
+
+Return one subcommand.
+
+Args:
+    name: Subcommand name.
+
+Returns:
+    Its description.
+
+Raises:
+    KeyError: If there is no such subcommand.
+~~~
+
+### `CommandForm` (`mediatools.gui.commandform`) {.unnumbered}
+
+~~~text
+Shows every option of a subcommand as a field and runs the command.
+
+Fields: a check box for on/off options, a list for options with fixed
+values, an entry for text and numbers (with a browse button for files
+and folders), a text box with one value per line for options that may
+be given several times. The command line that will run is always shown
+and can be copied. *Preview* runs the command with its read-only option
+(``--dry-run``, ``--list``, ``--report-only``). A command that may
+change files runs only after a confirmation that shows its command line.
+The values of the last run are remembered (:class:`FormStore`).
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    spec: The subcommand.
+    console: Output pane.
+    store: Remembered values, or None.
+    variables: Tk variables (or text boxes) by ``dest``.
+    line: Text of the command-line preview.
+    ask: Confirmation dialog, replaceable in tests.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    spec: CommandSpec,
+    console: ConsoleView,
+    store: FormStore | None = None,
+    ask: Callable[[str, str], bool] = askyesno,
+)
+
+Build the form.
+
+Args:
+    master: Parent widget.
+    spec: The subcommand.
+    console: Output pane that runs the command.
+    store: Remembered values, or None.
+    ask: Confirmation dialog (title, text) -> yes.
+~~~
+
+**`_field`**
+
+~~~text
+_field(self, row: int, option: OptionSpec, value: object) -> None
+
+Add the field of one option.
+
+Args:
+    row: Grid row.
+    option: The option.
+    value: Initial value.
+~~~
+
+**`_help`**
+
+~~~text
+_help(self, row: int, option: OptionSpec) -> None
+
+Show the help text of an option next to its field.
+
+Args:
+    row: Grid row.
+    option: The option.
+~~~
+
+**`values`**
+
+~~~text
+values(self) -> dict[str, object]
+
+Return the current field values.
+
+Returns:
+    Values by ``dest``.
+~~~
+
+**`set_value`**
+
+~~~text
+set_value(self, dest: str, value: object) -> None
+
+Set one field (used by other panels, e.g. a plan for undo).
+
+Args:
+    dest: Field name.
+    value: New value.
+~~~
+
+**`update_line`**
+
+~~~text
+update_line(self) -> None
+
+Show the command line of the current values.
+~~~
+
+**`preview_option`**
+
+~~~text
+preview_option(self) -> str | None
+
+Return the read-only option of this command.
+
+Returns:
+    ``--dry-run``, ``--list`` or ``--report-only``, or None.
+~~~
+
+**`browse`**
+
+~~~text
+browse(self, option: OptionSpec) -> None
+
+Choose a file or folder for a path field.
+
+Args:
+    option: The path option.
+~~~
+
+**`copy`**
+
+~~~text
+copy(self) -> None
+
+Copy the command line to the clipboard.
+~~~
+
+**`reset`**
+
+~~~text
+reset(self) -> None
+
+Set all fields to the defaults of the command line.
+~~~
+
+**`preview`**
+
+~~~text
+preview(self) -> bool
+
+Run the command with its read-only option.
+
+Returns:
+    True if the command was started.
+~~~
+
+**`run`**
+
+~~~text
+run(self) -> bool
+
+Run the command with the current values.
+
+Returns:
+    True if the command was started.
+~~~
+
+**`_start`**
+
+~~~text
+_start(self, values: dict[str, object]) -> bool
+
+Check, confirm, remember and start.
+
+Args:
+    values: Values by ``dest``.
+
+Returns:
+    True if the command was started.
+~~~
+
+### `CommandSpec` (`mediatools.gui.commandspec`) {.unnumbered}
+
+~~~text
+A subcommand of the command line and the form that runs it.
+
+Attributes:
+    name: Subcommand, e.g. ``shrink``.
+    help: Short help of the subcommand.
+    options: Its arguments in command-line order (positionals first).
+    program: Words that start the command line, e.g. ``["mediatools"]``.
+~~~
+
+**`option`**
+
+~~~text
+option(self, label: str) -> OptionSpec | None
+
+Return the argument with a label, e.g. ``--dry-run``.
+
+Args:
+    label: Long option or positional name.
+
+Returns:
+    The argument, or None if the command has none of that name.
+~~~
+
+**`argv`**
+
+~~~text
+argv(self, values: dict[str, object]) -> list[str]
+
+Build the arguments after the program name.
+
+Args:
+    values: Form values by ``dest``; missing ones count as not given.
+
+Returns:
+    Subcommand and its words, e.g. ``["shrink", "/data", "--crf", "26"]``.
+
+Raises:
+    ValueError: If a required argument is missing or a number is invalid.
+~~~
+
+**`command_line`**
+
+~~~text
+command_line(self, values: dict[str, object]) -> str
+
+Return the equivalent shell command, quoted for copying.
+
+Args:
+    values: Form values by ``dest``.
+
+Returns:
+    Text such as ``mediatools shrink /data --crf 26``.
+~~~
+
+**`changes_data`**
+
+~~~text
+changes_data(self, values: dict[str, object]) -> bool
+
+Tell whether a run may change files (and needs a confirmation).
+
+Args:
+    values: Form values by ``dest``.
+
+Returns:
+    False for read-only commands and previews, else True.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    name: str,
+    help: str = '',
+    options: list[OptionSpec] = <factory>,
+    program: list[str] = <factory>,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `ConfigPanel` (`mediatools.gui.configpanel`) {.unnumbered}
+
+~~~text
+Edits the INI file with its comments; shows the effective values.
+
+The left area holds the file as it is (comments included); *Save*
+checks it with the same INI parser that mediatools uses and writes it
+only if it can be read. The right area shows the effective values,
+i.e. the file plus the defaults of all keys it does not set.
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    config_factory: Creates a :class:`Config` (replaceable in tests).
+    opener: Opens the folder of the file.
+    editor: Text of the file.
+    effective: Effective values (read-only).
+    message: Result of the last button.
+    path: Location of the file.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, master: tk.Misc, config_factory=Config, opener: Opener | None = None)
+
+Build the editor and load the file.
+
+Args:
+    master: Parent widget.
+    config_factory: Callable without arguments that returns a :class:`Config`.
+    opener: Opener for the folder; ``xdg-open`` if None.
+~~~
+
+**`load`**
+
+~~~text
+load(self) -> None
+
+Show the file (or the template if it is missing) and the effective values.
+~~~
+
+**`save`**
+
+~~~text
+save(self) -> bool
+
+Check the edited text and write it.
+
+Returns:
+    True if the file was written.
+~~~
+
+**`create`**
+
+~~~text
+create(self) -> None
+
+Write the commented template if the file does not exist.
+~~~
+
+**`open_folder`**
+
+~~~text
+open_folder(self) -> None
+
+Open the folder of the file.
+~~~
+
+### `ConsoleView` (`mediatools.gui.consoleview`) {.unnumbered}
+
+~~~text
+Shows the output of one command as it arrives and lets the user answer.
+
+Questions of the command (``[y/N]``, a choice of versions or disks)
+are answered in the input line; Enter sends the answer. *Cancel* acts
+like Ctrl+C in a terminal, a second click terminates the command.
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    runner: Runs the command.
+    text: Output area (read-only).
+    answer: Input line for answers.
+    state: Text of the status line.
+    on_finish: Called with the exit code when a command ends, or None.
+    poll_ms: Interval of output checks in milliseconds.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    runner: JobRunner | None = None,
+    on_finish: Callable[[int], None] | None = None,
+    poll_ms: int = 100,
+    height: int = 12,
+)
+
+Build the pane.
+
+Args:
+    master: Parent widget.
+    runner: Runner to use; a new one if None.
+    on_finish: Called with the exit code when a command ends.
+    poll_ms: Interval of output checks in milliseconds.
+    height: Height of the output area in lines.
+~~~
+
+**`write`**
+
+~~~text
+write(self, text: str) -> None
+
+Append text to the output area and scroll to it.
+
+Args:
+    text: Text to append.
+~~~
+
+**`clear`**
+
+~~~text
+clear(self) -> None
+
+Empty the output area.
+~~~
+
+**`run`**
+
+~~~text
+run(self, args: list[str], shown: str) -> bool
+
+Start a command and follow its output.
+
+Args:
+    args: Words after the program name.
+    shown: Command line shown above the output.
+
+Returns:
+    False if a command of this pane still runs.
+~~~
+
+**`poll`**
+
+~~~text
+poll(self) -> None
+
+Show new output; report the exit code at the end.
+~~~
+
+**`send`**
+
+~~~text
+send(self) -> None
+
+Send the input line to the running command.
+~~~
+
+**`cancel`**
+
+~~~text
+cancel(self) -> None
+
+Interrupt the running command.
+~~~
+
+### `DesktopEntry` (`mediatools.gui.desktopentry`) {.unnumbered}
+
+~~~text
+Writes or removes ``mediatools.desktop`` for the application menu.
+
+Desktop environments (GNOME, COSMIC, KDE ...) list the applications
+whose ``.desktop`` files lie in ``~/.local/share/applications``
+(freedesktop.org Desktop Entry Specification). The file is written only
+on request (``mediatools gui --install-desktop``); it starts the
+installed program, normally the link ``~/scripts/mediatools``.
+
+Attributes:
+    path: Location of the ``.desktop`` file.
+    program: Program started by the entry.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, program: str, path: str | None = None)
+
+Prepare the entry.
+
+Args:
+    program: Absolute path of the ``mediatools`` program.
+    path: Location of the file; the user's application folder if None.
+~~~
+
+**`text`**
+
+~~~text
+text(self) -> str
+
+Return the content of the file.
+
+Returns:
+    A Desktop Entry of type Application.
+~~~
+
+**`install`**
+
+~~~text
+install(self) -> str
+
+Write the file.
+
+Returns:
+    Its location.
+~~~
+
+**`remove`**
+
+~~~text
+remove(self) -> bool
+
+Remove the file.
+
+Returns:
+    True if a file was removed.
+~~~
+
+### `FilesPanel` (`mediatools.gui.filespanel`) {.unnumbered}
+
+~~~text
+Lists the files below the data folder and shows the selected one.
+
+Folders: ``logs`` (one log per run), ``reports`` (progress lists, sync
+reports), ``plans`` (flatten plans, usable for undo) and ``state``.
+The newest files come first. Large files are shown from their end.
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    root: Data folder.
+    opener: Opens files and folders.
+    on_undo: Called with a plan file for *Use as flatten undo plan*, or None.
+    tree: List of folders and files.
+    viewer: Content of the selected file.
+    message: Result of the last button.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    root: str | None = None,
+    opener: Opener | None = None,
+    on_undo: Callable[[str], None] | None = None,
+)
+
+Build the browser and list the files.
+
+Args:
+    master: Parent widget.
+    root: Data folder; the mediatools data folder if None.
+    opener: Opener for files and folders; ``xdg-open`` if None.
+    on_undo: Called with a plan file for an undo, or None.
+~~~
+
+**`size_text`**
+
+~~~text
+size_text(size: int) -> str
+
+Format a file size.
+
+Args:
+    size: Bytes.
+
+Returns:
+    Text such as ``1.5 MiB``.
+~~~
+
+**`refresh`**
+
+~~~text
+refresh(self) -> None
+
+List the folders and their files, newest first.
+~~~
+
+**`selected`**
+
+~~~text
+selected(self) -> str | None
+
+Return the selected path.
+
+Returns:
+    File or folder path, or None if nothing is selected.
+~~~
+
+**`show_selected`**
+
+~~~text
+show_selected(self) -> None
+
+Show the selected file (its end if it is large).
+~~~
+
+**`open_selected`**
+
+~~~text
+open_selected(self) -> None
+
+Open the selected file or folder with the desktop's application.
+~~~
+
+**`use_as_undo`**
+
+~~~text
+use_as_undo(self) -> None
+
+Hand the selected plan file to the flatten form for an undo.
+~~~
+
+### `FormStore` (`mediatools.gui.formstore`) {.unnumbered}
+
+~~~text
+Keeps the values of each command form in ``<data>/state/gui.json``.
+
+A form opens with the values of its last run, so a repeated command
+needs only a click. The file holds no secrets: only what was entered
+in the forms (paths and options). A damaged file is ignored.
+
+Attributes:
+    path: Location of the JSON file.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str | None = None)
+
+Choose the file.
+
+Args:
+    path: JSON file; ``<data>/state/gui.json`` if None.
+~~~
+
+**`_all`**
+
+~~~text
+_all(self) -> dict[str, dict[str, object]]
+
+Read the whole file.
+
+Returns:
+    Values by command; empty if the file is missing or damaged.
+~~~
+
+**`load`**
+
+~~~text
+load(self, command: str) -> dict[str, object]
+
+Return the remembered values of a command.
+
+Args:
+    command: Subcommand name.
+
+Returns:
+    Values by ``dest``; empty if none are remembered.
+~~~
+
+**`save`**
+
+~~~text
+save(self, command: str, values: dict[str, object]) -> None
+
+Remember the values of a command (atomic replace).
+
+Args:
+    command: Subcommand name.
+    values: Values by ``dest``.
+~~~
+
+### `JobRunner` (`mediatools.gui.jobrunner`) {.unnumbered}
+
+~~~text
+Starts a command as a child process and streams its output.
+
+The GUI runs every command as ``python -m mediatools ...`` with the
+same interpreter, so it uses the same release as the GUI itself and
+behaves exactly like the command line. Output (standard output and
+error together) arrives in pieces through :meth:`poll`, also text
+without a line end, so that questions such as ``Continue? [y/N]:``
+are shown at once; :meth:`send` answers them. The child runs in its
+own process group: :meth:`cancel` sends SIGINT first (the command
+finishes cleanly, like Ctrl+C), a second call SIGTERM.
+
+Attributes:
+    program: Words that start a command, by default this interpreter
+        with ``-m mediatools``.
+    process: The running child, or None.
+    output: Pieces of output not yet fetched by :meth:`poll`.
+    cancels: Number of :meth:`cancel` calls for the current child.
+    reader: Thread that reads the child's output.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, program: list[str] | None = None)
+
+Prepare a runner.
+
+Args:
+    program: Words that start a command; ``[python, -m, mediatools]`` if None.
+~~~
+
+**`running`**
+
+~~~text
+running(self) -> bool
+
+True while a child runs.
+~~~
+
+**`start`**
+
+~~~text
+start(self, args: list[str]) -> None
+
+Start a command.
+
+Args:
+    args: Words after the program, e.g. ``["shrink", "-y"]``.
+
+Raises:
+    RuntimeError: If a command of this runner still runs.
+~~~
+
+**`_read`**
+
+~~~text
+_read(self, process: subprocess.Popen[bytes]) -> None
+
+Move the output of a child into :attr:`output` (reader thread).
+
+Args:
+    process: The child.
+~~~
+
+**`poll`**
+
+~~~text
+poll(self) -> tuple[str, int | None]
+
+Fetch new output and the exit code.
+
+Returns:
+    New text (possibly empty) and the exit code, or None while the
+    command runs or its output is not completely read yet.
+~~~
+
+**`send`**
+
+~~~text
+send(self, text: str) -> None
+
+Answer a question of the running command.
+
+Args:
+    text: The answer; a line end is added.
+
+Raises:
+    RuntimeError: If no command runs.
+~~~
+
+**`cancel`**
+
+~~~text
+cancel(self) -> str
+
+Ask the running command to end.
+
+Returns:
+    What was done, for the GUI.
+~~~
+
+**`wait`**
+
+~~~text
+wait(self, timeout: float | None = None) -> int | None
+
+Wait for the child and its output (used by tests and on exit).
+
+Args:
+    timeout: Seconds to wait at most; None waits without limit.
+
+Returns:
+    The exit code, or None if no command was started.
+~~~
+
+### `GuiLauncher` (`mediatools.gui.launcher`) {.unnumbered}
+
+~~~text
+Checks display and Tk, then opens the main window.
+
+Tk is part of Python, but Debian and Ubuntu ship it as a separate
+package (``python3-tk``); without it ``import tkinter`` fails. The
+launcher reports that with the command that installs it instead of a
+traceback. Without a graphical session (``DISPLAY`` or
+``WAYLAND_DISPLAY``) no window can open, e.g. over SSH.
+
+Attributes:
+    parser: Argument parser of ``mediatools`` (source of the forms).
+    program: Program the application menu entry starts.
+    environ: Environment to check (replaceable in tests).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    parser: argparse.ArgumentParser,
+    program: str,
+    environ: dict[str, str] | None = None,
+)
+
+Prepare the launcher.
+
+Args:
+    parser: Argument parser of ``mediatools``.
+    program: Program the application menu entry starts.
+    environ: Environment; ``os.environ`` if None.
+~~~
+
+**`problem`**
+
+~~~text
+problem(self) -> str | None
+
+Return why no window can open.
+
+Returns:
+    Explanation with the remedy, or None if a window can open.
+~~~
+
+**`run`**
+
+~~~text
+run(self, install_desktop: bool = False, remove_desktop: bool = False) -> int
+
+Handle the menu entry options or open the window.
+
+Args:
+    install_desktop: Write the application menu entry and end.
+    remove_desktop: Remove the application menu entry and end.
+
+Returns:
+    Process exit code.
+~~~
+
+### `Opener` (`mediatools.gui.opener`) {.unnumbered}
+
+~~~text
+Hands a path to ``xdg-open`` (file manager, text editor, player).
+
+Attributes:
+    program: The opener program, or None if it is not installed.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, program: str | None = None)
+
+Find the opener.
+
+Args:
+    program: Opener to use; ``xdg-open`` from the search path if None.
+~~~
+
+**`open`**
+
+~~~text
+open(self, path: str) -> str
+
+Open a path without waiting for the application.
+
+Args:
+    path: File or folder.
+
+Returns:
+    Message for the GUI.
+~~~
+
+### `OptionSpec` (`mediatools.gui.optionspec`) {.unnumbered}
+
+~~~text
+Describes one command-line argument for a form field.
+
+The GUI builds its forms from the argument parser of the command line
+(see :class:`~mediatools.gui.catalog.CommandCatalog`), so every option
+of the command line is available in the GUI and both always agree.
+
+Attributes:
+    dest: Name of the parsed value, e.g. ``keep_copies``.
+    flags: Option strings, e.g. ``["--keep-copies"]``; empty for a
+        positional argument.
+    help: Help text of the command line.
+    kind: ``flag`` (on/off), ``choice``, ``int``, ``float``, ``text``
+        or ``list`` (option that may be given several times).
+    choices: Allowed values of a ``choice``.
+    default: Default value of the command line, or None.
+    required: A positional argument that must be given.
+    path: The value is a file or directory (the form offers a browser).
+~~~
+
+**`positional`**
+
+~~~text
+positional(self) -> bool
+
+True for a positional argument.
+~~~
+
+**`label`**
+
+~~~text
+label(self) -> str
+
+Label of the form field: the long option or the argument name.
+~~~
+
+**`to_argv`**
+
+~~~text
+to_argv(self, value: object) -> list[str]
+
+Translate a form value into command-line words.
+
+Args:
+    value: Value of the form field: bool for a flag, list for a
+        ``list`` option, else text; empty text means "not given".
+
+Returns:
+    The words to append, possibly none.
+
+Raises:
+    ValueError: If a number field holds no number.
+~~~
+
+**`initial`**
+
+~~~text
+initial(self) -> object
+
+Return the value a new form shows.
+
+Returns:
+    False for flags, an empty list for ``list`` options, else the
+    default of the command line as text (empty if none).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    dest: str,
+    flags: list[str] = <factory>,
+    help: str = '',
+    kind: str = 'text',
+    choices: list[str] = <factory>,
+    default: object = None,
+    required: bool = False,
+    path: bool = False,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `ShrinkMonitor` (`mediatools.gui.shrinkmonitor`) {.unnumbered}
+
+~~~text
+Reads the files that a shrink run maintains, without touching it.
+
+The same files serve ``mediatools status`` and ``attach``: the PID file
+(process and log), the status file (progress lines) and
+``shrink_throughput.json`` (sizes of all runs). Stop and reload are
+requests by file, exactly as the command line makes them.
+
+Attributes:
+    control: Run control of the shrink job.
+    throughput_path: Location of ``shrink_throughput.json``, or None for
+        the default.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, control: RunControl | None = None, throughput_path: str | None = None)
+
+Prepare the monitor.
+
+Args:
+    control: Run control; the one of ``shrink`` if None.
+    throughput_path: ``shrink_throughput.json``; the default if None.
+~~~
+
+**`read`**
+
+~~~text
+read(self) -> ShrinkReading
+
+Read the current state.
+
+Returns:
+    The state; ``pid`` is None if no shrink runs.
+~~~
+
+**`tail`**
+
+~~~text
+tail(path: str | None, lines: int = 400, chunk: int = 65536) -> list[str]
+
+Return the last lines of a log file.
+
+Args:
+    path: Log file, or None.
+    lines: Number of lines to return at most.
+    chunk: Bytes read from the end of the file.
+
+Returns:
+    The lines without line ends; empty if the file is missing.
+~~~
+
+**`stop`**
+
+~~~text
+stop(self) -> str
+
+Ask the running shrink to stop after its current file.
+
+Returns:
+    Message for the GUI.
+~~~
+
+**`reload`**
+
+~~~text
+reload(self) -> str
+
+Ask the running shrink to switch to the installed release.
+
+Returns:
+    Message for the GUI.
+~~~
+
+### `ShrinkPanel` (`mediatools.gui.shrinkpanel`) {.unnumbered}
+
+~~~text
+Shows the running shrink like ``status`` and ``attach`` together.
+
+It refreshes itself every :attr:`refresh_ms` milliseconds: process and
+release (``mediatools status``), the progress lines with a progress toolbar,
+the space read, written and freed by all runs, and the end of the log.
+*Stop* and *Reload* make the same requests as ``mediatools stop`` and
+``mediatools reload``; the run itself continues independently of the
+GUI, which may be closed at any time.
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    monitor: Reads the state of the run.
+    opener: Opens the log in the desktop's text viewer.
+    refresh_ms: Refresh interval in milliseconds.
+    report: Text of the status report.
+    progress: Text of the progress lines.
+    overall: Text of the overall space line.
+    meter: Progress toolbar (percent of the run).
+    log: Area with the end of the log.
+    message: Result of the last button.
+    log_path: Log file of the shown run, or None.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    monitor: ShrinkMonitor | None = None,
+    opener: Opener | None = None,
+    refresh_ms: int = 2000,
+)
+
+Build the dashboard and start refreshing.
+
+Args:
+    master: Parent widget.
+    monitor: State reader; one for ``shrink`` if None.
+    opener: Opener for the log file; ``xdg-open`` if None.
+    refresh_ms: Refresh interval in milliseconds (0: no automatic refresh).
+~~~
+
+**`refresh`**
+
+~~~text
+refresh(self) -> None
+
+Read the state and show it; schedule the next refresh.
+~~~
+
+**`stop`**
+
+~~~text
+stop(self) -> None
+
+Request a stop after the current file.
+~~~
+
+**`reload`**
+
+~~~text
+reload(self) -> None
+
+Request a switch to the installed release.
+~~~
+
+**`open_log`**
+
+~~~text
+open_log(self) -> None
+
+Open the log of the run in the desktop's viewer.
+~~~
+
+### `ShrinkReading` (`mediatools.gui.shrinkreading`) {.unnumbered}
+
+~~~text
+One reading of the shrink run.
+
+Attributes:
+    pid: Process ID of the running shrink, or None.
+    report: Lines of ``mediatools status``.
+    progress: Progress lines of the status file (two or three).
+    percent: Overall percentage from the first progress line, or None.
+    log_path: Log file of the run, or None.
+    overall: Read, written and freed space of all runs so far.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    pid: int | None = None,
+    report: list[str] = <factory>,
+    progress: list[str] = <factory>,
+    percent: float | None = None,
+    log_path: str | None = None,
+    overall: str = '',
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
 ~~~

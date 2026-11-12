@@ -133,9 +133,10 @@ Everything except the system packages in step 1 runs as a **normal user**.
 | rsnapshot ≥ 1.4 | snapshot | `rsnapshot` |
 | git, Python venv module | installation option A | `git`, `python3-venv` |
 | pipx | installation option B | `pipx` |
+| Tk for Python | gui | `python3-tk` |
 
 ```bash
-sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv
+sudo apt install ffmpeg vlc libglib2.0-bin rsync rsnapshot git python3-venv python3-tk
 ffmpeg -hide_banner -encoders | grep libx265      # must print a libx265 line
 ```
 
@@ -240,6 +241,48 @@ mediatools flatten                       # create the flat hard-link views
 Every command also accepts an explicit path instead of `[collection] root`.
 
 ## Subcommands
+
+### gui
+
+`mediatools gui` opens a window with a tab per task; everything the
+command line can do, the window can do as well:
+
+![mediatools gui: the shrink tab](docs/img/gui_shrink.png)
+
+* **shrink**: the state of the running shrink (as `status` and `attach`
+  show it), its progress lines with a progress bar, the space read, written
+  and freed by all runs, the end of its log, and the buttons *Stop after
+  current file* and *Reload installed release*. Below, the form that starts
+  a shrink. The shrink keeps running when the window is closed.
+* **update, progress, triage, flatten, sync, rename-db, snapshot**: one form
+  each with a field per option, the command line that will run (*Copy
+  command* puts it on the clipboard), *Run*, and *Preview* for commands
+  with `--dry-run`, `--list` or `--report-only`.
+* **config**: editor of `mediatools.ini` with its comments; *Save* checks
+  the file before writing; the effective values (file + defaults) beside it.
+* **files**: logs, reports, flatten plans and state files of the data
+  directory, newest first; *Use as flatten undo plan* puts a plan into the
+  flatten form.
+
+The forms are read from the command line itself, so they always have the
+same options. Every command runs as `python -m mediatools ...` with the
+interpreter of the GUI and shows its output live; questions such as
+`[y/N]` are answered in the *Answer* line. *Cancel* acts like Ctrl+C, a
+second click terminates the command. A command that may change files
+starts only after a confirmation that shows its command line. The values of
+the last run of each form are kept in `state/gui.json`.
+
+```bash
+mediatools gui                    # open the window
+mediatools gui --install-desktop  # add mediatools to the application menu
+mediatools gui --remove-desktop   # remove it again
+```
+
+The menu entry is the file `~/.local/share/applications/mediatools.desktop`
+(freedesktop.org standard); it starts `~/scripts/mediatools gui`. The GUI
+needs a graphical session and the package `python3-tk`
+(`sudo apt install python3-tk`); without them `mediatools gui` says what is
+missing.
 
 ### shrink
 
