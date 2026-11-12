@@ -258,6 +258,8 @@ command line can do, the window can do as well:
   each with a field per option, the command line that will run (*Copy
   command* puts it on the clipboard), *Run*, and *Preview* for commands
   with `--dry-run`, `--list` or `--report-only`.
+* **savings**: freed space per session or per day, newest first, and the
+  total since the first shrunk file.
 * **config**: editor of `mediatools.ini` with its comments; *Save* checks
   the file before writing; the effective values (file + defaults) beside it.
 * **files**: logs, reports, flatten plans and state files of the data
@@ -318,16 +320,19 @@ mediatools status        # running? which release, current or not, which log
 Three progress lines show the whole run (percentage by volume, files,
 source GiB, remaining time), the current file (percentage, size, encoded
 part, remaining time) and the disk space (read, written and freed, for this
-run and overall); the speed is measured in this and earlier runs:
+session and for all sessions); the speed is measured in this and earlier runs:
 
 ~~~text
 total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB source | ETA 9d23h
 file   35 % of 2.40 GiB (0.84 GiB encoded) | 17m left | example_clip.mp4
-space  this run: 189.2 GiB read -> 30.3 GiB written = 158.9 GiB freed | overall: ...
+space  session since 2026-11-12 04:56: 32.6 GiB read -> 5.2 GiB written = 27.4 GiB freed | since 2026-10-20: ...
 ~~~
 
 The GiB of the first line are what was *read*, not what was freed, and
-they count this run only; the space line tells the two apart.
+they count this process only; the space line tells the two apart. A session
+lasts from `mediatools shrink` until the run ends and survives `mediatools
+reload`. `mediatools savings` lists the freed space per session
+(`--by day`: per day), read from the shrink logs.
 
 Each finished video adds a row to a framed result table (terminal and
 `reports/shrink_results_<ts>.txt`); long paths wrap inside their cell:

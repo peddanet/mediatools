@@ -5,6 +5,24 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-12
+
+### Added
+- `mediatools savings [--by session|day]`: freed space per shrink session
+  or per calendar day, with files, read, written, freed and output share,
+  and the total since the first shrunk file. Source: the result tables of
+  the shrink logs (no new data file; works for all logs back to the first
+  release with result tables).
+- GUI tab *savings*: the same table, per session or per day, newest first.
+
+### Changed
+- Space line of the progress display and of the GUI shrink tab:
+  `session since <start>` (everything shrunk since the session started; a
+  session survives `mediatools reload`) and `since <date>` (all sessions)
+  instead of `this run` (reset by every reload) and `overall`
+  (`shrink_throughput.json`, without a start date). Without a running
+  shrink the GUI shows the last session.
+
 ## [1.3.0] - 2026-11-12
 
 ### Added

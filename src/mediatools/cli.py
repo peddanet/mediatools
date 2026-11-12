@@ -27,6 +27,8 @@ from mediatools.gui.launcher import GuiLauncher
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
                                ShrinkOptions)
 from mediatools.shrink.resulttable import ResultTable
+from mediatools.shrink.savingslog import SavingsLog
+from mediatools.shrink.spacetally import SpaceTally
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
 from mediatools.update import ReleaseUpdater
@@ -195,6 +197,11 @@ class Cli:
         cmd.add_argument("-y", "--yes", action="store_true",
                          help="run: no questions; abort instead of asking")
 
+        cmd = sub.add_parser("savings", help="space freed by shrinking per session or per "
+                                             "day, from the shrink logs (read-only)")
+        cmd.add_argument("--by", choices=("session", "day"), default="session",
+                         help="one row per shrink session (default) or per calendar day")
+
         cmd = sub.add_parser("gui", help="graphical interface for all commands")
         group = cmd.add_mutually_exclusive_group()
         group.add_argument("--install-desktop", action="store_true",
@@ -203,6 +210,20 @@ class Cli:
                            help="remove mediatools from the application menu and end")
 
     # -- dispatch --------------------------------------------------------
+    @staticmethod
+    def cmd_savings(args: argparse.Namespace) -> int:
+        """Run ``mediatools savings``: freed space per session or per day.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0.
+        """
+        for line in SavingsLog(DataDir().sub("logs")).report(args.by):
+            print(line)
+        return 0
+
     def cmd_gui(self, args: argparse.Namespace) -> int:
         """Run ``mediatools gui``: open the window or manage its menu entry.
 
@@ -311,6 +332,8 @@ class Cli:
         shrinker.state["results"] = ResultTable(
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
+        shrinker.state["space"] = SpaceTally.from_logs(SavingsLog(DataDir().sub("logs")),
+                                                       run.path)
         shrinker.state["decode"] = DecodeCheck()
         shrinker.state["ffmpeg_logs"] = os.path.join(DataDir().sub("logs"), "ffmpeg")
         restart = SelfRestart(self.argv, run.path)

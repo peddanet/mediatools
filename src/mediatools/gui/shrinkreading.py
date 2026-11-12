@@ -14,7 +14,8 @@ class ShrinkReading:
         progress: Progress lines of the status file (two or three).
         percent: Overall percentage from the first progress line, or None.
         log_path: Log file of the run, or None.
-        overall: Read, written and freed space of all runs so far.
+        overall: Space line: read, written and freed in this (or the last)
+            session and in all sessions.
     """
 
     pid: int | None = None

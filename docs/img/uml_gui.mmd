@@ -166,10 +166,19 @@ classDiagram
     +initial()
     +init(dest, flags, help, kind, choices, default, required, path)
   }
+  class SavingsPanel {
+    +frame
+    +logs
+    +by
+    +tree
+    +total
+    +init(master, logs)
+    +refresh()
+  }
   class ShrinkMonitor {
     +control
-    +throughput_path
-    +init(control, throughput_path)
+    +logs
+    +init(control, logs)
     +read()
     +tail(path, lines, chunk)
     +stop()
@@ -209,6 +218,7 @@ classDiagram
   MediaToolsApp ..> DesktopEntry
   MediaToolsApp --> FilesPanel
   MediaToolsApp --> FormStore
+  MediaToolsApp --> SavingsPanel
   MediaToolsApp --> ShrinkPanel
   CommandCatalog ..> CommandSpec
   CommandCatalog ..> OptionSpec
