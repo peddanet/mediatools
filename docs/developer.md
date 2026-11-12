@@ -194,6 +194,8 @@ directory, configuration -- lives in `core`.
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
 | `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
+| `SpaceTally` | read, written and freed space of the session and of all sessions (space line) |
+| `SavingsLog`, `Savings` | freed space per session, per day and in total, read from the result tables of the shrink logs (`mediatools savings`) |
 | `ShrinkState` | typed collection of the run helpers (caches, throughput, result table, trial decode) |
 | `FileResult` | outcome of one video (status, sizes, times) |
 | `ResultTable` | framed per-file result table: terminal, log, `reports/shrink_results_<ts>.txt` |
@@ -269,9 +271,9 @@ directory, configuration -- lives in `core`.
 | `ShrinkMonitor`, `ShrinkReading` | reads PID file, status file, log end and throughput totals; stop and reload requests |
 | `FormStore` | last values per form in `state/gui.json` |
 | `DesktopEntry`, `Opener` | menu entry (`.desktop`), `xdg-open` |
-| `MediaToolsApp` | main window: a tab per command, config editor, file browser |
+| `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
-| `ShrinkPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, INI editor, data folder browser |
+| `ShrinkPanel`, `SavingsPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, savings table, INI editor, data folder browser |
 
 The GUI has no function of its own. It runs the command line as child
 processes (`JobRunner`) or makes the same request files (`RunControl`), so

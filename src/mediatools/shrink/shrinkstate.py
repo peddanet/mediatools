@@ -26,7 +26,7 @@ class ShrinkState(TypedDict):
             None (they are deleted).
         restart: Switch to a newly installed release on request, or None
             (requests are ignored).
-        space: Space read, written and freed, this run and overall.
+        space: Space read, written and freed, this session and overall.
     """
 
     durations: DurationCache | None

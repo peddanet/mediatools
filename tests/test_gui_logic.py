@@ -1,6 +1,5 @@
 """1.3.0 GUI: the parts without Tk (forms from the parser, runner, monitor, files)."""
 import argparse
-import json
 import os
 import sys
 import time
@@ -19,8 +18,6 @@ from mediatools.gui.launcher import GuiLauncher
 from mediatools.gui.opener import Opener
 from mediatools.gui.optionspec import OptionSpec
 from mediatools.gui.shrinkmonitor import ShrinkMonitor
-
-GIB = 1024 ** 3
 
 
 def catalog() -> CommandCatalog:
@@ -77,7 +74,8 @@ def test_catalog_covers_every_command_and_option() -> None:
     """Every subcommand and visible option of the command line is in the GUI."""
     commands = {spec.name: spec for spec in catalog().commands()}
     assert set(commands) == {"shrink", "reload", "status", "stop", "update", "progress",
-                             "triage", "flatten", "sync", "rename-db", "config", "snapshot"}
+                             "triage", "flatten", "sync", "rename-db", "config", "snapshot",
+                             "savings"}
     shrink = commands["shrink"]
     assert shrink.option("--continue-log") is None            # hidden option
     assert shrink.option("--order").kind == "choice"            # type: ignore[union-attr]
@@ -235,17 +233,13 @@ def test_monitor_reads_a_running_shrink(datadir: Path) -> None:
     Args:
         datadir: Data directory (fixture).
     """
-    state_dir = datadir / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "shrink_throughput.json").write_text(json.dumps(
-        {"bytes": 1, "seconds": 1, "files": 1, "ratio_src": 10 * GIB, "ratio_out": 2 * GIB}))
     log = write_run(datadir, "total [##......]  12.5 % | 1/8 files\nfile 3 %\nspace x\n")
     monitor = ShrinkMonitor()
     state = monitor.read()
     assert state.pid == os.getpid() and state.log_path == log
     assert state.progress == ["total [##......]  12.5 % | 1/8 files", "file 3 %", "space x"]
     assert state.percent == 12.5 and state.report[0].startswith("shrink: running")
-    assert state.overall == "overall: 10.0 GiB read -> 2.0 GiB written = 8.0 GiB freed"
+    assert state.overall.startswith("space  session: 0.0 GiB read")
     Path(monitor.control.status_file).write_text("starting\n", encoding="utf-8")
     assert monitor.read().percent is None
     os.remove(monitor.control.status_file)
@@ -260,6 +254,7 @@ def test_monitor_without_run() -> None:
     state = monitor.read()
     assert state.pid is None and not state.progress and state.log_path is None
     assert state.report[0] == "shrink: not running"
+    assert state.overall.startswith("space  last session: 0.0 GiB read")
     assert monitor.stop().startswith("no shrink run is active")
     assert monitor.reload().startswith("no shrink run is active")
 

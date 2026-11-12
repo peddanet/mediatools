@@ -14,7 +14,8 @@ class ShrinkPanel:
 
     It refreshes itself every :attr:`refresh_ms` milliseconds: process and
     release (``mediatools status``), the progress lines with a progress toolbar,
-    the space read, written and freed by all runs, and the end of the log.
+    the space read, written and freed in this session and in all sessions,
+    and the end of the log.
     *Stop* and *Reload* make the same requests as ``mediatools stop`` and
     ``mediatools reload``; the run itself continues independently of the
     GUI, which may be closed at any time.
@@ -79,7 +80,7 @@ class ShrinkPanel:
         self.report.set("\n".join(state.report))
         self.progress.set("\n".join(state.progress) if state.progress
                           else "(no progress lines - no shrink is encoding right now)")
-        self.overall.set("space  " + state.overall)
+        self.overall.set(state.overall)
         self.meter["value"] = state.percent or 0.0
         self.log_path = state.log_path
         at_end = self.log.yview()[1] >= 0.999
