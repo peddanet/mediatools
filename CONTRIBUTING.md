@@ -31,7 +31,7 @@ One script, used locally and in CI:
 ~~~bash
 pip install -e '.[dev]'                 # once, normal user (or in a venv)
 git config core.hooksPath .githooks     # once per clone: activate pre-push hook
-sudo apt install ffmpeg rsync rsnapshot # once: needed by the integration tests
+sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb  # once: integration and GUI tests
 tools/check.sh                          # all gates
 tools/check.sh --fast                   # without tests, while editing
 ~~~

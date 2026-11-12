@@ -23,6 +23,7 @@ from mediatools.core.runlog import RunLog
 from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.versioninfo import VersionInfo
 from mediatools.flatten import FlatPlan, Flattener
+from mediatools.gui.launcher import GuiLauncher
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
                                ShrinkOptions)
 from mediatools.shrink.resulttable import ResultTable
@@ -194,7 +195,28 @@ class Cli:
         cmd.add_argument("-y", "--yes", action="store_true",
                          help="run: no questions; abort instead of asking")
 
+        cmd = sub.add_parser("gui", help="graphical interface for all commands")
+        group = cmd.add_mutually_exclusive_group()
+        group.add_argument("--install-desktop", action="store_true",
+                           help="add mediatools to the application menu and end")
+        group.add_argument("--remove-desktop", action="store_true",
+                           help="remove mediatools from the application menu and end")
+
     # -- dispatch --------------------------------------------------------
+    def cmd_gui(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools gui``: open the window or manage its menu entry.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 on success, 2 if no window can open.
+        """
+        program = os.path.expanduser("~/scripts/mediatools")
+        if not os.path.exists(program):
+            program = shutil.which("mediatools") or os.path.abspath(sys.argv[0])
+        return GuiLauncher(self.parser, program).run(args.install_desktop, args.remove_desktop)
+
     def main(self, argv: list[str] | None = None) -> int:
         """Parse arguments and run the selected subcommand.
 
