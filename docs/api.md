@@ -60,6 +60,20 @@ Args:
     sub: Sub-parser collection of the main parser.
 ~~~
 
+**`cmd_savings`**
+
+~~~text
+cmd_savings(args: argparse.Namespace) -> int
+
+Run ``mediatools savings``: freed space per session or per day.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0.
+~~~
+
 **`cmd_gui`**
 
 ~~~text
@@ -1701,7 +1715,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.3.0') -> None
+__init__(self, control: RunControl, installed: str = '1.4.0') -> None
 
 Remember the job and the installed release.
 
@@ -1931,7 +1945,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.3.0')
+__init__(self, package_dir: str | None = None, version: str = '1.4.0')
 
 Locate the imported package.
 
@@ -3223,6 +3237,231 @@ Returns:
     Text such as ``44.3 min`` or ``-``.
 ~~~
 
+### `Savings` (`mediatools.shrink.savings`) {.unnumbered}
+
+~~~text
+Read, written and freed space of the files shrunk in a period.
+
+Sizes come from the result tables of the shrink logs, which give them in
+MB (10^6 bytes, rounded); a sum is therefore exact to about 0.5 MB per
+file.
+
+Attributes:
+    name: Label of the period: log name of a session, date of a day.
+    start: Time of the first shrunk file (or of the session start).
+    end: Time of the last shrunk file.
+    files: Number of shrunk files.
+    src: Source bytes (read).
+    out: Output bytes (written).
+~~~
+
+**`freed`**
+
+~~~text
+freed(self) -> int
+
+Bytes returned to the file system: source minus output.
+~~~
+
+**`share`**
+
+~~~text
+share(self) -> float
+
+Output in percent of the source (0 if nothing was read).
+~~~
+
+**`add`**
+
+~~~text
+add(self, when: datetime, src: int, out: int) -> None
+
+Count one shrunk file.
+
+Args:
+    when: Time the file was finished.
+    src: Source bytes.
+    out: Output bytes.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    name: str,
+    start: datetime,
+    end: datetime,
+    files: int = 0,
+    src: int = 0,
+    out: int = 0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `SavingsLog` (`mediatools.shrink.savingslog`) {.unnumbered}
+
+~~~text
+Reads the result tables of all shrink logs and sums the saved space.
+
+Every shrink session writes one log ``logs/shrink_<date>_<time>.log``;
+a release switch (``mediatools reload``) continues the same log, so one
+log is one session. Each shrunk file is a row of the result table::
+
+    2026-11-12 05:29:03,412 INFO    │  143 │ 05:29 │  1148 MB │   148 MB │ ... │ shrunk │ ...
+
+The timestamp of the log line gives date and time, the two MB columns
+the source and output size. Only rows with status ``shrunk`` free space
+(``HEVC``, ``kept``, copies and failures do not). Logs are read again
+only when they changed (cache by size and modification time).
+
+Attributes:
+    folder: Folder of the logs.
+    cache: Parsed rows by log path, with size and modification time.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, folder: str)
+
+Choose the log folder.
+
+Args:
+    folder: Folder with the ``shrink_*.log`` files.
+~~~
+
+**`logs`**
+
+~~~text
+logs(self) -> list[str]
+
+Return the shrink logs, oldest first.
+
+Returns:
+    Paths of ``shrink_<date>_<time>.log`` files.
+~~~
+
+**`rows`**
+
+~~~text
+rows(self, path: str) -> list[tuple[datetime, int, int]]
+
+Return the shrunk files of one log.
+
+Args:
+    path: Log file.
+
+Returns:
+    Time, source bytes and output bytes per shrunk file.
+~~~
+
+**`started`**
+
+~~~text
+started(cls, path: str) -> datetime | None
+
+Return the start of a session from its log name.
+
+Args:
+    path: Log file.
+
+Returns:
+    Start time, or None for another name.
+~~~
+
+**`session`**
+
+~~~text
+session(self, path: str) -> Savings
+
+Sum one session.
+
+Args:
+    path: Its log file.
+
+Returns:
+    Savings of the session; ``start`` is the session start.
+~~~
+
+**`sessions`**
+
+~~~text
+sessions(self) -> list[Savings]
+
+Sum every session that shrank at least one file.
+
+Returns:
+    One entry per log, oldest first.
+~~~
+
+**`days`**
+
+~~~text
+days(self) -> list[Savings]
+
+Sum per calendar day of the finished files.
+
+Returns:
+    One entry per day with shrunk files, oldest first.
+~~~
+
+**`total`**
+
+~~~text
+total(self) -> Savings
+
+Sum all sessions.
+
+Returns:
+    Savings of all logs; ``name`` tells since when (``since <date>``).
+~~~
+
+**`gib`**
+
+~~~text
+gib(size: int) -> str
+
+Format bytes in GiB.
+
+Args:
+    size: Bytes.
+
+Returns:
+    Text such as ``32.6``.
+~~~
+
+**`report`**
+
+~~~text
+report(self, by: str = 'session') -> list[str]
+
+Build the table of ``mediatools savings``.
+
+Args:
+    by: ``session`` (one row per log) or ``day``.
+
+Returns:
+    Lines of a table, a total line, and a note on precision.
+~~~
+
 ### `Shrinker` (`mediatools.shrink.shrinker`) {.unnumbered}
 
 ~~~text
@@ -3644,7 +3883,7 @@ Attributes:
         None (they are deleted).
     restart: Switch to a newly installed release on request, or None
         (requests are ignored).
-    space: Space read, written and freed, this run and overall.
+    space: Space read, written and freed, this session and overall.
 ~~~
 
 ### `SpaceTally` (`mediatools.shrink.spacetally`) {.unnumbered}
@@ -3654,48 +3893,63 @@ Counts how much was read, written and freed by shrinking.
 
 The overall progress line counts *source* bytes, i.e. how much was read
 and encoded. The space freed on disk is the source size minus the size of
-the shrunk file, and the counts of a run start at zero after every start,
-restart or ``mediatools reload``. This class keeps both views apart:
+the shrunk file. This class keeps two views, both taken from the result
+tables of the shrink logs (:class:`SavingsLog`) when the run starts and
+then counted on per replaced file:
 
-* this run: files replaced by their shrunk version since the start;
-* overall: all encoded files recorded in ``shrink_throughput.json``
-  (kept since 1.2.1), i.e. the state before this run plus this run.
+* this session: everything shrunk since the session started. A session
+  is one log; ``mediatools reload`` continues the log, so the session
+  (unlike the process) survives a release switch;
+* overall: all shrink logs, labelled with the date of the first shrunk
+  file (``since 2026-10-20``).
 
-Copies kept with ``--keep-copies`` free no space; they are not counted
-for this run. The overall figure contains them if earlier runs used that
-option, because ``shrink_throughput.json`` does not tell them apart.
+Copies kept with ``--keep-copies`` free no space and are not counted.
 
 Attributes:
-    earlier_src: Source bytes of all encoded files before this run.
-    earlier_out: Output bytes of those files.
-    run_src: Source bytes of the files replaced in this run.
+    earlier_src: Source bytes of all logs when this process started.
+    earlier_out: Output bytes of all logs when this process started.
+    session_src: Source bytes of this session before this process.
+    session_out: Output bytes of this session before this process.
+    run_src: Source bytes replaced by this process.
     run_out: Output bytes of those files.
+    since: Label of the overall view, e.g. ``since 2026-10-20``.
+    started: Start of the session, e.g. ``2026-11-12 04:56``.
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, earlier_src: int = 0, earlier_out: int = 0)
+__init__(
+    self,
+    earlier: tuple[int, int] = (0, 0),
+    session: tuple[int, int] = (0, 0),
+    since: str = 'overall',
+    started: str = '',
+)
 
-Start with the overall state before this run.
+Start with the state before this process.
 
 Args:
-    earlier_src: Source bytes of all encoded files before this run.
-    earlier_out: Output bytes of those files.
+    earlier: Source and output bytes of all logs so far.
+    session: Source and output bytes of this session so far.
+    since: Label of the overall view.
+    started: Start of the session; empty if unknown.
 ~~~
 
-**`from_throughput`**
+**`from_logs`**
 
 ~~~text
-from_throughput(cls, throughput: ThroughputLog) -> SpaceTally
+from_logs(cls, logs: SavingsLog, current: str | None) -> SpaceTally
 
-Start from the totals recorded in the throughput log.
+Start from the result tables of the shrink logs.
 
 Args:
-    throughput: Measured speed and size ratio of earlier runs.
+    logs: Reader of the shrink logs.
+    current: Log of this session, or None.
 
 Returns:
-    A tally with these totals as the state before this run.
+    A tally with all logs as overall state and the current log as
+    session state.
 ~~~
 
 **`add`**
@@ -3710,12 +3964,23 @@ Args:
     out: Size of the shrunk file in bytes.
 ~~~
 
+**`session`**
+
+~~~text
+session(self) -> tuple[int, int]
+
+Return the totals of this session.
+
+Returns:
+    Source bytes and output bytes.
+~~~
+
 **`overall`**
 
 ~~~text
 overall(self) -> tuple[int, int]
 
-Return the overall totals including this run.
+Return the totals of all sessions including this one.
 
 Returns:
     Source bytes and output bytes.
@@ -3736,6 +4001,17 @@ Returns:
     Text such as ``59.3 GiB read -> 9.1 GiB written = 50.2 GiB freed``.
 ~~~
 
+**`session_label`**
+
+~~~text
+session_label(self) -> str
+
+Return the label of the session view.
+
+Returns:
+    ``session since 2026-11-12 04:56`` or ``session``.
+~~~
+
 **`line`**
 
 ~~~text
@@ -3744,7 +4020,7 @@ line(self) -> str
 Build the space line of the progress display.
 
 Returns:
-    Text without line break, this run first, then overall.
+    Text without line break, this session first, then overall.
 ~~~
 
 **`summary`**
@@ -3755,8 +4031,8 @@ summary(self) -> list[str]
 Build the log lines for the end of a run.
 
 Returns:
-    Two lines: this run and overall, with the output share; none if
-    nothing was ever encoded.
+    Two lines: this session and overall, with the output share;
+    none if nothing was ever shrunk.
 ~~~
 
 ### `ThroughputLog` (`mediatools.shrink.throughput`) {.unnumbered}
@@ -6340,8 +6616,9 @@ Returns:
 One window with a tab per task; every command of the command line.
 
 Tabs: *shrink* (dashboard of the running shrink and the form to start
-one), one tab per further subcommand, *config* (editor of
-``mediatools.ini``) and *files* (logs, reports, plans). ``status``,
+one), one tab per further subcommand, *savings* (freed space per
+session or day), *config* (editor of ``mediatools.ini``) and *files*
+(logs, reports, plans). ``status``,
 ``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
 is replaced by the dashboard. Every command runs as a child process
 with the same interpreter as the GUI; one command per tab may run at a
@@ -7536,32 +7813,69 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
+### `SavingsPanel` (`mediatools.gui.savingspanel`) {.unnumbered}
+
+~~~text
+Shows ``mediatools savings`` as a table: sessions or days, and the total.
+
+A session is one shrink log, from ``mediatools shrink`` until the run
+ends (a release switch with ``reload`` continues the session). The
+sizes come from the result tables of the logs.
+
+Attributes:
+    frame: Container of the widgets (place it in the parent).
+    logs: Reader of the shrink logs.
+    by: ``session`` or ``day``.
+    tree: The table.
+    total: Text of the total line.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, master: tk.Misc, logs: SavingsLog | None = None)
+
+Build the table and fill it.
+
+Args:
+    master: Parent widget.
+    logs: Reader of the shrink logs; the data folder's logs if None.
+~~~
+
+**`refresh`**
+
+~~~text
+refresh(self) -> None
+
+Read the logs again and fill the table, newest first.
+~~~
+
 ### `ShrinkMonitor` (`mediatools.gui.shrinkmonitor`) {.unnumbered}
 
 ~~~text
 Reads the files that a shrink run maintains, without touching it.
 
 The same files serve ``mediatools status`` and ``attach``: the PID file
-(process and log), the status file (progress lines) and
-``shrink_throughput.json`` (sizes of all runs). Stop and reload are
-requests by file, exactly as the command line makes them.
+(process and log), the status file (progress lines) and the shrink logs
+(saved space of the session and of all sessions, :class:`SavingsLog`).
+Stop and reload are requests by file, exactly as the command line makes
+them.
 
 Attributes:
     control: Run control of the shrink job.
-    throughput_path: Location of ``shrink_throughput.json``, or None for
-        the default.
+    logs: Reader of the shrink logs (cached between readings).
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl | None = None, throughput_path: str | None = None)
+__init__(self, control: RunControl | None = None, logs: SavingsLog | None = None)
 
 Prepare the monitor.
 
 Args:
     control: Run control; the one of ``shrink`` if None.
-    throughput_path: ``shrink_throughput.json``; the default if None.
+    logs: Reader of the shrink logs; the data folder's logs if None.
 ~~~
 
 **`read`**
@@ -7620,7 +7934,8 @@ Shows the running shrink like ``status`` and ``attach`` together.
 
 It refreshes itself every :attr:`refresh_ms` milliseconds: process and
 release (``mediatools status``), the progress lines with a progress toolbar,
-the space read, written and freed by all runs, and the end of the log.
+the space read, written and freed in this session and in all sessions,
+and the end of the log.
 *Stop* and *Reload* make the same requests as ``mediatools stop`` and
 ``mediatools reload``; the run itself continues independently of the
 GUI, which may be closed at any time.
@@ -7702,7 +8017,8 @@ Attributes:
     progress: Progress lines of the status file (two or three).
     percent: Overall percentage from the first progress line, or None.
     log_path: Log file of the run, or None.
-    overall: Read, written and freed space of all runs so far.
+    overall: Space line: read, written and freed in this (or the last)
+        session and in all sessions.
 ~~~
 
 **`__init__`**

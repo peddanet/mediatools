@@ -134,7 +134,7 @@ class Shrinker:
                                    "throughput": throughput,
                                    "results": None, "decode": None, "ffmpeg_logs": None,
                                    "restart": None,
-                                   "space": SpaceTally.from_throughput(throughput)}
+                                   "space": SpaceTally()}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False, "restart": False}

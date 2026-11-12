@@ -18,7 +18,7 @@ class CommandSpec:
         program: Words that start the command line, e.g. ``["mediatools"]``.
     """
 
-    READ_ONLY = ("progress", "status")
+    READ_ONLY = ("progress", "status", "savings")
     """Commands that never change anything (run without confirmation)."""
 
     PREVIEW_FLAGS = ("--dry-run", "--list", "--report-only", "--path")
