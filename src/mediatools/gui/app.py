@@ -18,6 +18,7 @@ from mediatools.gui.consoleview import ConsoleView
 from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.filespanel import FilesPanel
 from mediatools.gui.formstore import FormStore
+from mediatools.gui.savingspanel import SavingsPanel
 from mediatools.gui.shrinkpanel import ShrinkPanel
 
 
@@ -25,8 +26,9 @@ class MediaToolsApp:
     """One window with a tab per task; every command of the command line.
 
     Tabs: *shrink* (dashboard of the running shrink and the form to start
-    one), one tab per further subcommand, *config* (editor of
-    ``mediatools.ini``) and *files* (logs, reports, plans). ``status``,
+    one), one tab per further subcommand, *savings* (freed space per
+    session or day), *config* (editor of ``mediatools.ini``) and *files*
+    (logs, reports, plans). ``status``,
     ``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
     is replaced by the dashboard. Every command runs as a child process
     with the same interpreter as the GUI; one command per tab may run at a
@@ -43,7 +45,7 @@ class MediaToolsApp:
         ask: Confirmation dialog, replaceable in tests.
     """
 
-    PANEL_COMMANDS = ("status", "stop", "reload", "config")
+    PANEL_COMMANDS = ("status", "stop", "reload", "config", "savings")
     """Subcommands covered by panels instead of a form."""
 
     def __init__(self, root: tk.Tk, catalog: CommandCatalog, store: FormStore | None = None,
@@ -87,6 +89,7 @@ class MediaToolsApp:
             self.tabs[spec.name] = frame
             self.consoles.append(console)
             self.notebook.add(frame, text=spec.name)
+        self.notebook.add(SavingsPanel(self.notebook).frame, text="savings")
         self.notebook.add(ConfigPanel(self.notebook).frame, text="config")
         self.notebook.add(FilesPanel(self.notebook, on_undo=self.undo_plan).frame, text="files")
 

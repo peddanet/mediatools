@@ -135,6 +135,32 @@ classDiagram
     +mb(size)
     +minutes(seconds)
   }
+  class Savings {
+    +name
+    +start
+    +end
+    +files
+    +src
+    +out
+    +freed()
+    +share()
+    +add(when, src, out)
+    +init(name, start, end, files, src, out)
+  }
+  class SavingsLog {
+    +folder
+    +cache
+    +init(folder)
+    +logs()
+    +rows(path)
+    +started(path)
+    +session(path)
+    +sessions()
+    +days()
+    +total()
+    +gib(size)
+    +report(by)
+  }
   class Shrinker {
     +root
     +log
@@ -187,13 +213,19 @@ classDiagram
   class SpaceTally {
     +earlier_src
     +earlier_out
+    +session_src
+    +session_out
     +run_src
     +run_out
-    +init(earlier_src, earlier_out)
-    +from_throughput(throughput)
+    +since
+    +started
+    +init(earlier, session, since, started)
+    +from_logs(logs, current)
     +add(src, out)
+    +session()
     +overall()
     +part(src, out)
+    +session_label()
     +line()
     +summary()
   }
@@ -220,6 +252,7 @@ classDiagram
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   ResultTable ..> FileResult
+  SavingsLog ..> Savings
   Shrinker ..> FileResult
   Shrinker --> HevcEncoder
   Shrinker --> ReplaceJournal
@@ -232,4 +265,4 @@ classDiagram
   ShrinkState ..> ResultTable
   ShrinkState ..> SpaceTally
   ShrinkState ..> ThroughputLog
-  SpaceTally ..> ThroughputLog
+  SpaceTally ..> SavingsLog
