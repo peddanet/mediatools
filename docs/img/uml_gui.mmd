@@ -1,0 +1,229 @@
+classDiagram
+  direction LR
+  class MediaToolsApp {
+    +root
+    +catalog
+    +store
+    +forms
+    +tabs
+    +consoles
+    +notebook
+    +ask
+    +init(root, catalog, store, ask, refresh_ms)
+    -_menu()
+    +program_path()
+    +about_text()
+    +about()
+    +install_desktop()
+    +remove_desktop()
+    +undo_plan(plan)
+    +running()
+    +close()
+  }
+  class CommandCatalog {
+    +parser
+    +program
+    +init(parser, program)
+    -_subparsers(parser)
+    +option(action)
+    +commands()
+    +command(name)
+  }
+  class CommandForm {
+    +frame
+    +spec
+    +console
+    +store
+    +variables
+    +line
+    +ask
+    +init(master, spec, console, store, ask)
+    -_field(row, option, value)
+    -_help(row, option)
+    +values()
+    +set_value(dest, value)
+    +update_line()
+    +preview_option()
+    +browse(option)
+    +copy()
+    +reset()
+    +preview()
+    +run()
+    -_start(values)
+  }
+  class CommandSpec {
+    +name
+    +help
+    +options
+    +program
+    +option(label)
+    +argv(values)
+    +command_line(values)
+    +changes_data(values)
+    +init(name, help, options, program)
+  }
+  class ConfigPanel {
+    +frame
+    +config_factory
+    +opener
+    +editor
+    +effective
+    +message
+    +path
+    +init(master, config_factory, opener)
+    +load()
+    +save()
+    +create()
+    +open_folder()
+  }
+  class ConsoleView {
+    +frame
+    +runner
+    +text
+    +answer
+    +state
+    +on_finish
+    +poll_ms
+    +init(master, runner, on_finish, poll_ms, height)
+    +write(text)
+    +clear()
+    +run(args, shown)
+    +poll()
+    +send()
+    +cancel()
+  }
+  class DesktopEntry {
+    +path
+    +program
+    +init(program, path)
+    +text()
+    +install()
+    +remove()
+  }
+  class FilesPanel {
+    +frame
+    +root
+    +opener
+    +on_undo
+    +tree
+    +viewer
+    +message
+    +init(master, root, opener, on_undo)
+    +size_text(size)
+    +refresh()
+    +selected()
+    +show_selected()
+    +open_selected()
+    +use_as_undo()
+  }
+  class FormStore {
+    +path
+    +init(path)
+    -_all()
+    +load(command)
+    +save(command, values)
+  }
+  class JobRunner {
+    +program
+    +process
+    +output
+    +cancels
+    +reader
+    +init(program)
+    +running()
+    +start(args)
+    -_read(process)
+    +poll()
+    +send(text)
+    +cancel()
+    +wait(timeout)
+  }
+  class GuiLauncher {
+    +parser
+    +program
+    +environ
+    +init(parser, program, environ)
+    +problem()
+    +run(install_desktop, remove_desktop)
+  }
+  class Opener {
+    +program
+    +init(program)
+    +open(path)
+  }
+  class OptionSpec {
+    +dest
+    +flags
+    +help
+    +kind
+    +choices
+    +default
+    +required
+    +path
+    +positional()
+    +label()
+    +to_argv(value)
+    +initial()
+    +init(dest, flags, help, kind, choices, default, required, path)
+  }
+  class ShrinkMonitor {
+    +control
+    +throughput_path
+    +init(control, throughput_path)
+    +read()
+    +tail(path, lines, chunk)
+    +stop()
+    +reload()
+  }
+  class ShrinkPanel {
+    +frame
+    +monitor
+    +opener
+    +refresh_ms
+    +report
+    +progress
+    +overall
+    +meter
+    +log
+    +message
+    +log_path
+    +init(master, monitor, opener, refresh_ms)
+    +refresh()
+    +stop()
+    +reload()
+    +open_log()
+  }
+  class ShrinkReading {
+    +pid
+    +report
+    +progress
+    +percent
+    +log_path
+    +overall
+    +init(pid, report, progress, percent, log_path, overall)
+  }
+  MediaToolsApp --> CommandCatalog
+  MediaToolsApp --> CommandForm
+  MediaToolsApp --> ConfigPanel
+  MediaToolsApp --> ConsoleView
+  MediaToolsApp ..> DesktopEntry
+  MediaToolsApp --> FilesPanel
+  MediaToolsApp --> FormStore
+  MediaToolsApp --> ShrinkPanel
+  CommandCatalog ..> CommandSpec
+  CommandCatalog ..> OptionSpec
+  CommandForm --> CommandSpec
+  CommandForm --> ConsoleView
+  CommandForm --> FormStore
+  CommandForm ..> OptionSpec
+  CommandSpec ..> OptionSpec
+  ConfigPanel --> Opener
+  ConsoleView --> JobRunner
+  FilesPanel --> Opener
+  GuiLauncher ..> CommandCatalog
+  GuiLauncher ..> DesktopEntry
+  GuiLauncher ..> MediaToolsApp
+  OptionSpec ..> CommandCatalog
+  ShrinkMonitor ..> ShrinkReading
+  ShrinkPanel --> Opener
+  ShrinkPanel --> ShrinkMonitor
