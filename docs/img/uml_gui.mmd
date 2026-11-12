@@ -8,6 +8,7 @@ classDiagram
     +tabs
     +consoles
     +notebook
+    +icon
     +ask
     +init(root, catalog, store, ask, refresh_ms)
     -_menu()
@@ -95,6 +96,7 @@ classDiagram
   class DesktopEntry {
     +path
     +program
+    +icons
     +init(program, path)
     +text()
     +install()
@@ -215,7 +217,7 @@ classDiagram
   MediaToolsApp --> CommandForm
   MediaToolsApp --> ConfigPanel
   MediaToolsApp --> ConsoleView
-  MediaToolsApp ..> DesktopEntry
+  MediaToolsApp --> DesktopEntry
   MediaToolsApp --> FilesPanel
   MediaToolsApp --> FormStore
   MediaToolsApp --> SavingsPanel
