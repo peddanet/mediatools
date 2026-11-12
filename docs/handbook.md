@@ -78,6 +78,7 @@ a test folder, back up, then work (section "First steps").
 | `snapshot` | versioned backups with rsnapshot | snapshot root on the backup disk |
 | `config` | show or create the configuration file | data directory only |
 | `rename-db` | rename shrink databases to the configured name | database files only |
+| `savings` | freed space per session or per day, from the shrink logs | nothing |
 | `gui` | window with a tab per task; runs the commands above | `state/gui.json`, optional menu entry |
 
 Shared rules, implemented once in `mediatools.core`:
@@ -491,7 +492,7 @@ them.
 ~~~text
 total [#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB source | ETA 2d21h
 file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
-space  this run: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | overall: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
+space  session since 2026-11-12 04:56: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | since 2026-10-20: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
 ~~~
 
 The first line covers the whole run, the second the file being encoded:
@@ -511,13 +512,32 @@ line keeps the three quantities apart:
 | written | size of their shrunk versions |
 | freed | read minus written: the space returned to the file system |
 
-`this run` starts at zero with every start, restart and
-`mediatools reload`, because the plan of a run contains only the files
-still to do. `overall` adds the totals of all earlier runs, taken from
-`state/shrink_throughput.json` (recorded since 1.2.1; files of older runs
-are missing). Copies kept with `--keep-copies` free no space and are not
-counted for this run. At the end of a run both views are written to the
-log, with the output share in percent of the source.
+`session` covers everything shrunk since `mediatools shrink` started this
+session (the time is shown). A session is one log file; `mediatools
+reload` continues the log, so the session survives a release switch,
+while the progress counts of the first line start again after it. The
+second view adds all sessions and names the date of the first shrunk file
+(`since 2026-10-20`). Both views come from the result tables of the shrink
+logs (sizes in MB, rounded: exact to about 0.5 MB per file) and are then
+counted on per replaced file. Copies kept with `--keep-copies` free no space
+and are not counted. At the end of a run both views are written to the log,
+with the output share in percent of the source.
+
+`mediatools savings` lists the freed space per session or per day
+(read-only):
+
+~~~bash
+mediatools savings              # one row per session
+mediatools savings --by day     # one row per calendar day
+~~~
+
+~~~text
+session                     from    to  files  read GiB written GiB  freed GiB  output
+2026-11-12 04:56           04:56 11:38     38      38.9         6.3       32.6   16.1%
+total since 2026-10-20                    412     ...
+~~~
+
+The GUI shows the same table in its *savings* tab.
 
 Percentage, volume and remaining time are measured in source bytes,
 because the encoding time grows with the file size, not with the number of
@@ -1155,7 +1175,8 @@ reload). Command line and window therefore always behave the same.
 
 | Tab | Content |
 |---|---|
-| shrink | state of the running shrink (`status`), progress lines and bar, space of all runs, log end, *Stop*, *Reload*, *Open log*; start form |
+| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and of all sessions, log end, *Stop*, *Reload*, *Open log*; start form |
+| savings | freed space per session or per day, newest first, and the total |
 | update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
 | config | editor of `mediatools.ini` (checked before saving) and the effective values |
 | files | `logs/`, `reports/`, `plans/`, `state/`, newest first; viewer; undo plan for flatten |

@@ -239,7 +239,7 @@ def test_shrink_panel(root: tk.Tk, datadir: Path) -> None:
     pump(root, lambda: panel.meter["value"] == 40.0)
     assert panel.report.get().startswith("shrink: running")
     assert "line 499" in panel.log.get("1.0", "end")
-    assert panel.overall.get().startswith("space  overall: 0.0 GiB read")
+    assert panel.overall.get().startswith("space  session: 0.0 GiB read")
     panel.open_log()
     assert opener.opened == [log]
     panel.stop()
@@ -369,7 +369,7 @@ def test_app_tabs_undo_about_and_close(root: tk.Tk, tmp_path: Path,
                         ask=lambda _t, _x: answers.pop(0), refresh_ms=0)
     tabs = [app.notebook.tab(tab, "text") for tab in app.notebook.tabs()]
     assert tabs == ["shrink", "update", "progress", "triage", "flatten", "sync", "rename-db",
-                    "snapshot", "config", "files"]
+                    "snapshot", "savings", "config", "files"]
     app.undo_plan("/data/plans/p.json")
     assert app.forms["flatten"].values()["undo"] == "/data/plans/p.json"
     assert app.notebook.tab(app.notebook.select(), "text") == "flatten"
