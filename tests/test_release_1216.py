@@ -9,7 +9,7 @@ from test_shrink_run import build, videos
 from mediatools.core.attachview import AttachView
 from mediatools.core.progressbar import ProgressBar
 from mediatools.core.runcontrol import RunControl
-from mediatools.shrink import ShrinkOptions, ThroughputLog
+from mediatools.shrink import ShrinkOptions
 from mediatools.shrink.spacetally import SpaceTally
 
 GIB = 1024 ** 3
@@ -27,27 +27,26 @@ class Tty(io.StringIO):
         return True
 
 
-def test_tally_separates_run_and_overall(tmp_path: Path) -> None:
-    """This run starts at zero; overall adds the throughput log totals.
+def test_tally_separates_session_and_overall() -> None:
+    """The session and overall views add the files of this process.
 
-    Args:
-        tmp_path: Temporary directory (fixture).
+    (1.4.0: the views come from the logs instead of the throughput log.)
     """
-    log = ThroughputLog(str(tmp_path / "speed.json"))
-    log.add(100 * GIB, 60.0, 15 * GIB)
-    tally = SpaceTally.from_throughput(log)
+    tally = SpaceTally((100 * GIB, 15 * GIB), (4 * GIB, 1 * GIB), "since 2026-10-20",
+                       "2026-11-12 04:56")
     assert (tally.run_src, tally.run_out) == (0, 0)
     tally.add(10 * GIB, 2 * GIB)
     assert tally.overall() == (110 * GIB, 17 * GIB)
+    assert tally.session() == (14 * GIB, 3 * GIB)
     line = tally.line()
-    assert line.startswith("space  this run: 10.0 GiB read -> 2.0 GiB written "
-                           "= 8.0 GiB freed | overall: 110.0 GiB read")
+    assert line.startswith("space  session since 2026-11-12 04:56: 14.0 GiB read -> 3.0 GiB "
+                           "written = 11.0 GiB freed | since 2026-10-20: 110.0 GiB read")
     assert line.endswith("17.0 GiB written = 93.0 GiB freed")
     summary = tally.summary()
-    assert summary[0].endswith("8.0 GiB freed (output 20.0 % of the source)")
-    assert summary[1].startswith("space overall since 1.2.1: 110.0 GiB read")
+    assert summary[0].endswith("11.0 GiB freed (output 21.4 % of the source)")
+    assert summary[1].startswith("space since 2026-10-20: 110.0 GiB read")
     assert not SpaceTally().summary()
-    assert "this run: 0.0 GiB read" in SpaceTally(GIB, GIB // 2).summary()[0]
+    assert "space session: 0.0 GiB read" in SpaceTally((GIB, GIB // 2)).summary()[0]
 
 
 def test_overall_line_says_source() -> None:
@@ -126,8 +125,8 @@ def test_shrink_run_counts_and_logs_freed_space(tmp_path: Path,
     assert (space.run_src, space.run_out) == (1110, written)
     assert space.overall() == (1110, written)
     messages = [record.getMessage() for record in caplog.records]
-    assert any(text.startswith("space this run: 0.0 GiB read") for text in messages)
-    assert any(text.startswith("space overall since 1.2.1:") for text in messages)
+    assert any(text.startswith("space session: 0.0 GiB read") for text in messages)
+    assert any(text.startswith("space overall: 0.0 GiB read") for text in messages)
 
 
 def test_kept_copies_free_no_space(tmp_path: Path) -> None:

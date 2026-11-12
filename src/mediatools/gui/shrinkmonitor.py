@@ -4,38 +4,39 @@ from __future__ import annotations
 import os
 import re
 
+from mediatools.core.datadir import DataDir
 from mediatools.core.runcontrol import RunControl
 from mediatools.core.runstatus import RunStatus
 from mediatools.gui.shrinkreading import ShrinkReading
+from mediatools.shrink.savingslog import SavingsLog
 from mediatools.shrink.spacetally import SpaceTally
-from mediatools.shrink.throughput import ThroughputLog
 
 
 class ShrinkMonitor:
     """Reads the files that a shrink run maintains, without touching it.
 
     The same files serve ``mediatools status`` and ``attach``: the PID file
-    (process and log), the status file (progress lines) and
-    ``shrink_throughput.json`` (sizes of all runs). Stop and reload are
-    requests by file, exactly as the command line makes them.
+    (process and log), the status file (progress lines) and the shrink logs
+    (saved space of the session and of all sessions, :class:`SavingsLog`).
+    Stop and reload are requests by file, exactly as the command line makes
+    them.
 
     Attributes:
         control: Run control of the shrink job.
-        throughput_path: Location of ``shrink_throughput.json``, or None for
-            the default.
+        logs: Reader of the shrink logs (cached between readings).
     """
 
     PERCENT = re.compile(r"\]\s+([0-9.]+) %")
 
-    def __init__(self, control: RunControl | None = None, throughput_path: str | None = None):
+    def __init__(self, control: RunControl | None = None, logs: SavingsLog | None = None):
         """Prepare the monitor.
 
         Args:
             control: Run control; the one of ``shrink`` if None.
-            throughput_path: ``shrink_throughput.json``; the default if None.
+            logs: Reader of the shrink logs; the data folder's logs if None.
         """
         self.control = control or RunControl("shrink")
-        self.throughput_path = throughput_path
+        self.logs = logs or SavingsLog(DataDir().sub("logs"))
 
     def read(self) -> ShrinkReading:
         """Read the current state.
@@ -45,11 +46,15 @@ class ShrinkMonitor:
         """
         pid = self.control.active_pid()
         state = ShrinkReading(pid=pid, report=RunStatus(self.control).lines())
-        state.overall = "overall: " + SpaceTally.part(
-            *SpaceTally.from_throughput(ThroughputLog(self.throughput_path)).overall())
+        if pid is not None:
+            state.log_path = self.control.active_log()
+        logs = self.logs.logs()
+        session = state.log_path or (logs[-1] if logs else None)
+        line = SpaceTally.from_logs(self.logs, session).line()
+        state.overall = line.replace("space  session", "space  last session", 1) \
+            if pid is None else line
         if pid is None:
             return state
-        state.log_path = self.control.active_log()
         try:
             with open(self.control.status_file, encoding="utf-8") as handle:
                 state.progress = handle.read().splitlines()[:3]
