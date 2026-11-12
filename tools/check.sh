@@ -12,6 +12,10 @@
 #   4. security bandit (config in pyproject.toml)
 #   5. tests    pytest with branch coverage, threshold in pyproject.toml
 #
+# The tests of the GUI need Tk for Python (package python3-tk) and a
+# display; without DISPLAY the script restarts itself under xvfb-run
+# (package xvfb), a virtual display without a window.
+#
 # Usage: tools/check.sh [--fast]
 #   --fast  skip the test gate (used for quick checks while editing)
 #
@@ -45,9 +49,16 @@ if (( FAST == 0 )); then
     for tool in ffmpeg ffprobe rsync rsnapshot; do
         command -v "$tool" >/dev/null || missing+=("$tool")
     done
+    python3 -c 'import tkinter' 2>/dev/null || missing+=("python3-tk")
+    if [[ -z "${DISPLAY:-}" ]]; then
+        if command -v xvfb-run >/dev/null && [[ -z "${MEDIATOOLS_XVFB:-}" ]]; then
+            exec env MEDIATOOLS_XVFB=1 xvfb-run -a "$0" "$@"
+        fi
+        missing+=("xvfb")
+    fi
     if (( ${#missing[@]} )); then
         echo "missing programs for the integration tests: ${missing[*]}" >&2
-        echo "install with: sudo apt install ffmpeg rsync rsnapshot" >&2
+        echo "install with: sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb" >&2
         exit 2
     fi
 fi

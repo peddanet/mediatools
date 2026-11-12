@@ -60,6 +60,7 @@ mediatools/
   .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13, 3.14
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
+  src/mediatools/gui/       Tk window (mediatools gui)
   tests/                    pytest suite
   tools/check.sh            quality gates
   tools/gen_docs.py         UML class diagrams + API reference from the code
@@ -145,6 +146,7 @@ suppression is `consider-using-with` for the long-lived player processes in
 | Layer | Package | May import |
 |---|---|---|
 | interface | `mediatools.cli` (`Cli`) | all packages |
+| window | `gui` | `core`, `shrink` (space totals), the parser of `cli` |
 | features | `shrink`, `triage`, `flatten`, `sync`, `snapshot` | `core`; `snapshot` also `sync.fscheck` |
 | foundation | `core` | standard library only |
 
@@ -253,6 +255,30 @@ directory, configuration -- lives in `core`.
 | Class | Responsibility |
 |---|---|
 | `ReleaseUpdater` | `mediatools update`: runs the bundled `apply-release.sh` (see "Applying delivered patch archives") |
+
+## Package `gui`
+
+![gui](img/uml_gui.png){width=95% height=19cm}
+
+| Class | Responsibility |
+|---|---|
+| `GuiLauncher` | `mediatools gui`: checks display and Tk, opens the window or writes the menu entry |
+| `CommandCatalog` | reads subcommands and options from the argument parser of `Cli` |
+| `CommandSpec`, `OptionSpec` | one subcommand / option: argv, shell line, read-only check |
+| `JobRunner` | runs `python -m mediatools ...` as a child in its own process group; output, answers, SIGINT/SIGTERM |
+| `ShrinkMonitor`, `ShrinkReading` | reads PID file, status file, log end and throughput totals; stop and reload requests |
+| `FormStore` | last values per form in `state/gui.json` |
+| `DesktopEntry`, `Opener` | menu entry (`.desktop`), `xdg-open` |
+| `MediaToolsApp` | main window: a tab per command, config editor, file browser |
+| `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
+| `ShrinkPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, INI editor, data folder browser |
+
+The GUI has no function of its own. It runs the command line as child
+processes (`JobRunner`) or makes the same request files (`RunControl`), so
+the window can never behave differently from a terminal. Only the widget
+classes import `tkinter`; they hold their `ttk.Frame` as `frame`
+(composition instead of subclassing the deep Tk class tree), and the
+command line keeps working where `python3-tk` is missing.
 
 ## Package `cli`
 
@@ -413,9 +439,12 @@ database rename never overwrites              test_renamer_renames_and_respects_
 All gates live in one script, `tools/check.sh`. The pre-push hook and the CI
 workflow call the same script, so a green local run predicts a green
 pipeline. Everything runs as normal user; no root privileges are needed.
-A full run requires ffmpeg, ffprobe, rsync and rsnapshot: without them the
-integration tests would be skipped and the coverage would drop, so the
-script stops with an installation hint instead.
+A full run requires ffmpeg, ffprobe, rsync, rsnapshot and Tk for Python
+(`python3-tk`): without them the integration and GUI tests would be
+skipped and the coverage would drop, so the script stops with an
+installation hint instead. The GUI tests need a display; without
+`DISPLAY` the script restarts itself under `xvfb-run` (package `xvfb`), a
+virtual X server that draws into memory.
 
 ~~~bash
 pip install -e '.[dev]'                 # tools: pytest, pytest-cov, pylint,
@@ -739,6 +768,9 @@ the clone.
 4. Add tests (unit, integration, CLI).
 5. Run the quality gates; regenerate diagrams and API reference.
 6. Document the command in `README.md`, `docs/handbook.md` and here.
+7. Nothing to do for the GUI: its form is read from the new sub-parser.
+   Add the name to `CommandCatalog.SKIP` or `MediaToolsApp.PANEL_COMMANDS`
+   only if the command must not get a form of its own.
 
 # Glossary
 
