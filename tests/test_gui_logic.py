@@ -75,7 +75,7 @@ def test_catalog_covers_every_command_and_option() -> None:
     commands = {spec.name: spec for spec in catalog().commands()}
     assert set(commands) == {"shrink", "reload", "status", "stop", "update", "progress",
                              "triage", "flatten", "sync", "rename-db", "config", "snapshot",
-                             "savings"}
+                             "savings", "where"}
     shrink = commands["shrink"]
     assert shrink.option("--continue-log") is None            # hidden option
     assert shrink.option("--order").kind == "choice"            # type: ignore[union-attr]

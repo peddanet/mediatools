@@ -9,11 +9,14 @@ import sys
 
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
+from mediatools.core.datamigration import DataMigration
 from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.attachview import AttachView
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
+from mediatools.core.placesreport import PlacesReport
+from mediatools.core.privacylists import PrivacyLists
 from mediatools.core.probe import MediaProbe
 from mediatools.core.prompt import Prompt
 from mediatools.core.runcontrol import RunControl
@@ -187,6 +190,16 @@ class Cli:
         group.add_argument("--set", metavar="SECTION.KEY=VALUE", action="append",
                            help="change a value, e.g. --set collection.root=~/Videos "
                                 "(repeatable)")
+
+        cmd = sub.add_parser("where", help="show where configuration, logs, state and data "
+                                           "are kept")
+        cmd.add_argument("--migrate", action="store_true",
+                         help="move the data of releases before 1.5.0 from "
+                              "~/scripts/mediatools.d into the XDG folders")
+
+        cmd = sub.add_parser("privacy", help="show or edit the local lists of the privacy scan")
+        cmd.add_argument("--edit", choices=("deny", "allow"),
+                         help="open the deny or allow list in $EDITOR (created if missing)")
 
         cmd = sub.add_parser("snapshot", help="versioned backups with rsnapshot")
         cmd.add_argument("action", choices=["check", "adopt", "init", "run", "status",
@@ -643,6 +656,51 @@ class Cli:
                                                "create it with --init)"
             print(f"# {config.path}{state}\n")
             print(config.render())
+        return 0
+
+    @staticmethod
+    def cmd_where(args: argparse.Namespace) -> int:
+        """Run ``mediatools where``: list the folders, optionally move old data.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0 on success, 1 if the move is refused.
+        """
+        if args.migrate:
+            if os.environ.get(DataDir.ENV):
+                print(f"${DataDir.ENV} is set - the move applies only to the default layout")
+                return 1
+            if not DataDir.legacy_in_use():
+                print(f"nothing to move: {DataDir.legacy_dir()} holds no data")
+            else:
+                try:
+                    for old, new in DataMigration().run():
+                        print(f"moved  {old}\n    -> {new}")
+                except RuntimeError as error:
+                    print(f"not moved: {error}")
+                    return 1
+            print()
+        for line in PlacesReport().lines():
+            print(line)
+        return 0
+
+    @staticmethod
+    def cmd_privacy(args: argparse.Namespace) -> int:
+        """Run ``mediatools privacy``: show or edit the local lists.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0, or the exit code of the editor.
+        """
+        lists = PrivacyLists()
+        if args.edit:
+            return lists.edit(args.edit)
+        for line in lists.lines():
+            print(line)
         return 0
 
     def cmd_snapshot(self, args: argparse.Namespace) -> int:
