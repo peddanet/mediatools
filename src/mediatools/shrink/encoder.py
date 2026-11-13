@@ -86,6 +86,15 @@ class HevcEncoder:
         self.process: subprocess.Popen | None = None
         self.aborted = False
 
+    def clone(self) -> HevcEncoder:
+        """Return an encoder with the same settings for a parallel slot.
+
+        Returns:
+            A new encoder without a running process.
+        """
+        return HevcEncoder(self.crf, self.threads, self.probe, self.log, self.ffmpeg,
+                           self.niceness, self.decode)
+
     @staticmethod
     def default_threads() -> int:
         """Return the default thread count: logical CPUs minus one.

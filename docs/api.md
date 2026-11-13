@@ -119,6 +119,80 @@ Raises:
     SystemExit: If the path is not a directory.
 ~~~
 
+**`_size_arg`**
+
+~~~text
+_size_arg(text: str) -> int
+
+Parse ``--min-size`` (argparse type).
+
+Args:
+    text: Size such as ``300M``.
+
+Returns:
+    Bytes.
+
+Raises:
+    argparse.ArgumentTypeError: If the text is not a size.
+~~~
+
+**`_date_arg`**
+
+~~~text
+_date_arg(text: str) -> float
+
+Parse ``--newer-than`` (argparse type).
+
+Args:
+    text: Date ``YYYY-MM-DD``.
+
+Returns:
+    Epoch seconds of local midnight.
+
+Raises:
+    argparse.ArgumentTypeError: If the text is not a date.
+~~~
+
+**`ledger`**
+
+~~~text
+ledger() -> Ledger
+
+Return the ledger of finished videos (filled in from the logs once).
+
+Returns:
+    ``<data>/ledger.tsv``.
+~~~
+
+**`registry`**
+
+~~~text
+registry(ledger: Ledger | None = None) -> JobRegistry
+
+Return the remembered shrink jobs.
+
+Args:
+    ledger: Ledger for the figures done; None leaves them 0.
+
+Returns:
+    ``<state>/jobs.json``.
+~~~
+
+**`_choose_job`**
+
+~~~text
+_choose_job(self, args: argparse.Namespace) -> argparse.Namespace | None
+
+Offer the earlier jobs for a plain ``mediatools shrink`` on a terminal.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    The arguments to run (those of the chosen job, or unchanged),
+    or None if the user ended the selection.
+~~~
+
 **`_need`**
 
 ~~~text
@@ -1498,11 +1572,16 @@ lines are redrawn in place and cut to the terminal width, so they never
 wrap; otherwise (output redirected to a file) nothing is drawn and only
 the log is written.
 
-The first line counts *source* bytes of the whole job (since 1.4.2):
-how much was read and encoded since the first shrink log, with the
-size after shrinking in brackets, and how much is still to go;
-percentage and ETA follow from these (:attr:`base`). A start or a
-reload therefore does not reset the figures.
+The first line counts *source* bytes of the whole **job** (since 1.6.0;
+a job is the root and the filters of the run, see :class:`JobSpec`):
+what was read and encoded of this job by all runs so far (:attr:`base`,
+from the ledger), with the size after shrinking in brackets, and what
+is still to go in this run's plan. Percentage and ETA follow from these;
+a start or a reload therefore does not reset the figures, and a run on
+another root or with other filters shows only its own job.
+
+With several encodes at the same time (:meth:`show_many`) one file line
+is drawn per running video.
 
 Attributes:
     total_bytes: Bytes of all files of the run.
@@ -1517,7 +1596,7 @@ Attributes:
     drawn: Number of lines on the screen (0: nothing drawn).
     status: Status file for ``mediatools attach`` (lines written at most
         once per :attr:`STATUS_SECONDS`); see :attr:`status_path`.
-    base: Work of all shrink runs before this process.
+    base: Work done for this job before this process.
 ~~~
 
 **`__init__`**
@@ -1611,6 +1690,7 @@ file_line(
     file_fraction: float = 0.0,
     file_bytes: int = 0,
     width: int | None = None,
+    share: int = 1,
 ) -> str
 
 Build the line of the current file.
@@ -1621,6 +1701,8 @@ Args:
     file_bytes: Size of the current file.
     width: Maximum length; a longer name is shortened in the middle,
         so that its start and end stay visible. None: no limit.
+    share: Number of files encoded at the same time; each gets this
+        part of the measured speed.
 
 Returns:
     Text without line break, e.g.
@@ -1630,21 +1712,12 @@ Returns:
 **`_write_status`**
 
 ~~~text
-_write_status(
-    self,
-    name: str,
-    file_fraction: float,
-    file_bytes: int,
-    extra: str = '',
-) -> None
+_write_status(self, lines: list[str]) -> None
 
 Replace the status file with all lines (rate-limited, atomic).
 
 Args:
-    name: Name of the current file.
-    file_fraction: Encoded fraction of the current file (0..1).
-    file_bytes: Size of the current file.
-    extra: Optional third line; empty for none.
+    lines: Status lines without line breaks.
 ~~~
 
 **`show`**
@@ -1658,13 +1731,25 @@ show(
     extra: str = '',
 ) -> None
 
-Redraw the status lines on a terminal.
+Redraw the status lines of one running file.
 
 Args:
     name: Name of the current file.
     file_fraction: Encoded fraction of the current file (0..1).
     file_bytes: Size of the current file.
     extra: Optional third line; empty for none.
+~~~
+
+**`show_many`**
+
+~~~text
+show_many(self, files: list[tuple[str, float, int]], extra: str = '') -> None
+
+Redraw the status lines of one or more running files.
+
+Args:
+    files: ``(name, encoded fraction, size)`` per running file.
+    extra: Optional last line; empty for none.
 ~~~
 
 **`file_done`**
@@ -1717,19 +1802,23 @@ Returns:
 ### `ProgressBase` (`mediatools.core.progressbase`) {.unnumbered}
 
 ~~~text
-What all shrink runs had already read when this process started.
+What earlier runs had already read of this job when this process started.
 
-The first progress line shows the whole job: everything read since the
-first shrink log (``since``) plus what this process reads, against what
-is still to go. Without this base the line would only count the current
-process and start at zero after every start or ``mediatools reload``.
+The first progress line shows the whole job: everything read of it
+since its first finished file (``since``) plus what this process reads,
+against what is still to go. Without this base the line would only
+count the current process and start at zero after every start or
+``mediatools reload``. Since 1.6.0 the figures come from the ledger and
+only count files of the job (root and filters, :class:`JobSpec`).
 
 Attributes:
-    read: Source bytes encoded before this process (all shrink logs).
-    files: Files encoded before this process.
-    since: Date of the first shrink log, e.g. ``2026-11-09``; empty if none.
-    after: Returns the size after shrinking of everything shrunk so far,
+    read: Source bytes of the job encoded before this process.
+    files: Files of the job encoded before this process.
+    since: Date of the job's first finished file, e.g. ``2026-11-09``;
+        empty if none.
+    after: Returns the size after shrinking of the job's shrunk files,
         or None to leave that figure out.
+    written: Output bytes of the job's shrunk files before this process.
 ~~~
 
 **`__init__`**
@@ -1741,6 +1830,7 @@ __init__(
     files: int = 0,
     since: str = '',
     after: Callable[[], int] | None = None,
+    written: int = 0,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -2103,7 +2193,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.5.1') -> None
+__init__(self, control: RunControl, installed: str = '1.6.0') -> None
 
 Remember the job and the installed release.
 
@@ -2367,7 +2457,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.5.1')
+__init__(self, package_dir: str | None = None, version: str = '1.6.0')
 
 Locate the imported package.
 
@@ -2840,6 +2930,17 @@ Args:
     decode: Trial decode of the output, or None (no decode check).
 ~~~
 
+**`clone`**
+
+~~~text
+clone(self) -> HevcEncoder
+
+Return an encoder with the same settings for a parallel slot.
+
+Returns:
+    A new encoder without a running process.
+~~~
+
 **`default_threads`**
 
 ~~~text
@@ -2996,6 +3097,459 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
+### `JobChooser` (`mediatools.shrink.jobchooser`) {.unnumbered}
+
+~~~text
+Lists the remembered jobs and lets the user pick one to continue.
+
+Used when ``mediatools shrink`` is called without any argument on a
+terminal and no shrink runs: instead of silently starting the default
+job, the jobs run so far are listed with their settings and progress,
+the most recently active first. The answer is a number (continue that
+job), ``n`` (new job with the defaults) or ``q`` (end).
+
+Attributes:
+    registry: Remembered jobs.
+    ask: Reads one answer (``input``).
+    say: Prints one line (``print``).
+    limit: Most jobs listed.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    registry: JobRegistry,
+    ask: Callable[[str], str] | None = None,
+    say: Callable[[str], None] | None = None,
+    limit: int = 9,
+)
+
+Prepare the selection.
+
+Args:
+    registry: Remembered jobs.
+    ask: Reads one answer; ``input`` if None.
+    say: Prints one line; ``print`` if None.
+    limit: Most jobs listed.
+~~~
+
+**`choose`**
+
+~~~text
+choose(self) -> list[str] | None
+
+Show the jobs and read the choice.
+
+Returns:
+    Arguments of the chosen job (``["shrink", root, ...]``), an empty
+    list for a new job with the defaults, or None to end. With no
+    remembered job: an empty list without asking.
+~~~
+
+### `JobEntry` (`mediatools.shrink.jobregistry`) {.unnumbered}
+
+~~~text
+A remembered job.
+
+Attributes:
+    spec: Root and filters.
+    settings: Settings of the last run: ``crf``, ``order``, ``jobs``.
+    last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
+    todo_bytes: Source bytes still to encode (as of the last plan, minus
+        the files finished since).
+    todo_files: Files still to encode.
+    read: Source bytes encoded so far (from the ledger).
+    done_files: Files encoded so far (from the ledger).
+~~~
+
+**`fraction`**
+
+~~~text
+fraction(self) -> float
+
+Share of the job that is done (0..1).
+~~~
+
+**`argv`**
+
+~~~text
+argv(self) -> list[str]
+
+Return the arguments of ``mediatools`` that continue this job.
+
+Returns:
+    ``["shrink", root, --crf ..., filters ...]``.
+~~~
+
+**`gauge`**
+
+~~~text
+gauge(self, width: int = 20) -> str
+
+Return a text progress bar.
+
+Args:
+    width: Number of cells.
+
+Returns:
+    Text such as ``███████░░░░░░░░░░░░░``.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    spec: JobSpec,
+    settings: dict[str, object] = <factory>,
+    last: str = '',
+    todo_bytes: int = 0,
+    todo_files: int = 0,
+    read: int = 0,
+    done_files: int = 0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `JobRegistry` (`mediatools.shrink.jobregistry`) {.unnumbered}
+
+~~~text
+``<state>/jobs.json``: the shrink jobs run so far.
+
+A job is entered when a run has planned it, with its settings and what
+is still to encode, and updated after every finished video, so the list
+shows the progress of a running job as well. The figures already done
+come from the :class:`Ledger` when the list is read.
+
+Attributes:
+    path: Location of the JSON file.
+    ledger: Source of the figures already done, or None.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str, ledger: Ledger | None = None)
+
+Bind the registry to its file.
+
+Args:
+    path: Location of ``jobs.json``.
+    ledger: Ledger for the figures already done; None leaves them 0.
+~~~
+
+**`_load`**
+
+~~~text
+_load(self) -> dict[str, dict]
+
+Read the file.
+
+Returns:
+    Raw entries by job key; empty if missing or damaged.
+~~~
+
+**`_save`**
+
+~~~text
+_save(self, data: dict[str, dict]) -> None
+
+Write the file atomically.
+
+Args:
+    data: Raw entries by job key.
+~~~
+
+**`planned`**
+
+~~~text
+planned(
+    self,
+    spec: JobSpec,
+    settings: dict[str, object],
+    todo_bytes: int,
+    todo_files: int,
+) -> None
+
+Enter or update a job after its plan.
+
+Args:
+    spec: Root and filters.
+    settings: ``crf``, ``order``, ``jobs`` of this run.
+    todo_bytes: Source bytes to encode.
+    todo_files: Files to encode.
+~~~
+
+**`finished_file`**
+
+~~~text
+finished_file(self, spec: JobSpec, size: int) -> None
+
+Take one finished (or skipped) video off the job's remainder.
+
+Args:
+    spec: The running job.
+    size: Its source size in bytes.
+~~~
+
+**`entries`**
+
+~~~text
+entries(self) -> list[JobEntry]
+
+Return the jobs, the most recently active first.
+
+Returns:
+    Jobs with the figures done taken from the ledger.
+~~~
+
+**`line`**
+
+~~~text
+line(entry: JobEntry) -> str
+
+Format one job for the selection list.
+
+Args:
+    entry: The job.
+
+Returns:
+    Text such as
+    ``2026-11-13 21:40  ████░░░░  37.2 %  412 GiB done, 695 GiB to go  crf 28  /m/c``.
+~~~
+
+### `JobSpec` (`mediatools.shrink.jobspec`) {.unnumbered}
+
+~~~text
+The set of videos of a shrink job.
+
+A *job* is defined by what it selects - the root directory and the
+filters - not by how it encodes: the CRF, the order and the number of
+parallel encodes are settings of a run and may change between runs of
+the same job. Every file finished by any run counts for each job whose
+set contains it (:meth:`matches`), so a job that is continued with
+other settings, or a subtree shrunk on its own, is counted correctly.
+
+Attributes:
+    root: Absolute start directory.
+    extensions: Processed extensions (lower case, with dot).
+    min_seconds: Shortest playing time; 0 selects all.
+    min_size: Smallest file size in bytes; 0 selects all.
+    newer_than: Earliest modification time (epoch seconds), or None.
+~~~
+
+**`parse_size`**
+
+~~~text
+parse_size(cls, text: str) -> int
+
+Parse a size such as ``300M`` (decimal units, like the MB of the logs).
+
+Args:
+    text: Number with an optional unit K, M, G or T (B optional).
+
+Returns:
+    Bytes.
+
+Raises:
+    ValueError: If the text is not a size.
+~~~
+
+**`parse_date`**
+
+~~~text
+parse_date(text: str) -> float
+
+Parse a date ``YYYY-MM-DD`` (local midnight).
+
+Args:
+    text: The date.
+
+Returns:
+    Epoch seconds.
+
+Raises:
+    ValueError: If the text is not such a date.
+~~~
+
+**`size_text`**
+
+~~~text
+size_text(size: int) -> str
+
+Format a size with the largest whole decimal unit.
+
+Args:
+    size: Bytes.
+
+Returns:
+    Text such as ``300M``.
+~~~
+
+**`as_dict`**
+
+~~~text
+as_dict(self) -> dict[str, object]
+
+Return the job as plain values (JSON).
+
+Returns:
+    Root, sorted extensions and the filters.
+~~~
+
+**`from_dict`**
+
+~~~text
+from_dict(cls, data: dict) -> JobSpec
+
+Rebuild a job from :meth:`as_dict`.
+
+Args:
+    data: Plain values.
+
+Returns:
+    The job.
+~~~
+
+**`key`**
+
+~~~text
+key(self) -> str
+
+Short stable identifier of the job.
+
+Returns:
+    12 hex characters derived from :meth:`as_dict`.
+~~~
+
+**`filters`**
+
+~~~text
+filters(self) -> list[str]
+
+Return the filters as command-line options.
+
+Returns:
+    Options that differ from the defaults, e.g. ``--min-size 300M``.
+~~~
+
+**`label`**
+
+~~~text
+label(self) -> str
+
+Return a one-line description.
+
+Returns:
+    Root followed by the filters, e.g. ``/media/c  --min-size 300M``.
+~~~
+
+**`contains`**
+
+~~~text
+contains(self, path: str) -> bool
+
+Return whether a path lies below the root with a processed extension.
+
+Args:
+    path: Absolute file path.
+
+Returns:
+    True if the path is part of the tree and extension set.
+~~~
+
+**`matches`**
+
+~~~text
+matches(self, row: LedgerRow) -> bool
+
+Return whether a finished file belongs to this job.
+
+Unknown values (playing time of an old log row, modification time
+of rows filled in from logs) pass a playing-time filter but fail a
+date filter, which would otherwise count files of unknown age.
+
+Args:
+    row: Ledger entry.
+
+Returns:
+    True if the file is part of the job's set.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    root: str,
+    extensions: frozenset = <factory>,
+    min_seconds: float = 0.0,
+    min_size: int = 0,
+    newer_than: float | None = None,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+**`__setattr__`**
+
+~~~text
+__setattr__(self, name, value)
+
+Implement setattr(self, name, value).
+~~~
+
+**`__delattr__`**
+
+~~~text
+__delattr__(self, name)
+
+Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
+~~~
+
 ### `ReplaceJournal` (`mediatools.shrink.journal`) {.unnumbered}
 
 ~~~text
@@ -3082,6 +3636,365 @@ Args:
     path: Directory.
 ~~~
 
+### `Ledger` (`mediatools.shrink.ledger`) {.unnumbered}
+
+~~~text
+``<data>/ledger.tsv``: one line per finished video, never rewritten.
+
+The ledger is the source of the job, session and overall figures. It
+lives with the kept data (``~/.local/share/mediatools``), is only
+appended to and has mode 600, as it lists paths of the collection.
+If it does not exist, it is filled in once from the result tables of
+the shrink logs (:class:`LogBackfill`), so nothing counted before 1.6.0
+is lost. Resetting the overall figures therefore takes deleting the
+ledger *and* the logs on purpose.
+
+Attributes:
+    path: Location of the ledger.
+    logs: Folder of the shrink logs (source of the first filling).
+    cache: Parsed entries with the file size they were read at.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str, logs: str | None = None)
+
+Bind the ledger to its file.
+
+Args:
+    path: Location of ``ledger.tsv``.
+    logs: Folder of the shrink logs; None never fills in.
+~~~
+
+**`ensure`**
+
+~~~text
+ensure(self) -> int
+
+Create the ledger, filled in from the logs, if it does not exist.
+
+Returns:
+    Number of entries taken from the logs (0 if it existed).
+~~~
+
+**`add`**
+
+~~~text
+add(self, row: LedgerRow) -> None
+
+Append one entry and flush it.
+
+Args:
+    row: The finished video.
+~~~
+
+**`rows`**
+
+~~~text
+rows(self) -> list[LedgerRow]
+
+Return all entries (read again only when the file grew).
+
+Returns:
+    Entries, oldest first; empty if there is no ledger.
+~~~
+
+**`sums`**
+
+~~~text
+sums(self, job: JobSpec | None = None, session: str | None = None) -> LedgerSums
+
+Sum the entries of a job, of a session, or all.
+
+Args:
+    job: Only entries of this job; None for all.
+    session: Only entries of this session; None for all.
+
+Returns:
+    Totals.
+~~~
+
+### `LedgerSums` (`mediatools.shrink.ledger`) {.unnumbered}
+
+~~~text
+Totals over a selection of ledger entries.
+
+Attributes:
+    read: Source bytes of the encoded videos (``shrunk``, ``copy``,
+        ``FAILED``).
+    files: Number of those videos.
+    freed_src: Source bytes of the shrunk videos.
+    freed_out: Output bytes of the shrunk videos.
+    since: Date of the first entry (``YYYY-MM-DD``), empty if none.
+~~~
+
+**`add`**
+
+~~~text
+add(self, row: LedgerRow) -> None
+
+Count one entry.
+
+Args:
+    row: Ledger entry.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    read: int = 0,
+    files: int = 0,
+    freed_src: int = 0,
+    freed_out: int = 0,
+    since: str = '',
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `LedgerRow` (`mediatools.shrink.ledgerrow`) {.unnumbered}
+
+~~~text
+A video finished by a shrink run, as kept in ``ledger.tsv``.
+
+Attributes:
+    when: End time, ``YYYY-MM-DD HH:MM:SS``.
+    session: Session name (log file name without ``.log``).
+    status: ``shrunk``, ``copy``, ``FAILED``, ``BROKEN`` or ``HEVC``.
+    source: Size before, in bytes.
+    result: Size after, in bytes, or None.
+    took: Wall-clock seconds spent on the file.
+    length: Playing time in seconds, or None if unknown.
+    mtime: Modification time of the original (epoch seconds), or None
+        if unknown (rows filled in from logs).
+    path: Absolute path of the video.
+~~~
+
+**`_optional`**
+
+~~~text
+_optional(text: str, kind: type) -> float | int | None
+
+Parse an optional number.
+
+Args:
+    text: Field text; empty for None.
+    kind: ``int`` or ``float``.
+
+Returns:
+    The number, or None.
+~~~
+
+**`_text`**
+
+~~~text
+_text(value: float | int | None, fmt: str) -> str
+
+Format an optional number.
+
+Args:
+    value: The number, or None.
+    fmt: Format specification.
+
+Returns:
+    The text; empty for None.
+~~~
+
+**`line`**
+
+~~~text
+line(self) -> str
+
+Return the TSV line (without line break).
+
+Tabs and line breaks in the path are replaced by spaces.
+
+Returns:
+    Nine tab-separated fields.
+~~~
+
+**`parse`**
+
+~~~text
+parse(cls, line: str) -> LedgerRow | None
+
+Parse one TSV line.
+
+Args:
+    line: Line of ``ledger.tsv``.
+
+Returns:
+    The entry, or None for a comment or a damaged line.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    when: str,
+    session: str,
+    status: str,
+    source: int,
+    result: int | None,
+    took: float,
+    length: float | None,
+    mtime: float | None,
+    path: str,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `LogBackfill` (`mediatools.shrink.logbackfill`) {.unnumbered}
+
+~~~text
+Reads the boxed result tables of shrink logs written before the ledger.
+
+Each result row starts with its number and may continue on further
+lines that carry only the next piece of the path (the path is wrapped
+after ``/`` or a space, see :class:`ResultTable`). The shrink root is
+taken from the line ``shrink root: <root>  mode: ...`` that every run
+writes first. Sizes are in MB (10^6 bytes, rounded), times in minutes
+with one decimal; the modification time of the original is unknown.
+
+Attributes:
+    folder: Folder of the ``shrink_*.log`` files.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, folder: str)
+
+Choose the log folder.
+
+Args:
+    folder: Folder with the shrink logs.
+~~~
+
+**`logs`**
+
+~~~text
+logs(self) -> list[str]
+
+Return the shrink logs, oldest first.
+
+Returns:
+    Paths.
+~~~
+
+**`rows`**
+
+~~~text
+rows(self) -> list[LedgerRow]
+
+Return the finished videos of all logs.
+
+Returns:
+    Ledger entries, oldest first.
+~~~
+
+**`number`**
+
+~~~text
+number(text: str, unit: str) -> float | None
+
+Parse a figure such as ``1148 MB`` or ``44.3 min``.
+
+Args:
+    text: Cell text.
+    unit: Expected unit.
+
+Returns:
+    The number, or None for ``-``.
+~~~
+
+**`read`**
+
+~~~text
+read(self, path: str) -> list[LedgerRow]
+
+Return the finished videos of one log.
+
+Args:
+    path: Log file.
+
+Returns:
+    Ledger entries in log order.
+~~~
+
+**`_start`**
+
+~~~text
+_start(self, when: str, session: str, cells: list[str]) -> LedgerRow
+
+Create the entry of a result row (path follows).
+
+Args:
+    when: Time stamp of the log line.
+    session: Session name.
+    cells: The nine cells.
+
+Returns:
+    Entry without path.
+~~~
+
+**`_close`**
+
+~~~text
+_close(row: LedgerRow, pieces: list[str], root: str) -> LedgerRow
+
+Join the path pieces and make the path absolute.
+
+A piece that fills its cell completely was cut inside a word (marked
+with a trailing NUL) and is joined without a space, as is a piece
+ending with ``/``; other pieces were broken at a space.
+
+Args:
+    row: Entry without path.
+    pieces: Path pieces of the row.
+    root: Shrink root of the log.
+
+Returns:
+    The entry with its path.
+~~~
+
 ### `ShrinkOptions` (`mediatools.shrink.options`) {.unnumbered}
 
 ~~~text
@@ -3097,6 +4010,10 @@ Attributes:
     retry_failed: Include videos recorded as failed (``FAILED`` or
         ``BROKEN``) in an earlier run; by default they are left out
         while their size is unchanged.
+    min_size: Leave out videos smaller than this many bytes; 0 processes all.
+    newer_than: Leave out videos modified before this time (epoch
+        seconds); None processes all.
+    jobs: Number of videos encoded at the same time (1: one after the other).
 ~~~
 
 **`__post_init__`**
@@ -3107,7 +4024,8 @@ __post_init__(self) -> None
 Validate the values.
 
 Raises:
-    ValueError: If ``order`` is unknown or ``min_seconds`` negative.
+    ValueError: If ``order`` is unknown, ``min_seconds`` or ``min_size``
+        negative or ``jobs`` below 1.
 ~~~
 
 **`__init__`**
@@ -3121,6 +4039,9 @@ __init__(
     order: str = 'largest',
     min_seconds: float = 0.0,
     retry_failed: bool = False,
+    min_size: int = 0,
+    newer_than: float | None = None,
+    jobs: int = 1,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -3180,7 +4101,8 @@ a file that is now clearly larger than recorded (``regrown``, e.g. an
 original restored from a backup over its shrunk version) and whose
 video is not HEVC is planned again. A video recorded as failed
 (``FAILED`` or ``BROKEN``) with unchanged size is left out unless
-``retry_failed`` is set. Then optionally drop
+``retry_failed`` is set. Videos smaller than ``min_size`` or modified
+before ``newer_than`` are left out first. Then optionally drop
 videos shorter than ``min_seconds``, set aside videos that are already
 HEVC and sort the rest (``largest`` first, ``smallest`` first or walk
 order ``path``).
@@ -3197,7 +4119,7 @@ Attributes:
     database_of: Returns the database of a directory.
     journal: Completes interrupted replacements.
     stats: Shared counters ``skipped``, ``short``, ``recovered``,
-        ``failed_before``, ``regrown``.
+        ``failed_before``, ``regrown``, ``small``, ``older``.
     found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
 ~~~
 
@@ -3256,6 +4178,21 @@ Args:
 Returns:
     ``(path, size)`` if it is to be encoded, else None (other
     extension, link, placeholder, recorded or recorded as failed).
+~~~
+
+**`_wanted`**
+
+~~~text
+_wanted(self, path: str, size: int) -> bool
+
+Apply the size and date filters.
+
+Args:
+    path: Video file.
+    size: Its size in bytes.
+
+Returns:
+    True if the video passes ``min_size`` and ``newer_than``.
 ~~~
 
 **`_video_size`**
@@ -3946,6 +4883,14 @@ original is untouched. Signals never interrupt the replacement itself.
 
 **Crash safety.** See :class:`ReplaceJournal`.
 
+**Parallel encodes** (``opts.jobs`` > 1, since 1.6.0). Only ffmpeg runs
+in worker threads, one :class:`HevcEncoder` per slot; checks,
+replacement, databases, ledger, table and display stay in the main
+thread. Two paths of the same inode (hard links) never run at the same
+time, and a work folder is removed only when no encode runs in it.
+A stop or reload starts no further file and waits for the running
+ones; an abort stops all of them.
+
 **New release during a run.** ``mediatools reload`` (also sent by
 ``mediatools update``) asks the job to switch to the installed release.
 Between two files - never during an encode or a replacement - the job
@@ -4102,6 +5047,92 @@ Returns:
     See :meth:`run`.
 ~~~
 
+**`settings`**
+
+~~~text
+settings(self) -> dict[str, object]
+
+Return the settings of this run that do not define the job.
+
+Returns:
+    ``crf``, ``order`` and ``jobs``.
+~~~
+
+**`_encode_serial`**
+
+~~~text
+_encode_serial(self, todo: list[tuple[str, int]]) -> None
+
+Encode the planned videos one after the other.
+
+Args:
+    todo: Planned videos.
+~~~
+
+**`_job_progress`**
+
+~~~text
+_job_progress(self, size: int) -> None
+
+Take a finished or skipped video off the job's remainder.
+
+Args:
+    size: Its source size.
+~~~
+
+**`_slots`**
+
+~~~text
+_slots(self) -> list[HevcEncoder]
+
+Create one encoder per parallel slot.
+
+Returns:
+    ``opts.jobs`` encoders; the first is :attr:`encoder`.
+~~~
+
+**`_encode_parallel`**
+
+~~~text
+_encode_parallel(self, todo: list[tuple[str, int]]) -> None
+
+Encode up to ``opts.jobs`` videos at the same time.
+
+Args:
+    todo: Planned videos.
+~~~
+
+**`_start_free_slots`**
+
+~~~text
+_start_free_slots(
+    self,
+    pool: ThreadPoolExecutor,
+    table: SlotTable,
+    pending: deque,
+) -> None
+
+Start planned videos in the free slots (not after a stop or reload).
+
+Args:
+    pool: Worker threads.
+    table: Slot bookkeeping.
+    pending: Planned videos not yet started.
+~~~
+
+**`_collect`**
+
+~~~text
+_collect(self, table: SlotTable, future: Future, busy: int) -> None
+
+Finish one encode of a slot: check, replace, record, count.
+
+Args:
+    table: Slot bookkeeping.
+    future: The finished encode.
+    busy: Encodes that were running (share of the speed measurement).
+~~~
+
 **`_report_plan`**
 
 ~~~text
@@ -4139,6 +5170,22 @@ Returns:
     (removed, recorded meanwhile, or HEVC by now - e.g. a hard link
     of a file shrunk earlier in this run) or its data cannot be
     decoded.
+~~~
+
+**`_prepare`**
+
+~~~text
+_prepare(self, path: str, size: int) -> tuple[str, ShrinkDatabase] | None
+
+Check one planned video and create its work folder.
+
+Args:
+    path: Absolute path of the video.
+    size: Its size when planned.
+
+Returns:
+    Output path and database, or None if the video needs no encode
+    (see :meth:`_process`).
 ~~~
 
 **`_broken`**
@@ -4222,6 +5269,49 @@ Args:
     size: Its size.
     out: Output path in ``newShrinkedFiles/``.
     database: Database of its directory.
+~~~
+
+**`_length`**
+
+~~~text
+_length(self, path: str) -> float | None
+
+Return the playing time from the duration cache.
+
+Args:
+    path: Video file.
+
+Returns:
+    Seconds, or None if not cached (or no cache is used).
+~~~
+
+**`_complete`**
+
+~~~text
+_complete(
+    self,
+    path: str,
+    size: int,
+    out: str,
+    database: ShrinkDatabase,
+    ok: bool,
+    length: float | None,
+    took: float,
+    share: int = 1,
+) -> None
+
+Check the result of one encode and replace the original.
+
+Args:
+    path: Original video.
+    size: Its size.
+    out: Output path in ``newShrinkedFiles/``.
+    database: Database of its directory.
+    ok: True if the encoder validated the output.
+    length: Playing time, or None.
+    took: Wall-clock seconds of the encode.
+    share: Encodes that ran at the same time; the speed measurement
+        counts ``took / share``.
 ~~~
 
 **`_result`**
@@ -4336,7 +5426,163 @@ Attributes:
     restart: Switch to a newly installed release on request, or None
         (requests are ignored).
     space: Space read, written and freed, this session and overall.
-    base: Work of all shrink runs before this process (progress line).
+    base: Work done for the job before this process (progress line).
+    ledger: Record of every finished video, or None (nothing recorded).
+    registry: Remembered jobs with their remainder, or None.
+    job: Root and filters of this run, or None.
+    session: Name of the session (log name without ``.log``).
+    encoders: Encoders of the parallel slots (the first is the run's
+        encoder).
+    mtimes: Modification times of the videos being encoded, taken
+        before the replacement (for the ledger).
+~~~
+
+### `RunningEncode` (`mediatools.shrink.slottable`) {.unnumbered}
+
+~~~text
+One encode in a slot.
+
+Attributes:
+    slot: Slot number (index of its encoder).
+    path: Original video.
+    size: Its size.
+    out: Output path in ``newShrinkedFiles/``.
+    database: Database of its directory.
+    inode: ``(device, inode)`` of the original, or None.
+    length: Playing time, or None.
+    started: Monotonic start time.
+    cell: ``[name, encoded fraction, size]`` for the display; the
+        worker thread updates the fraction.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    slot: int,
+    path: str,
+    size: int,
+    out: str,
+    database: ShrinkDatabase,
+    inode: tuple[int, int] | None,
+    length: float | None,
+    started: float = <factory>,
+    cell: list = <factory>,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `SlotTable` (`mediatools.shrink.slottable`) {.unnumbered}
+
+~~~text
+Which slots are free, what runs where, and what must not run together.
+
+Two names of one inode (hard links) must not be encoded at the same
+time: both replacements would write the same file. A work folder
+``newShrinkedFiles/`` may be removed only when no encode of its
+directory runs. Only the main thread uses this table; the worker
+threads only write the fraction into their :attr:`RunningEncode.cell`.
+
+Attributes:
+    free: Free slot numbers.
+    running: Encodes by their future.
+    inodes: Inodes being encoded.
+    folders: Running encodes per directory.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, slots: int)
+
+Start with all slots free.
+
+Args:
+    slots: Number of slots.
+~~~
+
+**`inode`**
+
+~~~text
+inode(path: str) -> tuple[int, int] | None
+
+Return device and inode of a file.
+
+Args:
+    path: File.
+
+Returns:
+    ``(st_dev, st_ino)``, or None if the file is gone.
+~~~
+
+**`blocked`**
+
+~~~text
+blocked(self, path: str) -> bool
+
+Return whether another name of this file is being encoded.
+
+Args:
+    path: Planned video.
+
+Returns:
+    True if it has to wait.
+~~~
+
+**`take`**
+
+~~~text
+take(self, future: Future, item: RunningEncode) -> None
+
+Record an encode that was started in ``item.slot``.
+
+Args:
+    future: Its future.
+    item: The encode.
+~~~
+
+**`release`**
+
+~~~text
+release(self, future: Future) -> tuple[RunningEncode, bool]
+
+Free the slot of a finished encode.
+
+Args:
+    future: Its future.
+
+Returns:
+    The encode and whether no other encode of its directory runs
+    (its work folder may then be removed).
+~~~
+
+**`cells`**
+
+~~~text
+cells(self) -> list[tuple[str, float, int]]
+
+Return the display data of the running encodes.
+
+Returns:
+    ``(name, fraction, size)`` per running encode, in slot order.
 ~~~
 
 ### `SpaceTally` (`mediatools.shrink.spacetally`) {.unnumbered}
@@ -4347,13 +5593,14 @@ Counts how much was read, written and freed by shrinking.
 The overall progress line counts *source* bytes, i.e. how much was read
 and encoded. The space freed on disk is the source size minus the size of
 the shrunk file. This class keeps two views, both taken from the result
-tables of the shrink logs (:class:`SavingsLog`) when the run starts and
-then counted on per replaced file:
+tables of the shrink logs (:class:`SavingsLog`) or, since 1.6.0, from the
+ledger (:meth:`from_ledger`) when the run starts and then counted on per
+replaced file:
 
 * this session: everything shrunk since the session started. A session
   is one log; ``mediatools reload`` continues the log, so the session
   (unlike the process) survives a release switch;
-* overall: all shrink logs, labelled with the date of the first shrunk
+* overall (``total``): all finished files, labelled with the date of the first shrunk
   file (``since 2026-10-20``).
 
 Copies kept with ``--keep-copies`` free no space and are not counted.
@@ -4403,6 +5650,22 @@ Args:
 Returns:
     A tally with all logs as overall state and the current log as
     session state.
+~~~
+
+**`from_ledger`**
+
+~~~text
+from_ledger(cls, ledger: Ledger, session: str | None) -> SpaceTally
+
+Start from the ledger.
+
+Args:
+    ledger: The ledger of all finished videos.
+    session: Name of this session (log name without ``.log``), or None.
+
+Returns:
+    A tally with all entries as overall state and the entries of the
+    session as session state.
 ~~~
 
 **`add`**
@@ -7077,6 +8340,12 @@ is replaced by the dashboard. Every command runs as a child process
 with the same interpreter as the GUI; one command per tab may run at a
 time, different tabs may run at the same time.
 
+Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
+fills the form, *Continue* runs it); the menu *View* changes the font
+size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme
+(:class:`Appearance`); a newly installed release is noticed (checked
+every :attr:`UPDATE_SECONDS`) and a restart offered in a bar above the tabs.
+
 Attributes:
     root: Tk main window.
     catalog: Subcommands read from the argument parser.
@@ -7087,6 +8356,10 @@ Attributes:
     notebook: The tabs.
     icon: Window icon (kept so Tk does not discard it).
     ask: Confirmation dialog, replaceable in tests.
+    appearance: Font size and colour scheme; holds the configuration
+        file (``[gui]`` settings).
+    updates: Bar shown when a newer release is installed.
+    restarter: Replaces the process by a new GUI (replaceable in tests).
 ~~~
 
 **`__init__`**
@@ -7099,6 +8372,7 @@ __init__(
     store: FormStore | None = None,
     ask: Callable[[str, str], bool] = askyesno,
     refresh_ms: int = 2000,
+    config: Config | None = None,
 )
 
 Build the window.
@@ -7109,6 +8383,7 @@ Args:
     store: Remembered form values; the default file if None.
     ask: Confirmation dialog (title, text) -> yes.
     refresh_ms: Refresh interval of the shrink dashboard (0: manual).
+    config: Configuration file; the default file if None.
 ~~~
 
 **`_menu`**
@@ -7166,6 +8441,89 @@ remove_desktop(self) -> None
 Remove the application menu entry.
 ~~~
 
+**`_zoom_key`**
+
+~~~text
+_zoom_key(self, steps: int) -> Callable[[tk.Event], None]
+
+Return the key handler of one zoom shortcut.
+
+Args:
+    steps: See :meth:`zoom`.
+
+Returns:
+    Handler that ignores its event.
+~~~
+
+**`zoom`**
+
+~~~text
+zoom(self, steps: int) -> None
+
+Change the text size (see :meth:`Appearance.zoom`).
+
+Args:
+    steps: +1 larger, -1 smaller, 0 normal.
+~~~
+
+**`job_values`**
+
+~~~text
+job_values(entry: JobEntry) -> dict[str, str]
+
+Return the shrink form values of a remembered job.
+
+Args:
+    entry: The job.
+
+Returns:
+    Values by ``dest`` of the shrink form.
+~~~
+
+**`pick_job`**
+
+~~~text
+pick_job(self, entry: JobEntry, start: bool = False) -> bool
+
+Fill the shrink form with a job; optionally run it.
+
+Args:
+    entry: The chosen job.
+    start: Run the form afterwards.
+
+Returns:
+    True if the form was filled (and, with ``start``, started).
+~~~
+
+**`check_update`**
+
+~~~text
+check_update(self) -> None
+
+Check for a newly installed release; show the bar a little later.
+~~~
+
+**`restart`**
+
+~~~text
+restart(self) -> bool
+
+Close the window (asking about running commands) and start a new GUI.
+
+A running shrink is not affected; the new window shows it again.
+
+Returns:
+    False if the user kept the window open.
+~~~
+
+**`_exec_gui`**
+
+~~~text
+_exec_gui() -> None
+
+Replace this process by ``mediatools gui`` of the installed release.
+~~~
+
 **`undo_plan`**
 
 ~~~text
@@ -7200,6 +8558,159 @@ the GUI once it has moved into the background.
 
 Returns:
     True if the window was closed.
+~~~
+
+### `Appearance` (`mediatools.gui.appearance`) {.unnumbered}
+
+~~~text
+Applies a flat, calm style with a selectable size and colour scheme.
+
+Tk's default look on Linux dates from the 1990s: grey bevelled
+buttons and small fonts. This class builds a style on the ``clam``
+theme, which ships with every Tk and can be coloured completely: flat
+surfaces, one accent colour (selected tab, progress bars, the *Run*
+button), more padding and fonts scaled by :attr:`scale`. Classic Tk
+widgets (text areas, menus) are coloured as well. No extra package is
+needed.
+
+The settings live in ``[gui]`` of ``mediatools.ini``: ``scale``
+(1.0 = 10 pt; :attr:`MIN_SCALE` to :attr:`MAX_SCALE`) and ``theme``
+(``light`` or ``dark``). :meth:`zoom` and :meth:`toggle_theme` apply a
+change at once and save it.
+
+Attributes:
+    root: Tk main window.
+    config: Configuration file, or None (nothing is saved).
+    scale: Font scale.
+    theme: ``light`` or ``dark``.
+    style: ttk style object.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: tk.Misc, config: Config | None = None)
+
+Read the settings.
+
+Args:
+    root: Tk main window.
+    config: Configuration file; None uses the defaults and saves nothing.
+~~~
+
+**`_number`**
+
+~~~text
+_number(self, key: str, fallback: float) -> float
+
+Read a number of ``[gui]``.
+
+Args:
+    key: Key in ``[gui]``.
+    fallback: Value if unset or not a number.
+
+Returns:
+    The number.
+~~~
+
+**`clamp`**
+
+~~~text
+clamp(cls, scale: float) -> float
+
+Limit a scale to the allowed range.
+
+Args:
+    scale: Requested scale.
+
+Returns:
+    Scale between :attr:`MIN_SCALE` and :attr:`MAX_SCALE`, one decimal.
+~~~
+
+**`colors`**
+
+~~~text
+colors(self) -> dict[str, str]
+
+Colours of the current scheme.
+~~~
+
+**`points`**
+
+~~~text
+points(self) -> int
+
+Return the base font size.
+
+Returns:
+    Points for the current scale.
+~~~
+
+**`apply`**
+
+~~~text
+apply(self) -> None
+
+Apply fonts, ttk styles and the colours of classic widgets.
+~~~
+
+**`_styles`**
+
+~~~text
+_styles(self, size: int) -> None
+
+Configure the ttk styles.
+
+Args:
+    size: Base font size in points.
+~~~
+
+**`_classic`**
+
+~~~text
+_classic(self, widget: tk.Misc) -> None
+
+Colour classic Tk widgets below a widget (text areas, menus, root).
+
+Args:
+    widget: Start of the walk.
+~~~
+
+**`zoom`**
+
+~~~text
+zoom(self, steps: int) -> float
+
+Change the font scale and save it.
+
+Args:
+    steps: +1 larger, -1 smaller, 0 back to 1.0.
+
+Returns:
+    The new scale.
+~~~
+
+**`toggle_theme`**
+
+~~~text
+toggle_theme(self) -> str
+
+Switch between light and dark and save it.
+
+Returns:
+    The new scheme.
+~~~
+
+**`save`**
+
+~~~text
+save(self, key: str, value: str) -> None
+
+Write one value of ``[gui]``.
+
+Args:
+    key: Key.
+    value: Value.
 ~~~
 
 ### `CommandCatalog` (`mediatools.gui.catalog`) {.unnumbered}
@@ -7748,7 +9259,11 @@ Specification): the scalable SVG and a 256-pixel PNG. ``StartupWMClass``
 matches the window class of the GUI (Tk capitalises the class name
 ``mediatools`` to ``Mediatools``), so the dock shows the running window
 under this entry. The files are written only on request
-(``mediatools gui --install-desktop`` or the GUI menu).
+(``mediatools gui --install-desktop`` or the GUI menu). Since 1.6.0 the
+request is remembered (``[gui] desktop_entry = yes``); the GUI start and
+``mediatools update`` then put back a missing or outdated entry
+(:meth:`problems`, :meth:`repair`), because some launchers or clean-up
+tools drop entries and a moved program would leave a dead one.
 
 Attributes:
     path: Location of the ``.desktop`` file.
@@ -7766,6 +9281,44 @@ Prepare the entry.
 Args:
     program: Absolute path of the ``mediatools`` program.
     path: Location of the file; the user's application folder if None.
+~~~
+
+**`default_program`**
+
+~~~text
+default_program() -> str
+
+Return the program an entry should start.
+
+Returns:
+    ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+    the search path, else this interpreter's script.
+~~~
+
+**`problems`**
+
+~~~text
+problems(self) -> list[str]
+
+Check entry, icons and program.
+
+Returns:
+    One text per problem; empty if the entry is complete and current.
+~~~
+
+**`repair`**
+
+~~~text
+repair(self, wanted: bool) -> list[str]
+
+Put back a missing or outdated entry if one is wanted.
+
+Args:
+    wanted: True if the user asked for the entry (``[gui]
+        desktop_entry = yes``).
+
+Returns:
+    The problems that were repaired; empty if nothing was done.
 ~~~
 
 **`text`**
@@ -7959,6 +9512,80 @@ Remember the values of a command (atomic replace).
 Args:
     command: Subcommand name.
     values: Values by ``dest``.
+~~~
+
+### `JobList` (`mediatools.gui.joblist`) {.unnumbered}
+
+~~~text
+Shows the remembered shrink jobs (:class:`JobRegistry`).
+
+One row per job, the most recently active first: last activity, a
+progress bar with percent (done against still to go), the figures in
+GiB, the settings of the last run and the folder with its filters. The
+list is filled again only when ``jobs.json`` or the ledger changed.
+Selecting a row hands the job to ``on_pick`` (fill the shrink form);
+*Continue* or a double click also asks to start it.
+
+Attributes:
+    jobs: The list widget.
+    monitor: Source of the registry.
+    entries: Jobs shown, by row id.
+    on_pick: Called with a job and whether to start it, or None.
+    signature: State of the job files when the list was last filled.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    monitor: ShrinkMonitor,
+    on_pick: Callable[[JobEntry, bool], object] | None = None,
+)
+
+Build the list.
+
+Args:
+    master: Parent widget.
+    monitor: Source of the registry.
+    on_pick: Receives a selected job and True to start it.
+~~~
+
+**`refresh`**
+
+~~~text
+refresh(self) -> None
+
+Fill the list again if the job files changed.
+~~~
+
+**`_stamp`**
+
+~~~text
+_stamp(path: str) -> tuple[float, int]
+
+Return modification time and size of a file.
+
+Args:
+    path: File.
+
+Returns:
+    ``(mtime, size)``; zeros if missing.
+~~~
+
+**`pick`**
+
+~~~text
+pick(self, start: bool) -> object
+
+Hand the selected job to ``on_pick``.
+
+Args:
+    start: Also start it.
+
+Returns:
+    The result of ``on_pick``, or None without a selection.
 ~~~
 
 ### `JobRunner` (`mediatools.gui.jobrunner`) {.unnumbered}
@@ -8327,6 +9954,7 @@ them.
 Attributes:
     control: Run control of the shrink job.
     logs: Reader of the shrink logs (cached between readings).
+    ledger: Ledger of finished videos (cached between readings), or None.
 ~~~
 
 **`__init__`**
@@ -8350,6 +9978,28 @@ Read the current state.
 
 Returns:
     The state; ``pid`` is None if no shrink runs.
+~~~
+
+**`job_files`**
+
+~~~text
+job_files() -> list[str]
+
+Return the files the job list is built from.
+
+Returns:
+    Paths of ``jobs.json`` and ``ledger.tsv``.
+~~~
+
+**`registry`**
+
+~~~text
+registry(self) -> JobRegistry
+
+Return the remembered shrink jobs with the ledger figures.
+
+Returns:
+    The registry.
 ~~~
 
 **`tail`**
@@ -8403,6 +10053,9 @@ and the end of the log.
 ``mediatools reload``; the run itself continues independently of the
 GUI, which may be closed at any time.
 
+Below, the shrink jobs so far are listed, the most recently active
+first (:class:`JobList`).
+
 Attributes:
     frame: Container of the widgets (place it in the parent).
     monitor: Reads the state of the run.
@@ -8415,6 +10068,7 @@ Attributes:
     log: Area with the end of the log.
     message: Result of the last button.
     log_path: Log file of the shown run, or None.
+    joblist: List of the shrink jobs.
 ~~~
 
 **`__init__`**
@@ -8426,6 +10080,7 @@ __init__(
     monitor: ShrinkMonitor | None = None,
     opener: Opener | None = None,
     refresh_ms: int = 2000,
+    on_pick: Callable[[JobEntry, bool], object] | None = None,
 )
 
 Build the dashboard and start refreshing.
@@ -8435,6 +10090,7 @@ Args:
     monitor: State reader; one for ``shrink`` if None.
     opener: Opener for the log file; ``xdg-open`` if None.
     refresh_ms: Refresh interval in milliseconds (0: no automatic refresh).
+    on_pick: Receives a selected job and True to start it.
 ~~~
 
 **`refresh`**
@@ -8514,4 +10170,67 @@ Return repr(self).
 __eq__(self, other)
 
 Return self==value.
+~~~
+
+### `UpdateBar` (`mediatools.gui.updatebar`) {.unnumbered}
+
+~~~text
+Notices a newly installed release and offers to restart the window.
+
+``mediatools update`` installs a release while the GUI keeps running
+the old code. Every :attr:`seconds` the bar asks the installed release
+for its version (``python -m mediatools --version``, in a background
+thread so the window never blocks); if it differs from the running one,
+the bar appears above the tabs with a *Restart now* button.
+
+Attributes:
+    frame: The bar (shown only when needed).
+    text: Text of the bar.
+    installed: Version of the installed release, as last checked.
+    running: Version of the running window.
+    version_of: Returns the installed version (replaceable in tests).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    root: tk.Misc,
+    on_restart: Callable[[], object],
+    version_of: Callable[[], str | None] | None = None,
+)
+
+Build the (hidden) bar.
+
+Args:
+    root: Main window.
+    on_restart: Called by *Restart now*.
+    version_of: Returns the installed version; asks the installed
+        release if None.
+~~~
+
+**`check`**
+
+~~~text
+check(self, background: bool = True) -> None
+
+Ask for the installed version.
+
+Args:
+    background: Ask in a thread (the window stays responsive).
+~~~
+
+**`show`**
+
+~~~text
+show(self, before: tk.Misc) -> bool
+
+Show the bar above a widget if a newer release is installed.
+
+Args:
+    before: Widget the bar is placed above.
+
+Returns:
+    True if the bar is (now) shown.
 ~~~

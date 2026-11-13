@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import scrolledtext, ttk
 
 from mediatools.gui.opener import Opener
 from mediatools.gui.shrinkmonitor import ShrinkMonitor
+from mediatools.gui.joblist import JobList
+from mediatools.shrink.jobregistry import JobEntry
 
 
 class ShrinkPanel:
@@ -20,6 +23,9 @@ class ShrinkPanel:
     ``mediatools reload``; the run itself continues independently of the
     GUI, which may be closed at any time.
 
+    Below, the shrink jobs so far are listed, the most recently active
+    first (:class:`JobList`).
+
     Attributes:
         frame: Container of the widgets (place it in the parent).
         monitor: Reads the state of the run.
@@ -32,10 +38,12 @@ class ShrinkPanel:
         log: Area with the end of the log.
         message: Result of the last button.
         log_path: Log file of the shown run, or None.
+        joblist: List of the shrink jobs.
     """
 
     def __init__(self, master: tk.Misc, monitor: ShrinkMonitor | None = None,
-                 opener: Opener | None = None, refresh_ms: int = 2000):
+                 opener: Opener | None = None, refresh_ms: int = 2000,
+                 on_pick: Callable[[JobEntry, bool], object] | None = None):
         """Build the dashboard and start refreshing.
 
         Args:
@@ -43,6 +51,7 @@ class ShrinkPanel:
             monitor: State reader; one for ``shrink`` if None.
             opener: Opener for the log file; ``xdg-open`` if None.
             refresh_ms: Refresh interval in milliseconds (0: no automatic refresh).
+            on_pick: Receives a selected job and True to start it.
         """
         self.frame = ttk.Frame(master)
         self.monitor = monitor or ShrinkMonitor()
@@ -69,7 +78,8 @@ class ShrinkPanel:
         ttk.Button(buttons, text="Refresh", command=self.refresh).pack(side="left")
         ttk.Button(buttons, text="Open log", command=self.open_log).pack(side="left", padx=4)
         ttk.Label(buttons, textvariable=self.message).pack(side="left", padx=8)
-        self.log = scrolledtext.ScrolledText(self.frame, height=6, font="TkFixedFont",
+        self.joblist = JobList(self.frame, self.monitor, on_pick)
+        self.log = scrolledtext.ScrolledText(self.frame, height=4, font="TkFixedFont",
                                              wrap="none", state="disabled")
         self.log.pack(fill="both", expand=True)
         self.refresh()
@@ -90,6 +100,7 @@ class ShrinkPanel:
         if at_end:
             self.log.see("end")
         self.log.configure(state="disabled")
+        self.joblist.refresh()
         if self.refresh_ms:
             self.frame.after(self.refresh_ms, self.refresh)
 

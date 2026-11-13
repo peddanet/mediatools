@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Callable
 
+from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
 from mediatools.core.versioninfo import VersionInfo
+from mediatools.gui.appearance import Appearance
 from mediatools.gui.catalog import CommandCatalog
 from mediatools.gui.commandform import CommandForm
 from mediatools.gui.configpanel import ConfigPanel
@@ -20,6 +21,9 @@ from mediatools.gui.filespanel import FilesPanel
 from mediatools.gui.formstore import FormStore
 from mediatools.gui.savingspanel import SavingsPanel
 from mediatools.gui.shrinkpanel import ShrinkPanel
+from mediatools.gui.updatebar import UpdateBar
+from mediatools.shrink.jobregistry import JobEntry
+from mediatools.shrink.jobspec import JobSpec
 
 
 class MediaToolsApp:
@@ -34,6 +38,12 @@ class MediaToolsApp:
     with the same interpreter as the GUI; one command per tab may run at a
     time, different tabs may run at the same time.
 
+    Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
+    fills the form, *Continue* runs it); the menu *View* changes the font
+    size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme
+    (:class:`Appearance`); a newly installed release is noticed (checked
+    every :attr:`UPDATE_SECONDS`) and a restart offered in a bar above the tabs.
+
     Attributes:
         root: Tk main window.
         catalog: Subcommands read from the argument parser.
@@ -44,13 +54,20 @@ class MediaToolsApp:
         notebook: The tabs.
         icon: Window icon (kept so Tk does not discard it).
         ask: Confirmation dialog, replaceable in tests.
+        appearance: Font size and colour scheme; holds the configuration
+            file (``[gui]`` settings).
+        updates: Bar shown when a newer release is installed.
+        restarter: Replaces the process by a new GUI (replaceable in tests).
     """
 
     PANEL_COMMANDS = ("status", "stop", "reload", "config", "savings")
     """Subcommands covered by panels instead of a form."""
 
+    UPDATE_SECONDS = 60
+
     def __init__(self, root: tk.Tk, catalog: CommandCatalog, store: FormStore | None = None,
-                 ask: Callable[[str, str], bool] = messagebox.askyesno, refresh_ms: int = 2000):
+                 ask: Callable[[str, str], bool] = messagebox.askyesno, refresh_ms: int = 2000,
+                 config: Config | None = None):
         """Build the window.
 
         Args:
@@ -59,6 +76,7 @@ class MediaToolsApp:
             store: Remembered form values; the default file if None.
             ask: Confirmation dialog (title, text) -> yes.
             refresh_ms: Refresh interval of the shrink dashboard (0: manual).
+            config: Configuration file; the default file if None.
         """
         self.root = root
         self.catalog = catalog
@@ -67,6 +85,8 @@ class MediaToolsApp:
         self.forms: dict[str, CommandForm] = {}
         self.consoles: list[ConsoleView] = []
         self.tabs: dict[str, ttk.Frame] = {}
+        self.appearance = Appearance(root, config or Config())
+        self.restarter: Callable[[], None] = self._exec_gui
         root.title(f"mediatools {VersionInfo().describe()}")
         self.icon = tk.PhotoImage(master=root, file=os.path.join(DesktopEntry.ICON_DIR,
                                                                  "mediatools-64.png"))
@@ -74,7 +94,12 @@ class MediaToolsApp:
         root.geometry("1280x900")
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind_all("<Control-q>", lambda _event: self.close())
+        for sequence, steps in (("<Control-plus>", 1), ("<Control-equal>", 1),
+                                ("<Control-KP_Add>", 1), ("<Control-minus>", -1),
+                                ("<Control-KP_Subtract>", -1), ("<Control-0>", 0)):
+            root.bind_all(sequence, self._zoom_key(steps))
         self._menu()
+        self.updates = UpdateBar(root, self.restart)
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, padx=6, pady=6)
         for spec in catalog.commands():
@@ -84,7 +109,8 @@ class MediaToolsApp:
             panes = ttk.PanedWindow(frame, orient="vertical")
             panes.pack(fill="both", expand=True)
             if spec.name == "shrink":
-                panes.add(ShrinkPanel(panes, refresh_ms=refresh_ms).frame, weight=2)
+                panes.add(ShrinkPanel(panes, refresh_ms=refresh_ms,
+                                      on_pick=self.pick_job).frame, weight=2)
             console = ConsoleView(panes, height=6 if spec.name == "shrink" else 12)
             form = CommandForm(panes, spec, console, self.store, ask)
             panes.add(form.frame, weight=1)
@@ -96,6 +122,9 @@ class MediaToolsApp:
         self.notebook.add(SavingsPanel(self.notebook).frame, text="savings")
         self.notebook.add(ConfigPanel(self.notebook).frame, text="config")
         self.notebook.add(FilesPanel(self.notebook, on_undo=self.undo_plan).frame, text="files")
+        self.appearance.apply()
+        if refresh_ms:
+            root.after(self.UPDATE_SECONDS * 1000, self.check_update)
 
     def _menu(self) -> None:
         """Build the menu bar."""
@@ -106,6 +135,14 @@ class MediaToolsApp:
         program.add_separator()
         program.add_command(label="Quit", accelerator="Ctrl+Q", command=self.close)
         menubar.add_cascade(label="mediatools", menu=program)
+        view = tk.Menu(menubar, tearoff=False)
+        view.add_command(label="Larger text", accelerator="Ctrl++", command=lambda: self.zoom(1))
+        view.add_command(label="Smaller text", accelerator="Ctrl+-",
+                         command=lambda: self.zoom(-1))
+        view.add_command(label="Normal size", accelerator="Ctrl+0", command=lambda: self.zoom(0))
+        view.add_separator()
+        view.add_command(label="Light / dark scheme", command=self.appearance.toggle_theme)
+        menubar.add_cascade(label="View", menu=view)
         helpmenu = tk.Menu(menubar, tearoff=False)
         helpmenu.add_command(label="About", command=self.about)
         menubar.add_cascade(label="Help", menu=helpmenu)
@@ -119,10 +156,7 @@ class MediaToolsApp:
             ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
             the search path, else this interpreter's script.
         """
-        link = os.path.expanduser("~/scripts/mediatools")
-        if os.path.exists(link):
-            return link
-        return shutil.which("mediatools") or os.path.abspath(sys.argv[0])
+        return DesktopEntry.default_program()
 
     def about_text(self) -> str:
         """Return the text of the About dialog.
@@ -144,13 +178,99 @@ class MediaToolsApp:
     def install_desktop(self) -> None:
         """Write the application menu entry."""
         path = DesktopEntry(self.program_path()).install()
+        self.appearance.save("desktop_entry", "yes")
         messagebox.showinfo("Application menu", "written: " + path, parent=self.root)
 
     def remove_desktop(self) -> None:
         """Remove the application menu entry."""
         removed = DesktopEntry(self.program_path()).remove()
+        self.appearance.save("desktop_entry", "no")
         messagebox.showinfo("Application menu", "removed" if removed else "there was no entry",
                             parent=self.root)
+
+    def _zoom_key(self, steps: int) -> Callable[[tk.Event], None]:
+        """Return the key handler of one zoom shortcut.
+
+        Args:
+            steps: See :meth:`zoom`.
+
+        Returns:
+            Handler that ignores its event.
+        """
+        def handler(_event: tk.Event) -> None:
+            self.zoom(steps)
+        return handler
+
+    def zoom(self, steps: int) -> None:
+        """Change the text size (see :meth:`Appearance.zoom`).
+
+        Args:
+            steps: +1 larger, -1 smaller, 0 normal.
+        """
+        self.appearance.zoom(steps)
+
+    @staticmethod
+    def job_values(entry: JobEntry) -> dict[str, str]:
+        """Return the shrink form values of a remembered job.
+
+        Args:
+            entry: The job.
+
+        Returns:
+            Values by ``dest`` of the shrink form.
+        """
+        spec = entry.spec
+        newer = spec.as_dict()["newer_than"]
+        jobs = entry.settings.get("jobs")
+        return {"path": spec.root, "crf": str(entry.settings.get("crf") or 28),
+                "order": str(entry.settings.get("order") or "largest"),
+                "jobs": "" if jobs in (None, 1) else str(jobs),
+                "ext": ",".join(ext.lstrip(".") for ext in sorted(spec.extensions)),
+                "min_seconds": f"{spec.min_seconds:g}",
+                "min_size": JobSpec.size_text(spec.min_size) if spec.min_size else "",
+                "newer_than": str(newer or "")}
+
+    def pick_job(self, entry: JobEntry, start: bool = False) -> bool:
+        """Fill the shrink form with a job; optionally run it.
+
+        Args:
+            entry: The chosen job.
+            start: Run the form afterwards.
+
+        Returns:
+            True if the form was filled (and, with ``start``, started).
+        """
+        form = self.forms.get("shrink")
+        if form is None:
+            return False
+        for dest, value in self.job_values(entry).items():
+            if dest in form.variables:
+                form.set_value(dest, value)
+        return form.run() if start else True
+
+    def check_update(self) -> None:
+        """Check for a newly installed release; show the bar a little later."""
+        self.updates.check()
+        self.root.after(5000, lambda: self.updates.show(self.notebook))
+        self.root.after(self.UPDATE_SECONDS * 1000, self.check_update)
+
+    def restart(self) -> bool:
+        """Close the window (asking about running commands) and start a new GUI.
+
+        A running shrink is not affected; the new window shows it again.
+
+        Returns:
+            False if the user kept the window open.
+        """
+        if not self.close():
+            return False
+        self.restarter()
+        return True
+
+    @staticmethod
+    def _exec_gui() -> None:
+        """Replace this process by ``mediatools gui`` of the installed release."""
+        os.execv(sys.executable, [sys.executable, "-m", "mediatools", "gui"])
 
     def undo_plan(self, plan: str) -> None:
         """Put a plan file into the flatten form and show that tab.
