@@ -7,6 +7,9 @@ import sys
 import time
 from typing import TextIO
 
+from mediatools.core.progressbase import ProgressBase
+from mediatools.core.statusfile import StatusFile
+
 
 class ProgressBar:
     """Shows overall progress by bytes, files and estimated remaining time.
@@ -25,8 +28,11 @@ class ProgressBar:
     wrap; otherwise (output redirected to a file) nothing is drawn and only
     the log is written.
 
-    The GiB figures of the overall line are *source* bytes (read and
-    encoded), not the space freed on disk; they count this run only.
+    The first line counts *source* bytes of the whole job (since 1.4.2):
+    how much was read and encoded since the first shrink log, with the
+    size after shrinking in brackets, and how much is still to go;
+    percentage and ETA follow from these (:attr:`base`). A start or a
+    reload therefore does not reset the figures.
 
     Attributes:
         total_bytes: Bytes of all files of the run.
@@ -39,9 +45,9 @@ class ProgressBar:
         enabled: True if the stream is a terminal.
         note: Text shown at the start of the first line, e.g. a pending stop.
         drawn: Number of lines on the screen (0: nothing drawn).
-        status_path: If set, both lines are also written to this file (at
-            most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
-        last_status: Monotonic time of the last status file update.
+        status: Status file for ``mediatools attach`` (lines written at most
+            once per :attr:`STATUS_SECONDS`); see :attr:`status_path`.
+        base: Work of all shrink runs before this process.
     """
 
     WIDTH = 24
@@ -68,8 +74,26 @@ class ProgressBar:
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
         self.note = ""
         self.drawn = 0
-        self.status_path: str | None = None
-        self.last_status = 0.0
+        self.status = StatusFile()
+        self.base = ProgressBase()
+
+    @property
+    def status_path(self) -> str | None:
+        """Status file, or None (the lines are then only drawn)."""
+        return self.status.path
+
+    @status_path.setter
+    def status_path(self, path: str | None) -> None:
+        self.status.path = path
+
+    @property
+    def last_status(self) -> float:
+        """Monotonic time of the last status file update."""
+        return self.status.last
+
+    @last_status.setter
+    def last_status(self, when: float) -> None:
+        self.status.last = when
 
     def rate(self, current_bytes: float = 0.0) -> float | None:
         """Return the speed used for the estimate.
@@ -113,17 +137,23 @@ class ProgressBar:
         Returns:
             Text without line break.
         """
+        gib = 1024 ** 3
         current = file_fraction * file_bytes
-        fraction = min(1.0, (self.done_bytes + current) / self.total_bytes)
+        read = self.base.read + self.done_bytes + current
+        to_go = max(0.0, self.total_bytes - self.done_bytes - current)
+        fraction = min(1.0, read / max(1.0, read + to_go))
         filled = int(fraction * self.WIDTH)
         remaining = self.remaining_seconds(current)
         eta = "?" if remaining is None else self.duration_text(remaining)
         prefix = f"{self.note} | " if self.note else ""
         gauge = '#' * filled + '.' * (self.WIDTH - filled)
-        return (f"{prefix}total [{gauge}] {fraction * 100:5.1f} % | "
-                f"{self.done_files}/{self.total_files} files | "
-                f"{(self.done_bytes + current) / 1024 ** 3:.1f}/"
-                f"{self.total_bytes / 1024 ** 3:.1f} GiB source | ETA {eta}")
+        after = (f" (-> {self.base.after() / gib:.1f} GiB after shrinking)"
+                 if self.base.after is not None else "")
+        since = f"since {self.base.since}: " if self.base.since else ""
+        return (f"{prefix}total [{gauge}] {fraction * 100:5.1f} % | ETA {eta} | {since}"
+                f"{read / gib:.1f} GiB read{after}, {to_go / gib:.1f} GiB to go | "
+                f"{self.base.files + self.done_files} files done, "
+                f"{max(0, self.total_files - self.done_files)} to go")
 
     def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
                   width: int | None = None) -> str:
@@ -162,17 +192,17 @@ class ProgressBar:
             extra: Optional third line; empty for none.
         """
         now = time.monotonic()
-        if self.status_path is None or now - self.last_status < self.STATUS_SECONDS:
+        if self.status.path is None or now - self.status.last < self.STATUS_SECONDS:
             return
-        self.last_status = now
+        self.status.last = now
         text = (self.line(name, file_fraction, file_bytes) + "\n"
                 + self.file_line(name, file_fraction, file_bytes) + "\n"
                 + (extra + "\n" if extra else ""))
-        tmp = self.status_path + ".tmp"
+        tmp = self.status.path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as handle:
                 handle.write(text)
-            os.replace(tmp, self.status_path)
+            os.replace(tmp, self.status.path)
         except OSError:
             pass                                 # the display must never stop a run
 

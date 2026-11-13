@@ -238,7 +238,7 @@ def test_progress_bar_and_throughput(tmp_path: Path) -> None:
     display = ProgressBar(4 * 1024 ** 3, 4, initial_rate=1024 ** 2, stream=stream)
     display.file_done(1024 ** 3)
     line = display.line("clip.mp4", 0.5, 1024 ** 3)
-    assert "37.5 %" in line and "1/4 files" in line and "ETA 0d" not in line
+    assert "37.5 %" in line and "1 files done, 3 to go" in line and "ETA 0d" not in line
     assert display.remaining_seconds() == 3 * 1024
     display.show("clip.mp4")                       # not a terminal: nothing drawn
     assert stream.getvalue() == ""

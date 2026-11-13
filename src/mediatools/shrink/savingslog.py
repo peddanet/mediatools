@@ -29,6 +29,8 @@ class SavingsLog:
 
     ROW = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)(?:,\d+)? \S+\s+│\s*\d+ │\s*\d\d:\d\d │"
                      r"\s*(\d+) MB │\s*(\d+) MB │.*│\s*shrunk\s*│")
+    READ = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:,\d+)? \S+\s+│\s*\d+ │\s*\d\d:\d\d │"
+                      r"\s*(\d+) MB │.*│\s*(?:shrunk|copy|FAILED)\s*│")
     NAME = re.compile(r"^shrink_(\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d)\.log$")
     MB = 1_000_000
 
@@ -78,6 +80,48 @@ class SavingsLog:
                                  int(match.group(2)) * self.MB, int(match.group(3)) * self.MB))
         self.cache[path] = (info.st_size, info.st_mtime, rows)
         return rows
+
+    def read(self, path: str) -> tuple[int, int]:
+        """Return how much a session has encoded so far.
+
+        Counts every file that was encoded, whatever the result (``shrunk``,
+        ``copy``, ``FAILED``); skipped files (``HEVC``, ``BROKEN``) cost no
+        encoding and are not counted, like in the progress line.
+
+        Args:
+            path: Log of the session.
+
+        Returns:
+            Source bytes and number of files; zeros if the log is missing.
+        """
+        size = files = 0
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    match = self.READ.match(line)
+                    if match:
+                        size += int(match.group(1)) * self.MB
+                        files += 1
+        except OSError:
+            return 0, 0
+        return size, files
+
+    def read_all(self) -> tuple[int, int, str]:
+        """Return how much all shrink runs have encoded so far.
+
+        Returns:
+            Source bytes, number of files and the date of the first log
+            (``YYYY-MM-DD``; empty if there is none).
+        """
+        size = files = 0
+        first = None
+        for path in self.logs():
+            part_size, part_files = self.read(path)
+            if part_files and first is None:
+                first = self.started(path)
+            size += part_size
+            files += part_files
+        return size, files, f"{first:%Y-%m-%d}" if first else ""
 
     @classmethod
     def started(cls, path: str) -> datetime | None:
