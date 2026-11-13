@@ -43,6 +43,7 @@ class HevcEncoder:
 
     Attributes:
         crf: libx265 constant rate factor.
+        preset: libx265 preset (speed against compression), e.g. ``medium``.
         threads: Decoder threads and size of the x265 thread pool.
         niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
         probe: :class:`MediaProbe` used for validation.
@@ -60,10 +61,13 @@ class HevcEncoder:
     VERIFY_FACTOR = 2.0
 
     NICENESS = 19
+    PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow",
+               "slower", "veryslow")
 
     def __init__(self, crf: int = 28, threads: int | None = None,
                  probe: MediaProbe | None = None, logger=None, ffmpeg: str = "ffmpeg",
-                 niceness: int = NICENESS, decode: DecodeCheck | None = None):
+                 niceness: int = NICENESS, decode: DecodeCheck | None = None,
+                 preset: str = "medium"):
         """Configure the encoder.
 
         Args:
@@ -75,7 +79,14 @@ class HevcEncoder:
             ffmpeg: Name or path of the ffmpeg executable.
             niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
             decode: Trial decode of the output, or None (no decode check).
+            preset: libx265 preset; ``medium`` is the libx265 default.
+
+        Raises:
+            ValueError: For an unknown preset.
         """
+        if preset not in self.PRESETS:
+            raise ValueError(f"preset must be one of {self.PRESETS}")
+        self.preset = preset
         self.decode = decode
         self.crf = crf
         self.niceness = niceness
@@ -93,7 +104,7 @@ class HevcEncoder:
             A new encoder without a running process.
         """
         return HevcEncoder(self.crf, self.threads, self.probe, self.log, self.ffmpeg,
-                           self.niceness, self.decode)
+                           self.niceness, self.decode, self.preset)
 
     @staticmethod
     def default_threads() -> int:
@@ -122,7 +133,7 @@ class HevcEncoder:
         return prefix + [
             self.ffmpeg, "-nostdin", "-y", "-hide_banner", "-nostats",
             "-progress", "pipe:1", "-threads", str(self.threads), "-i", src,
-            "-vcodec", "libx265", "-crf", str(self.crf),
+            "-vcodec", "libx265", "-preset", self.preset, "-crf", str(self.crf),
             "-x265-params", f"pools={self.threads}", dst]
 
     def encode(self, src: str, dst: str,

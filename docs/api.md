@@ -193,6 +193,24 @@ Returns:
     or None if the user ended the selection.
 ~~~
 
+**`_preset`**
+
+~~~text
+_preset(given: str | None, config: Config) -> str
+
+Choose the libx265 preset: option, else ``[shrink] preset``, else medium.
+
+Args:
+    given: Value of ``--preset``, or None.
+    config: Configuration file.
+
+Returns:
+    The preset.
+
+Raises:
+    SystemExit: If the configured preset is unknown.
+~~~
+
 **`_need`**
 
 ~~~text
@@ -2193,7 +2211,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.6.0') -> None
+__init__(self, control: RunControl, installed: str = '1.6.1') -> None
 
 Remember the job and the installed release.
 
@@ -2457,7 +2475,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.6.0')
+__init__(self, package_dir: str | None = None, version: str = '1.6.1')
 
 Locate the imported package.
 
@@ -2893,6 +2911,7 @@ lines are logged; the caller decides where it is kept).
 
 Attributes:
     crf: libx265 constant rate factor.
+    preset: libx265 preset (speed against compression), e.g. ``medium``.
     threads: Decoder threads and size of the x265 thread pool.
     niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
     probe: :class:`MediaProbe` used for validation.
@@ -2915,6 +2934,7 @@ __init__(
     ffmpeg: str = 'ffmpeg',
     niceness: int = 19,
     decode: DecodeCheck | None = None,
+    preset: str = 'medium',
 )
 
 Configure the encoder.
@@ -2928,6 +2948,10 @@ Args:
     ffmpeg: Name or path of the ffmpeg executable.
     niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
     decode: Trial decode of the output, or None (no decode check).
+    preset: libx265 preset; ``medium`` is the libx265 default.
+
+Raises:
+    ValueError: For an unknown preset.
 ~~~
 
 **`clone`**
@@ -3155,7 +3179,7 @@ A remembered job.
 
 Attributes:
     spec: Root and filters.
-    settings: Settings of the last run: ``crf``, ``order``, ``jobs``.
+    settings: Settings of the last run: ``crf``, ``preset``, ``order``, ``jobs``.
     last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
     todo_bytes: Source bytes still to encode (as of the last plan, minus
         the files finished since).
@@ -5055,7 +5079,7 @@ settings(self) -> dict[str, object]
 Return the settings of this run that do not define the job.
 
 Returns:
-    ``crf``, ``order`` and ``jobs``.
+    ``crf``, ``preset``, ``order`` and ``jobs``.
 ~~~
 
 **`_encode_serial`**
@@ -8342,9 +8366,10 @@ time, different tabs may run at the same time.
 
 Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
 fills the form, *Continue* runs it); the menu *View* changes the font
-size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme
-(:class:`Appearance`); a newly installed release is noticed (checked
-every :attr:`UPDATE_SECONDS`) and a restart offered in a bar above the tabs.
+size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
+(default, followed live), light or dark (:class:`Appearance`); a newly
+installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
+a restart offered in a bar above the tabs.
 
 Attributes:
     root: Tk main window.
@@ -8575,27 +8600,44 @@ needed.
 
 The settings live in ``[gui]`` of ``mediatools.ini``: ``scale``
 (1.0 = 10 pt; :attr:`MIN_SCALE` to :attr:`MAX_SCALE`) and ``theme``
-(``light`` or ``dark``). :meth:`zoom` and :meth:`toggle_theme` apply a
-change at once and save it.
+(``auto``, ``light`` or ``dark``). :meth:`zoom` and :meth:`set_theme`
+apply a change at once and save it.
+
+``auto`` (the default since 1.6.1) follows the desktop: the preferred
+scheme and accent colour of the settings portal (:class:`SystemLook`).
+:meth:`probe` reads them (in a thread, see :meth:`watch`) and
+:meth:`take_probe` applies a change in the Tk thread, so switching the
+desktop to dark switches the window within seconds. Without a portal or
+preference the scheme is :attr:`FALLBACK`.
 
 Attributes:
     root: Tk main window.
     config: Configuration file, or None (nothing is saved).
     scale: Font scale.
-    theme: ``light`` or ``dark``.
+    theme: ``auto``, ``light`` or ``dark``.
     style: ttk style object.
+    system: Reader of the desktop settings.
+    detected: Scheme and accent colour of the desktop last applied.
+    probed: Scheme and accent colour last read, not yet applied.
+    choice: Tk variable of the setting (radio buttons of the menu).
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, root: tk.Misc, config: Config | None = None)
+__init__(
+    self,
+    root: tk.Misc,
+    config: Config | None = None,
+    system: SystemLook | None = None,
+)
 
-Read the settings.
+Read the settings and, for ``auto``, the desktop's choice.
 
 Args:
     root: Tk main window.
     config: Configuration file; None uses the defaults and saves nothing.
+    system: Reader of the desktop settings; the portal if None.
 ~~~
 
 **`_number`**
@@ -8627,12 +8669,97 @@ Returns:
     Scale between :attr:`MIN_SCALE` and :attr:`MAX_SCALE`, one decimal.
 ~~~
 
+**`scheme`**
+
+~~~text
+scheme(self) -> str
+
+Return the scheme in effect.
+
+Returns:
+    ``light`` or ``dark``.
+~~~
+
 **`colors`**
 
 ~~~text
 colors(self) -> dict[str, str]
 
-Colours of the current scheme.
+Colours of the scheme in effect, with the desktop's accent for ``auto``.
+~~~
+
+**`channel`**
+
+~~~text
+channel(text: str) -> float
+
+Linearise one sRGB channel.
+
+Args:
+    text: Two hex digits.
+
+Returns:
+    Linear value 0..1.
+~~~
+
+**`luminance`**
+
+~~~text
+luminance(color: str) -> float
+
+Return the relative luminance of a colour (WCAG 2).
+
+Args:
+    color: ``#rrggbb``.
+
+Returns:
+    0 (black) to 1 (white).
+~~~
+
+**`mix`**
+
+~~~text
+mix(first: str, second: str, share: float) -> str
+
+Mix two colours.
+
+Args:
+    first: ``#rrggbb``.
+    second: ``#rrggbb``.
+    share: Part of ``second`` (0..1).
+
+Returns:
+    The mixed colour ``#rrggbb``.
+~~~
+
+**`probe`**
+
+~~~text
+probe(self) -> None
+
+Read scheme and accent colour of the desktop (may run in a thread).
+~~~
+
+**`take_probe`**
+
+~~~text
+take_probe(self) -> bool
+
+Apply the last reading if it differs (Tk thread only).
+
+Returns:
+    True if the look changed.
+~~~
+
+**`watch`**
+
+~~~text
+watch(self, interval_ms: int = 3000) -> None
+
+Follow the desktop while ``auto`` is set (reads in a thread).
+
+Args:
+    interval_ms: Time between two readings.
 ~~~
 
 **`points`**
@@ -8690,15 +8817,21 @@ Returns:
     The new scale.
 ~~~
 
-**`toggle_theme`**
+**`set_theme`**
 
 ~~~text
-toggle_theme(self) -> str
+set_theme(self, theme: str) -> str
 
-Switch between light and dark and save it.
+Choose ``auto``, ``light`` or ``dark`` and save it.
+
+Args:
+    theme: The setting.
 
 Returns:
-    The new scheme.
+    The scheme in effect afterwards.
+
+Raises:
+    ValueError: For another value.
 ~~~
 
 **`save`**
@@ -10170,6 +10303,84 @@ Return repr(self).
 __eq__(self, other)
 
 Return self==value.
+~~~
+
+### `SystemLook` (`mediatools.gui.systemlook`) {.unnumbered}
+
+~~~text
+Reads the appearance settings of the desktop from the settings portal.
+
+Desktops publish the user's choice through the XDG desktop portal
+(``org.freedesktop.portal.Settings`` on the session bus), namespace
+``org.freedesktop.appearance``:
+
+* ``color-scheme`` (``u``): 0 no preference, 1 prefer dark, 2 prefer
+  light; unknown values count as 0;
+* ``accent-color`` (``(ddd)``): RGB in the range 0..1; values out of
+  range count as unset.
+
+The values are read with ``gdbus`` (package ``libglib2.0-bin``, present
+on GNOME-based systems such as Pop!_OS), so no Python D-Bus binding is
+needed: first with ``ReadOne`` (interface version 2), then with the
+older ``Read``, whose answer is wrapped in one more variant. Without
+``gdbus``, without a portal or without the key every value is None and
+the caller uses its own default.
+
+Attributes:
+    run: Runs a command and returns its result (replaceable in tests).
+    gdbus: Path of ``gdbus``, or None.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    run: Callable[..., subprocess.CompletedProcess] | None = None,
+    gdbus: str | None = None,
+)
+
+Find ``gdbus``.
+
+Args:
+    run: Command runner; :func:`subprocess.run` if None.
+    gdbus: Path of ``gdbus``; looked up in ``PATH`` if None.
+~~~
+
+**`read`**
+
+~~~text
+read(self, key: str) -> str | None
+
+Read one key of the appearance namespace.
+
+Args:
+    key: ``color-scheme`` or ``accent-color``.
+
+Returns:
+    The answer of ``gdbus`` (GVariant text), or None if unavailable.
+~~~
+
+**`scheme`**
+
+~~~text
+scheme(self) -> str | None
+
+Return the preferred colour scheme.
+
+Returns:
+    ``dark``, ``light``, or None for no preference or no portal.
+~~~
+
+**`accent`**
+
+~~~text
+accent(self) -> str | None
+
+Return the preferred accent colour.
+
+Returns:
+    Colour as ``#rrggbb``, or None if unset or unavailable.
 ~~~
 
 ### `UpdateBar` (`mediatools.gui.updatebar`) {.unnumbered}
