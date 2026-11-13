@@ -42,6 +42,7 @@ class MediaToolsApp:
         tabs: Tab of each command form by subcommand.
         consoles: Output panes of all tabs.
         notebook: The tabs.
+        icon: Window icon (kept so Tk does not discard it).
         ask: Confirmation dialog, replaceable in tests.
     """
 
@@ -67,6 +68,9 @@ class MediaToolsApp:
         self.consoles: list[ConsoleView] = []
         self.tabs: dict[str, ttk.Frame] = {}
         root.title(f"mediatools {VersionInfo().describe()}")
+        self.icon = tk.PhotoImage(master=root, file=os.path.join(DesktopEntry.ICON_DIR,
+                                                                 "mediatools-64.png"))
+        root.iconphoto(True, self.icon)
         root.geometry("1280x900")
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind_all("<Control-q>", lambda _event: self.close())
