@@ -7,7 +7,12 @@ name: quality-gates
 #
 # Which event runs what (see docs/developer.md, "CI runs"):
 #   pull_request into main/develop  gates on the merge result; required check
-#   push of a tag v*                 gates on the released commit + release-check
+#   push of a tag v*                 release-check only: the tagged merge commit has
+#                                    the tree its pull request already tested
+#                                    (branch protection: strict), so the gates
+#                                    would only repeat that run
+# Python versions: the oldest supported (requires-python) and the newest; the
+# pre-push hook on the developer's PC covers the version in between.
 # Branch pushes start no run: work branches are checked through their pull
 # request, and a merge into main/develop has the tree its pull request
 # already tested (branch protection: strict, no direct pushes).
@@ -21,16 +26,19 @@ on:
 
 jobs:
   gates:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.12", "3.13", "3.14"]
+        python: ["3.10", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+          cache: pip                          # pip downloads, keyed on pyproject.toml
+          cache-dependency-path: pyproject.toml
       - name: system tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb
       - name: python tools
@@ -41,10 +49,9 @@ jobs:
   release-check:
     # A tag must point to a commit on main and match __version__.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: gates
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: tag is on main
