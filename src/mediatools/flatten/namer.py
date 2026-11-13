@@ -9,8 +9,8 @@ import re
 class FlatNamer:
     """Encodes the relative path of a file into one file name.
 
-    ``posts/2024/Videos/clip_01.mp4`` becomes
-    ``posts__2024__Videos__clip_01.mp4``. The separator ``__`` is used
+    ``footage/2024/Videos/clip_01.mp4`` becomes
+    ``footage__2024__Videos__clip_01.mp4``. The separator ``__`` is used
     because it hardly ever occurs in real folder names.
 
     If the result exceeds ``limit`` bytes (UTF-8), increasingly compact

@@ -26,7 +26,7 @@
 #      network loss does not stop the update; a red CI run still does.
 #   5. Installs the newest release (install.sh), checks --version and asks a
 #      running shrink to switch to it after its current file (mediatools reload).
-#   6. Moves the used archives to ~/scripts/mediatools.d/releases/ and deletes
+#   6. Moves the used archives to the releases folder (mediatools where) and deletes
 #      stale archives, browser copies and old apply scripts from the folder.
 #
 # Usage (normal user; git and gh act on your clone and with your GitHub
@@ -81,8 +81,23 @@ if [ -z "$REPO" ]; then                     # the clone this script belongs to
   REPO=$(git -C "$(dirname "$APPLY_RELEASE_ORIGIN")" rev-parse --show-toplevel 2>/dev/null || true)
   [ -f "$REPO/src/mediatools/__init__.py" ] || REPO="$HOME/Projects/mediatools"
 fi
-ARCHIVE="$HOME/scripts/mediatools.d/releases"
-LOG_DIR="$HOME/scripts/mediatools.d/logs"
+# folders as in mediatools.core.datadir.DataDir: one folder from
+# $MEDIATOOLS_HOME, the old folder while it still holds data, else XDG
+LEGACY="$HOME/scripts/mediatools.d"
+xdg_dir() {                                # $1 = value of the variable, $2 = default
+  case "$1" in /*) echo "$1/mediatools" ;; *) echo "$2/mediatools" ;; esac
+}
+if [ -n "${MEDIATOOLS_HOME:-}" ]; then
+  STATE_DIR="$MEDIATOOLS_HOME"; DATA_DIR="$MEDIATOOLS_HOME"
+elif [ ! -e "$LEGACY/WHERE-IS-THE-DATA.txt" ] \
+     && { [ -e "$LEGACY/logs" ] || [ -e "$LEGACY/state" ] || [ -e "$LEGACY/mediatools.ini" ]; }; then
+  STATE_DIR="$LEGACY"; DATA_DIR="$LEGACY"
+else
+  STATE_DIR=$(xdg_dir "${XDG_STATE_HOME:-}" "$HOME/.local/state")
+  DATA_DIR=$(xdg_dir "${XDG_DATA_HOME:-}" "$HOME/.local/share")
+fi
+ARCHIVE="$DATA_DIR/releases"
+LOG_DIR="$STATE_DIR/logs"
 VENV="$HOME/.venvs/mediatools"
 NAME_RE='^mediatools-hotfix-([0-9]+\.[0-9]+\.[0-9]+)-patch( \([0-9]+\))?\.tar\.gz$'
 STEP="start"

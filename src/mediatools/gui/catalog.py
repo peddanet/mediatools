@@ -22,8 +22,10 @@ class CommandCatalog:
         program: Words that start a command line.
     """
 
-    SKIP = ("attach", "front", "gui")
-    """Subcommands that the GUI replaces (watching) or that start it."""
+    SKIP = ("attach", "front", "gui", "privacy")
+    """Subcommands that the GUI replaces (watching), that start it, or that
+    need a terminal (``privacy --edit`` opens a text editor; ``where`` shows
+    the lists too)."""
 
     def __init__(self, parser: argparse.ArgumentParser, program: list[str] | None = None):
         """Remember the parser.

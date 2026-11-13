@@ -21,6 +21,9 @@ class CommandSpec:
     READ_ONLY = ("progress", "status", "savings")
     """Commands that never change anything (run without confirmation)."""
 
+    CHANGE_FLAGS = {"where": "--migrate"}
+    """Commands that change something only with the given option."""
+
     PREVIEW_FLAGS = ("--dry-run", "--list", "--report-only", "--path")
     """Options that turn a command into a read-only preview."""
 
@@ -81,10 +84,14 @@ class CommandSpec:
             values: Form values by ``dest``.
 
         Returns:
-            False for read-only commands and previews, else True.
+            False for read-only commands, previews and ``where`` without
+            ``--migrate``, else True.
         """
         if self.name in self.READ_ONLY:
             return False
+        if self.name in self.CHANGE_FLAGS:
+            spec = self.option(self.CHANGE_FLAGS[self.name])
+            return spec is not None and bool(values.get(spec.dest))
         for flag in self.PREVIEW_FLAGS:
             spec = self.option(flag)
             if spec is not None and values.get(spec.dest):

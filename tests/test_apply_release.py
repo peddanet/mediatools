@@ -82,7 +82,8 @@ def run(setup: dict[str, Path], *args: str) -> str:
         Combined output.
     """
     env = dict(os.environ, HOME=str(setup["home"]), APPLY_RELEASE_ALLOW_ROOT="1")
-    env.pop("APPLY_RELEASE_ORIGIN", None)
+    for name in ("APPLY_RELEASE_ORIGIN", "MEDIATOOLS_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME"):
+        env.pop(name, None)
     result = subprocess.run(["bash", str(SCRIPT), "--repo", str(setup["repo"]), *args],
                             env=env, capture_output=True, text=True, check=True, timeout=60)
     return result.stdout + result.stderr
@@ -128,8 +129,24 @@ def test_nothing_pending_tidies_the_folder(setup: dict[str, Path]) -> None:
     out = run(setup, "-y")
     assert "pending patches:  none" in out and "nothing applied" in out
     assert sorted(p.name for p in dl.iterdir()) == ["holiday.jpg"]
-    logs = list((setup["home"] / "scripts" / "mediatools.d" / "logs").iterdir())
+    logs = list((setup["home"] / ".local" / "state" / "mediatools" / "logs").iterdir())
     assert len(logs) == 1 and logs[0].name.startswith("apply-release_")
+
+
+def test_old_data_folder_is_used_until_moved(setup: dict[str, Path]) -> None:
+    """While ~/scripts/mediatools.d holds logs, the script keeps writing there.
+
+    Args:
+        setup: Paths from the fixture.
+    """
+    legacy = setup["home"] / "scripts" / "mediatools.d" / "logs"
+    legacy.mkdir(parents=True)
+    run(setup, "-y")
+    assert [p.name[:14] for p in legacy.iterdir()] == ["apply-release_"]
+    assert not (setup["home"] / ".local" / "state" / "mediatools").exists()
+    (legacy.parent / "WHERE-IS-THE-DATA.txt").write_text("moved", encoding="utf-8")
+    run(setup, "-y")
+    assert len(list((setup["home"] / ".local/state/mediatools/logs").iterdir())) == 1
 
 
 def test_help_and_unknown_option(setup: dict[str, Path]) -> None:
