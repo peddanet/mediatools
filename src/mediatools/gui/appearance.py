@@ -1,11 +1,13 @@
 """Look of the GUI: font size, colour scheme and ttk styles."""
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
 from mediatools.core.config import Config
+from mediatools.gui.systemlook import SystemLook
 
 
 class Appearance:
@@ -21,15 +23,26 @@ class Appearance:
 
     The settings live in ``[gui]`` of ``mediatools.ini``: ``scale``
     (1.0 = 10 pt; :attr:`MIN_SCALE` to :attr:`MAX_SCALE`) and ``theme``
-    (``light`` or ``dark``). :meth:`zoom` and :meth:`toggle_theme` apply a
-    change at once and save it.
+    (``auto``, ``light`` or ``dark``). :meth:`zoom` and :meth:`set_theme`
+    apply a change at once and save it.
+
+    ``auto`` (the default since 1.6.1) follows the desktop: the preferred
+    scheme and accent colour of the settings portal (:class:`SystemLook`).
+    :meth:`probe` reads them (in a thread, see :meth:`watch`) and
+    :meth:`take_probe` applies a change in the Tk thread, so switching the
+    desktop to dark switches the window within seconds. Without a portal or
+    preference the scheme is :attr:`FALLBACK`.
 
     Attributes:
         root: Tk main window.
         config: Configuration file, or None (nothing is saved).
         scale: Font scale.
-        theme: ``light`` or ``dark``.
+        theme: ``auto``, ``light`` or ``dark``.
         style: ttk style object.
+        system: Reader of the desktop settings.
+        detected: Scheme and accent colour of the desktop last applied.
+        probed: Scheme and accent colour last read, not yet applied.
+        choice: Tk variable of the setting (radio buttons of the menu).
     """
 
     BASE_POINTS = 10
@@ -44,22 +57,34 @@ class Appearance:
                  "accent": "#4c8dff", "accent_fg": "#0d1117", "active": "#79a8ff",
                  "border": "#3a414a", "select": "#2d4a7a", "hover": "#30363e"},
     }
+    THEMES = ("auto", "light", "dark")
+    FALLBACK = "dark"
     FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont",
              "TkSmallCaptionFont", "TkIconFont", "TkTooltipFont", "TkFixedFont")
 
-    def __init__(self, root: tk.Misc, config: Config | None = None):
-        """Read the settings.
+    def __init__(self, root: tk.Misc, config: Config | None = None,
+                 system: SystemLook | None = None):
+        """Read the settings and, for ``auto``, the desktop's choice.
 
         Args:
             root: Tk main window.
             config: Configuration file; None uses the defaults and saves nothing.
+            system: Reader of the desktop settings; the portal if None.
         """
         self.root = root
         self.config = config
         self.scale = self.clamp(self._number("scale", 1.0))
         theme = config.get("gui", "theme") if config else ""
-        self.theme = theme if theme in self.PALETTES else "light"
+        self.theme = theme if theme in self.THEMES else "auto"
         self.style = ttk.Style(root)
+        self.system = system or SystemLook()
+        self.detected: tuple[str | None, str | None] = (None, None)
+        self.probed: tuple[str | None, str | None] | None = None
+        self.choice = tk.StringVar(master=root, value=self.theme)
+        if self.theme == "auto":
+            self.probe()
+            self.detected = self.probed or (None, None)
+            self.probed = None
 
     def _number(self, key: str, fallback: float) -> float:
         """Read a number of ``[gui]``.
@@ -88,10 +113,96 @@ class Appearance:
         """
         return round(min(cls.MAX_SCALE, max(cls.MIN_SCALE, scale)), 1)
 
+    def scheme(self) -> str:
+        """Return the scheme in effect.
+
+        Returns:
+            ``light`` or ``dark``.
+        """
+        if self.theme != "auto":
+            return self.theme
+        return self.detected[0] or self.FALLBACK
+
     @property
     def colors(self) -> dict[str, str]:
-        """Colours of the current scheme."""
-        return self.PALETTES[self.theme]
+        """Colours of the scheme in effect, with the desktop's accent for ``auto``."""
+        colors = dict(self.PALETTES[self.scheme()])
+        accent = self.detected[1] if self.theme == "auto" else None
+        if accent:
+            colors["accent"] = accent
+            colors["active"] = self.mix(accent, colors["fg"], 0.25)
+            colors["accent_fg"] = "#0d1117" if self.luminance(accent) > 0.5 else "#ffffff"
+        return colors
+
+    @staticmethod
+    def channel(text: str) -> float:
+        """Linearise one sRGB channel.
+
+        Args:
+            text: Two hex digits.
+
+        Returns:
+            Linear value 0..1.
+        """
+        value = int(text, 16) / 255
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+    @staticmethod
+    def luminance(color: str) -> float:
+        """Return the relative luminance of a colour (WCAG 2).
+
+        Args:
+            color: ``#rrggbb``.
+
+        Returns:
+            0 (black) to 1 (white).
+        """
+        red, green, blue = (Appearance.channel(color[i:i + 2]) for i in (1, 3, 5))
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+    @staticmethod
+    def mix(first: str, second: str, share: float) -> str:
+        """Mix two colours.
+
+        Args:
+            first: ``#rrggbb``.
+            second: ``#rrggbb``.
+            share: Part of ``second`` (0..1).
+
+        Returns:
+            The mixed colour ``#rrggbb``.
+        """
+        parts = [round(int(first[i:i + 2], 16) * (1 - share) + int(second[i:i + 2], 16) * share)
+                 for i in (1, 3, 5)]
+        return "#" + "".join(f"{part:02x}" for part in parts)
+
+    def probe(self) -> None:
+        """Read scheme and accent colour of the desktop (may run in a thread)."""
+        self.probed = (self.system.scheme(), self.system.accent())
+
+    def take_probe(self) -> bool:
+        """Apply the last reading if it differs (Tk thread only).
+
+        Returns:
+            True if the look changed.
+        """
+        probed, self.probed = self.probed, None
+        if probed is None or self.theme != "auto" or probed == self.detected:
+            return False
+        self.detected = probed
+        self.apply()
+        return True
+
+    def watch(self, interval_ms: int = 3000) -> None:
+        """Follow the desktop while ``auto`` is set (reads in a thread).
+
+        Args:
+            interval_ms: Time between two readings.
+        """
+        self.take_probe()
+        if self.theme == "auto":
+            threading.Thread(target=self.probe, daemon=True).start()
+        self.root.after(interval_ms, lambda: self.watch(interval_ms))
 
     def points(self) -> int:
         """Return the base font size.
@@ -211,16 +322,28 @@ class Appearance:
         self.save("scale", f"{self.scale:.1f}")
         return self.scale
 
-    def toggle_theme(self) -> str:
-        """Switch between light and dark and save it.
+    def set_theme(self, theme: str) -> str:
+        """Choose ``auto``, ``light`` or ``dark`` and save it.
+
+        Args:
+            theme: The setting.
 
         Returns:
-            The new scheme.
+            The scheme in effect afterwards.
+
+        Raises:
+            ValueError: For another value.
         """
-        self.theme = "dark" if self.theme == "light" else "light"
+        if theme not in self.THEMES:
+            raise ValueError(f"theme must be one of {self.THEMES}")
+        self.theme = theme
+        self.choice.set(theme)
+        if theme == "auto":
+            self.probe()
+            self.take_probe()
         self.apply()
-        self.save("theme", self.theme)
-        return self.theme
+        self.save("theme", theme)
+        return self.scheme()
 
     def save(self, key: str, value: str) -> None:
         """Write one value of ``[gui]``.

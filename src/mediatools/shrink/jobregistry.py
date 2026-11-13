@@ -17,7 +17,7 @@ class JobEntry:
 
     Attributes:
         spec: Root and filters.
-        settings: Settings of the last run: ``crf``, ``order``, ``jobs``.
+        settings: Settings of the last run: ``crf``, ``preset``, ``order``, ``jobs``.
         last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
         todo_bytes: Source bytes still to encode (as of the last plan, minus
             the files finished since).
@@ -50,6 +50,9 @@ class JobEntry:
         crf = self.settings.get("crf")
         if crf not in (None, 28):
             args += ["--crf", str(crf)]
+        preset = self.settings.get("preset")
+        if preset not in (None, "medium"):
+            args += ["--preset", str(preset)]
         order = self.settings.get("order")
         if order not in (None, "largest"):
             args += ["--order", str(order)]
@@ -186,4 +189,5 @@ class JobRegistry:
         gib = 1024 ** 3
         return (f"{entry.last:<16}  {entry.gauge()} {entry.fraction * 100:5.1f} %  "
                 f"{entry.read / gib:7.1f} GiB done, {entry.todo_bytes / gib:7.1f} GiB to go  "
-                f"crf {entry.settings.get('crf', 28)}  {entry.spec.label()}")
+                f"crf {entry.settings.get('crf', 28)} {entry.settings.get('preset') or 'medium'}"
+                f"  {entry.spec.label()}")

@@ -46,6 +46,10 @@ db_name = shrink.db
 # Videos encoded at the same time when --jobs is not given (1 = one after
 # the other). Compare the MB/s of the progress line with 1 and 2.
 jobs = 1
+# libx265 preset when --preset is not given: faster encodes about 1.5 times
+# as fast at nearly the same quality (measure with bench-encode.py first);
+# slower compresses more. Default medium.
+preset = medium
 
 [flatten]
 # Folder abbreviations used when a flat name is too long (naming level 1).
@@ -77,8 +81,9 @@ max_deletions = 500
 # Text size of the window (1.0 = 10 pt; 0.8 to 2.5). Ctrl++ / Ctrl+- / Ctrl+0
 # in the window change it and save it here.
 scale = 1.0
-# Colour scheme: light or dark (menu View).
-theme = light
+# Colour scheme: auto (follow the desktop, also its accent colour), light
+# or dark (menu View).
+theme = auto
 # yes: put back the application menu entry if it is missing (set by
 # "mediatools gui --install-desktop").
 desktop_entry =
