@@ -136,9 +136,10 @@ classDiagram
     +rate(current_bytes)
     +remaining_seconds(current_bytes)
     +line(_name, file_fraction, file_bytes)
-    +file_line(name, file_fraction, file_bytes, width)
-    -_write_status(name, file_fraction, file_bytes, extra)
+    +file_line(name, file_fraction, file_bytes, width, share)
+    -_write_status(lines)
     +show(name, file_fraction, file_bytes, extra)
+    +show_many(files, extra)
     +file_done(size)
     +file_skipped(size)
     +clear()
@@ -149,7 +150,8 @@ classDiagram
     +files
     +since
     +after
-    +init(read, files, since, after)
+    +written
+    +init(read, files, since, after, written)
   }
   class Prompt {
     +assume_yes

@@ -43,6 +43,9 @@ source =
 [shrink]
 # File name of the per-directory database of shrunk videos.
 db_name = shrink.db
+# Videos encoded at the same time when --jobs is not given (1 = one after
+# the other). Compare the MB/s of the progress line with 1 and 2.
+jobs = 1
 
 [flatten]
 # Folder abbreviations used when a flat name is too long (naming level 1).
@@ -69,6 +72,16 @@ exclude = newShrinkedFiles/
 # newest snapshot (they stay in older snapshots, but a mistake in the
 # source path would otherwise empty the mirror).
 max_deletions = 500
+
+[gui]
+# Text size of the window (1.0 = 10 pt; 0.8 to 2.5). Ctrl++ / Ctrl+- / Ctrl+0
+# in the window change it and save it here.
+scale = 1.0
+# Colour scheme: light or dark (menu View).
+theme = light
+# yes: put back the application menu entry if it is missing (set by
+# "mediatools gui --install-desktop").
+desktop_entry =
 """
 
     def __init__(self, datadir: DataDir | None = None):

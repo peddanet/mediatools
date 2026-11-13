@@ -88,7 +88,7 @@ def test_status_file_is_written_rate_limited(tmp_path: Path) -> None:
     progress.status_path = str(tmp_path / "s.status")
     progress.show("clip.mp4", 0.5, 100)
     lines = Path(progress.status_path).read_text(encoding="utf-8").splitlines()
-    assert lines[0].startswith("total [") and "clip.mp4" in lines[1]
+    assert lines[0].startswith("job   [") and "clip.mp4" in lines[1]
     progress.show("other.mp4", 0.6, 100)                   # within the interval: unchanged
     assert "clip.mp4" in Path(progress.status_path).read_text(encoding="utf-8")
     progress.status_path = str(tmp_path / "missing-dir" / "s.status")

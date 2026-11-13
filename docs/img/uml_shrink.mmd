@@ -43,6 +43,7 @@ classDiagram
     +process
     +aborted
     +init(crf, threads, probe, logger, ffmpeg, niceness, decode)
+    +clone()
     +default_threads()
     +command(src, dst)
     +encode(src, dst, on_progress)
@@ -61,6 +62,56 @@ classDiagram
     +took
     +init(path, status, source, result, length, took)
   }
+  class JobChooser {
+    +registry
+    +ask
+    +say
+    +limit
+    +init(registry, ask, say, limit)
+    +choose()
+  }
+  class JobEntry {
+    +spec
+    +settings
+    +last
+    +todo_bytes
+    +todo_files
+    +read
+    +done_files
+    +fraction()
+    +argv()
+    +gauge(width)
+    +init(spec, settings, last, todo_bytes, todo_files, read, done_files)
+  }
+  class JobRegistry {
+    +path
+    +ledger
+    +init(path, ledger)
+    -_load()
+    -_save(data)
+    +planned(spec, settings, todo_bytes, todo_files)
+    +finished_file(spec, size)
+    +entries()
+    +line(entry)
+  }
+  class JobSpec {
+    +root
+    +extensions
+    +min_seconds
+    +min_size
+    +newer_than
+    +parse_size(text)
+    +parse_date(text)
+    +size_text(size)
+    +as_dict()
+    +from_dict(data)
+    +key()
+    +filters()
+    +label()
+    +contains(path)
+    +matches(row)
+    +init(root, extensions, min_seconds, min_size, newer_than)
+  }
   class ReplaceJournal {
     +log
     +init(logger)
@@ -69,6 +120,51 @@ classDiagram
     +fsync_file(path)
     +fsync_dir(path)
   }
+  class Ledger {
+    +path
+    +logs
+    +cache
+    +init(path, logs)
+    +ensure()
+    +add(row)
+    +rows()
+    +sums(job, session)
+  }
+  class LedgerSums {
+    +read
+    +files
+    +freed_src
+    +freed_out
+    +since
+    +add(row)
+    +init(read, files, freed_src, freed_out, since)
+  }
+  class LedgerRow {
+    +when
+    +session
+    +status
+    +source
+    +result
+    +took
+    +length
+    +mtime
+    +path
+    -_optional(text, kind)
+    -_text(value, fmt)
+    +line()
+    +parse(line)
+    +init(when, session, status, source, result, took, length, mtime, path)
+  }
+  class LogBackfill {
+    +folder
+    +init(folder)
+    +logs()
+    +rows()
+    +number(text, unit)
+    +read(path)
+    -_start(when, session, cells)
+    -_close(row, pieces, root)
+  }
   class ShrinkOptions {
     +keep_copies
     +extensions
@@ -76,7 +172,10 @@ classDiagram
     +order
     +min_seconds
     +retry_failed
-    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed)
+    +min_size
+    +newer_than
+    +jobs
+    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed, min_size, newer_than, jobs)
   }
   class ShrinkPlanner {
     +root
@@ -91,6 +190,7 @@ classDiagram
     +init(root, logger, opts, probe, state, database_of, journal, results)
     +plan(stopped)
     -_candidate(path)
+    -_wanted(path, size)
     -_video_size(path)
     -_drop_short(todo)
     -_set_aside_hevc(todo)
@@ -183,15 +283,25 @@ classDiagram
     +plan()
     +run(confirm)
     -_run(confirm)
+    +settings()
+    -_encode_serial(todo)
+    -_job_progress(size)
+    -_slots()
+    -_encode_parallel(todo)
+    -_start_free_slots(pool, table, pending)
+    -_collect(table, future, busy)
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
+    -_prepare(path, size)
     -_broken(path, size)
     -_record_failure(path, status, reason)
     -_keep_ffmpeg_log(out, path)
     -_record_hevc()
     -_record_one_hevc(path)
     -_encode_and_replace(path, size, out, database)
+    -_length(path)
+    -_complete(path, size, out, database, ok, length, took, share)
     -_result(item)
     -_show(name, fraction, size)
     -_poll_stop(force)
@@ -212,6 +322,36 @@ classDiagram
     +restart
     +space
     +base
+    +ledger
+    +registry
+    +job
+    +session
+    +encoders
+    +mtimes
+  }
+  class RunningEncode {
+    +slot
+    +path
+    +size
+    +out
+    +database
+    +inode
+    +length
+    +started
+    +cell
+    +init(slot, path, size, out, database, inode, length, started, cell)
+  }
+  class SlotTable {
+    +free
+    +running
+    +inodes
+    +folders
+    +init(slots)
+    +inode(path)
+    +blocked(path)
+    +take(future, item)
+    +release(future)
+    +cells()
   }
   class SpaceTally {
     +earlier_src
@@ -224,6 +364,7 @@ classDiagram
     +started
     +init(earlier, session, since, started)
     +from_logs(logs, current)
+    +from_ledger(ledger, session)
     +add(src, out)
     +session()
     +overall()
@@ -245,7 +386,25 @@ classDiagram
     +add(size, seconds, out_size)
     +duration_text(seconds)
   }
+  JobChooser --> JobRegistry
+  JobEntry ..> JobSpec
+  JobRegistry ..> JobEntry
+  JobRegistry ..> JobSpec
+  JobRegistry --> Ledger
+  JobSpec ..> Ledger
+  JobSpec ..> LedgerRow
   ReplaceJournal ..> ShrinkDatabase
+  Ledger ..> JobSpec
+  Ledger --> LedgerRow
+  Ledger ..> LedgerSums
+  Ledger ..> LogBackfill
+  LedgerSums ..> JobSpec
+  LedgerSums ..> Ledger
+  LedgerSums ..> LedgerRow
+  LogBackfill ..> Ledger
+  LogBackfill ..> LedgerRow
+  LogBackfill ..> ResultTable
+  LogBackfill ..> SavingsLog
   ShrinkOptions ..> Shrinker
   ShrinkPlanner --> ReplaceJournal
   ShrinkPlanner --> ShrinkDatabase
@@ -258,14 +417,24 @@ classDiagram
   SavingsLog ..> Savings
   Shrinker ..> FileResult
   Shrinker --> HevcEncoder
+  Shrinker ..> JobSpec
+  Shrinker ..> LedgerRow
   Shrinker --> ReplaceJournal
+  Shrinker ..> RunningEncode
   Shrinker --> ShrinkDatabase
   Shrinker --> ShrinkOptions
   Shrinker --> ShrinkPlanner
   Shrinker --> ShrinkState
+  Shrinker ..> SlotTable
   Shrinker --> SpaceTally
   Shrinker --> ThroughputLog
+  ShrinkState ..> JobRegistry
+  ShrinkState ..> JobSpec
+  ShrinkState ..> Ledger
   ShrinkState ..> ResultTable
   ShrinkState ..> SpaceTally
   ShrinkState ..> ThroughputLog
+  RunningEncode ..> ShrinkDatabase
+  SlotTable --> RunningEncode
+  SpaceTally ..> Ledger
   SpaceTally ..> SavingsLog

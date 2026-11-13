@@ -28,11 +28,16 @@ class ProgressBar:
     wrap; otherwise (output redirected to a file) nothing is drawn and only
     the log is written.
 
-    The first line counts *source* bytes of the whole job (since 1.4.2):
-    how much was read and encoded since the first shrink log, with the
-    size after shrinking in brackets, and how much is still to go;
-    percentage and ETA follow from these (:attr:`base`). A start or a
-    reload therefore does not reset the figures.
+    The first line counts *source* bytes of the whole **job** (since 1.6.0;
+    a job is the root and the filters of the run, see :class:`JobSpec`):
+    what was read and encoded of this job by all runs so far (:attr:`base`,
+    from the ledger), with the size after shrinking in brackets, and what
+    is still to go in this run's plan. Percentage and ETA follow from these;
+    a start or a reload therefore does not reset the figures, and a run on
+    another root or with other filters shows only its own job.
+
+    With several encodes at the same time (:meth:`show_many`) one file line
+    is drawn per running video.
 
     Attributes:
         total_bytes: Bytes of all files of the run.
@@ -47,7 +52,7 @@ class ProgressBar:
         drawn: Number of lines on the screen (0: nothing drawn).
         status: Status file for ``mediatools attach`` (lines written at most
             once per :attr:`STATUS_SECONDS`); see :attr:`status_path`.
-        base: Work of all shrink runs before this process.
+        base: Work done for this job before this process.
     """
 
     WIDTH = 24
@@ -150,13 +155,13 @@ class ProgressBar:
         after = (f" (-> {self.base.after() / gib:.1f} GiB after shrinking)"
                  if self.base.after is not None else "")
         since = f"since {self.base.since}: " if self.base.since else ""
-        return (f"{prefix}total [{gauge}] {fraction * 100:5.1f} % | ETA {eta} | {since}"
+        return (f"{prefix}job   [{gauge}] {fraction * 100:5.1f} % | ETA {eta} | {since}"
                 f"{read / gib:.1f} GiB read{after}, {to_go / gib:.1f} GiB to go | "
                 f"{self.base.files + self.done_files} files done, "
                 f"{max(0, self.total_files - self.done_files)} to go")
 
     def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
-                  width: int | None = None) -> str:
+                  width: int | None = None, share: int = 1) -> str:
         """Build the line of the current file.
 
         Args:
@@ -165,6 +170,8 @@ class ProgressBar:
             file_bytes: Size of the current file.
             width: Maximum length; a longer name is shortened in the middle,
                 so that its start and end stay visible. None: no limit.
+            share: Number of files encoded at the same time; each gets this
+                part of the measured speed.
 
         Returns:
             Text without line break, e.g.
@@ -172,7 +179,8 @@ class ProgressBar:
         """
         current = file_fraction * file_bytes
         rate = self.rate(current)
-        left = "?" if not rate else self.duration_text((file_bytes - current) / rate)
+        left = ("?" if not rate
+                else self.duration_text((file_bytes - current) / rate * max(1, share)))
         head = (f"file  {file_fraction * 100:3.0f} % of {file_bytes / 1024 ** 3:.2f} GiB "
                 f"({current / 1024 ** 3:.2f} GiB encoded) | {left} left | ")
         room = None if width is None else max(9, width - len(head))
@@ -181,34 +189,27 @@ class ProgressBar:
             name = name[:keep // 2] + "..." + name[len(name) - (keep - keep // 2):]
         return head + name
 
-    def _write_status(self, name: str, file_fraction: float, file_bytes: int,
-                      extra: str = "") -> None:
+    def _write_status(self, lines: list[str]) -> None:
         """Replace the status file with all lines (rate-limited, atomic).
 
         Args:
-            name: Name of the current file.
-            file_fraction: Encoded fraction of the current file (0..1).
-            file_bytes: Size of the current file.
-            extra: Optional third line; empty for none.
+            lines: Status lines without line breaks.
         """
         now = time.monotonic()
         if self.status.path is None or now - self.status.last < self.STATUS_SECONDS:
             return
         self.status.last = now
-        text = (self.line(name, file_fraction, file_bytes) + "\n"
-                + self.file_line(name, file_fraction, file_bytes) + "\n"
-                + (extra + "\n" if extra else ""))
         tmp = self.status.path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as handle:
-                handle.write(text)
+                handle.write("".join(line + "\n" for line in lines))
             os.replace(tmp, self.status.path)
         except OSError:
             pass                                 # the display must never stop a run
 
     def show(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
              extra: str = "") -> None:
-        """Redraw the status lines on a terminal.
+        """Redraw the status lines of one running file.
 
         Args:
             name: Name of the current file.
@@ -216,14 +217,29 @@ class ProgressBar:
             file_bytes: Size of the current file.
             extra: Optional third line; empty for none.
         """
-        self._write_status(name, file_fraction, file_bytes, extra)
+        self.show_many([(name, file_fraction, file_bytes)], extra)
+
+    def show_many(self, files: list[tuple[str, float, int]], extra: str = "") -> None:
+        """Redraw the status lines of one or more running files.
+
+        Args:
+            files: ``(name, encoded fraction, size)`` per running file.
+            extra: Optional last line; empty for none.
+        """
+        current = sum(fraction * size for _name, fraction, size in files)
+        share = max(1, len(files))
+        plain = ([self.line("", 1.0, int(current))]
+                 + [self.file_line(name, fraction, size, share=share)
+                    for name, fraction, size in files]
+                 + ([extra] if extra else []))
+        self._write_status(plain)
         if not self.enabled:
             return
         width = max(20, shutil.get_terminal_size().columns - 1)
-        lines = [self.line(name, file_fraction, file_bytes)[:width],
-                 self.file_line(name, file_fraction, file_bytes, width)[:width]]
-        if extra:
-            lines.append(extra[:width])
+        lines = ([self.line("", 1.0, int(current))[:width]]
+                 + [self.file_line(name, fraction, size, width, share)[:width]
+                    for name, fraction, size in files]
+                 + ([extra[:width]] if extra else []))
         up = "\033[1A" * (self.drawn - 1) if self.drawn > 1 else ""   # back to line 1
         if len(lines) < self.drawn:              # fewer lines than before: clear first
             self.clear()

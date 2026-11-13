@@ -18,6 +18,10 @@ class ShrinkOptions:
         retry_failed: Include videos recorded as failed (``FAILED`` or
             ``BROKEN``) in an earlier run; by default they are left out
             while their size is unchanged.
+        min_size: Leave out videos smaller than this many bytes; 0 processes all.
+        newer_than: Leave out videos modified before this time (epoch
+            seconds); None processes all.
+        jobs: Number of videos encoded at the same time (1: one after the other).
     """
 
     keep_copies: bool = False
@@ -26,6 +30,9 @@ class ShrinkOptions:
     order: str = "largest"
     min_seconds: float = 0.0
     retry_failed: bool = False
+    min_size: int = 0
+    newer_than: float | None = None
+    jobs: int = 1
 
     ORDERS = ("largest", "smallest", "path")
 
@@ -33,9 +40,14 @@ class ShrinkOptions:
         """Validate the values.
 
         Raises:
-            ValueError: If ``order`` is unknown or ``min_seconds`` negative.
+            ValueError: If ``order`` is unknown, ``min_seconds`` or ``min_size``
+                negative or ``jobs`` below 1.
         """
         if self.order not in self.ORDERS:
             raise ValueError(f"order must be one of {self.ORDERS}")
         if self.min_seconds < 0:
             raise ValueError("min_seconds must not be negative")
+        if self.min_size < 0:
+            raise ValueError("min_size must not be negative")
+        if self.jobs < 1:
+            raise ValueError("jobs must be at least 1")
