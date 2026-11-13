@@ -1715,7 +1715,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.4.0') -> None
+__init__(self, control: RunControl, installed: str = '1.4.1') -> None
 
 Remember the job and the installed release.
 
@@ -1945,7 +1945,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.4.0')
+__init__(self, package_dir: str | None = None, version: str = '1.4.1')
 
 Locate the imported package.
 
@@ -6632,6 +6632,7 @@ Attributes:
     tabs: Tab of each command form by subcommand.
     consoles: Output panes of all tabs.
     notebook: The tabs.
+    icon: Window icon (kept so Tk does not discard it).
     ask: Confirmation dialog, replaceable in tests.
 ~~~
 
@@ -7283,17 +7284,22 @@ Interrupt the running command.
 ### `DesktopEntry` (`mediatools.gui.desktopentry`) {.unnumbered}
 
 ~~~text
-Writes or removes ``mediatools.desktop`` for the application menu.
+Writes or removes the menu entry and the icon of the GUI.
 
-Desktop environments (GNOME, COSMIC, KDE ...) list the applications
+Desktop environments (COSMIC, GNOME, KDE ...) list the applications
 whose ``.desktop`` files lie in ``~/.local/share/applications``
-(freedesktop.org Desktop Entry Specification). The file is written only
-on request (``mediatools gui --install-desktop``); it starts the
-installed program, normally the link ``~/scripts/mediatools``.
+(freedesktop.org Desktop Entry Specification) and take their icons from
+the icon theme folders, here ``~/.local/share/icons/hicolor`` (Icon Theme
+Specification): the scalable SVG and a 256-pixel PNG. ``StartupWMClass``
+matches the window class of the GUI (Tk capitalises the class name
+``mediatools`` to ``Mediatools``), so the dock shows the running window
+under this entry. The files are written only on request
+(``mediatools gui --install-desktop`` or the GUI menu).
 
 Attributes:
     path: Location of the ``.desktop`` file.
     program: Program started by the entry.
+    icons: Icon theme folder (``.../icons/hicolor``).
 ~~~
 
 **`__init__`**
@@ -7324,10 +7330,10 @@ Returns:
 ~~~text
 install(self) -> str
 
-Write the file.
+Write the entry and copy the icons.
 
 Returns:
-    Its location.
+    Location of the entry.
 ~~~
 
 **`remove`**
@@ -7335,10 +7341,10 @@ Returns:
 ~~~text
 remove(self) -> bool
 
-Remove the file.
+Remove the entry and the icons.
 
 Returns:
-    True if a file was removed.
+    True if the entry was removed.
 ~~~
 
 ### `FilesPanel` (`mediatools.gui.filespanel`) {.unnumbered}

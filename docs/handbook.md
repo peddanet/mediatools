@@ -1235,8 +1235,14 @@ mediatools gui --remove-desktop
 
 The entry is `~/.local/share/applications/mediatools.desktop`, the place
 where desktops following the freedesktop.org Desktop Entry Specification
-look for user applications; it starts `~/scripts/mediatools gui`. Both
-commands run as normal user and touch only that file.
+look for user applications; it starts `~/scripts/mediatools gui`. The icon
+is copied to `~/.local/share/icons/hicolor/scalable/apps/mediatools.svg`
+and `.../256x256/apps/mediatools.png` (Icon Theme Specification).
+`StartupWMClass=Mediatools` is the window class of the GUI, so the dock or
+panel groups the open window with the entry. The same can be done in the
+GUI: menu *mediatools > Add to application menu*. Both commands run as
+normal user and touch only these three files. A desktop may need a new
+login, or a moment, before it shows a new entry.
 
 # Testing
 

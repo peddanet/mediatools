@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>mediatools</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f6fb3"/>
+      <stop offset="1" stop-color="#1b3f6b"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="44" fill="url(#bg)"/>
+  <!-- film strip -->
+  <rect x="52" y="64" width="152" height="128" rx="10" fill="#f4f6f9"/>
+  <g fill="#1b3f6b">
+    <rect x="60" y="72" width="14" height="12" rx="2"/>
+    <rect x="60" y="100" width="14" height="12" rx="2"/>
+    <rect x="60" y="128" width="14" height="12" rx="2"/>
+    <rect x="60" y="156" width="14" height="12" rx="2"/>
+    <rect x="182" y="72" width="14" height="12" rx="2"/>
+    <rect x="182" y="100" width="14" height="12" rx="2"/>
+    <rect x="182" y="128" width="14" height="12" rx="2"/>
+    <rect x="182" y="156" width="14" height="12" rx="2"/>
+  </g>
+  <!-- inward arrows: shrink -->
+  <g fill="#f08c2e">
+    <path d="M86 128 l26 -22 v12 h10 v20 h-10 v12 z" transform="rotate(180 104 128)"/>
+    <path d="M170 128 l-26 -22 v12 h-10 v20 h10 v12 z" transform="rotate(180 152 128)"/>
+  </g>
+  <rect x="122" y="96" width="12" height="64" rx="3" fill="#f08c2e"/>
+</svg>
