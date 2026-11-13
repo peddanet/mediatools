@@ -27,9 +27,14 @@ from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.versioninfo import VersionInfo
 from mediatools.core.progressbase import ProgressBase
 from mediatools.flatten import FlatPlan, Flattener
+from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.launcher import GuiLauncher
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
                                ShrinkOptions)
+from mediatools.shrink.jobchooser import JobChooser
+from mediatools.shrink.jobregistry import JobRegistry
+from mediatools.shrink.jobspec import JobSpec
+from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.savingslog import SavingsLog
 from mediatools.shrink.spacetally import SpaceTally
@@ -80,6 +85,14 @@ class Cli:
                          help="processing order (default: largest files first)")
         cmd.add_argument("--min-seconds", type=float, default=0.0,
                          help="leave out videos shorter than this (e.g. 60 before a triage)")
+        cmd.add_argument("--min-size", type=Cli._size_arg, default=None,
+                         help="leave out videos smaller than this, e.g. 300M or 1.5G "
+                              "(decimal units)")
+        cmd.add_argument("--newer-than", type=Cli._date_arg, default=None, metavar="YYYY-MM-DD",
+                         help="leave out videos last modified before this date")
+        cmd.add_argument("--jobs", type=int, default=None,
+                         help="videos encoded at the same time (default: [shrink] jobs, "
+                              "else 1); try 2 and compare the MB/s")
         cmd.add_argument("--retry-failed", action="store_true",
                          help="include videos that failed in an earlier run (FAILED/BROKEN); "
                               "by default they are left out while their size is unchanged")
@@ -247,10 +260,8 @@ class Cli:
         Returns:
             0 on success, 2 if no window can open.
         """
-        program = os.path.expanduser("~/scripts/mediatools")
-        if not os.path.exists(program):
-            program = shutil.which("mediatools") or os.path.abspath(sys.argv[0])
-        return GuiLauncher(self.parser, program).run(args.install_desktop, args.remove_desktop)
+        return GuiLauncher(self.parser, DesktopEntry.default_program()).run(
+            args.install_desktop, args.remove_desktop)
 
     def main(self, argv: list[str] | None = None) -> int:
         """Parse arguments and run the selected subcommand.
@@ -298,6 +309,86 @@ class Cli:
         return os.path.abspath(path)
 
     @staticmethod
+    def _size_arg(text: str) -> int:
+        """Parse ``--min-size`` (argparse type).
+
+        Args:
+            text: Size such as ``300M``.
+
+        Returns:
+            Bytes.
+
+        Raises:
+            argparse.ArgumentTypeError: If the text is not a size.
+        """
+        try:
+            return JobSpec.parse_size(text)
+        except ValueError as err:
+            raise argparse.ArgumentTypeError(str(err)) from None
+
+    @staticmethod
+    def _date_arg(text: str) -> float:
+        """Parse ``--newer-than`` (argparse type).
+
+        Args:
+            text: Date ``YYYY-MM-DD``.
+
+        Returns:
+            Epoch seconds of local midnight.
+
+        Raises:
+            argparse.ArgumentTypeError: If the text is not a date.
+        """
+        try:
+            return JobSpec.parse_date(text)
+        except ValueError as err:
+            raise argparse.ArgumentTypeError(str(err)) from None
+
+    @staticmethod
+    def ledger() -> Ledger:
+        """Return the ledger of finished videos (filled in from the logs once).
+
+        Returns:
+            ``<data>/ledger.tsv``.
+        """
+        datadir = DataDir()
+        ledger = Ledger(os.path.join(datadir.data_dir, "ledger.tsv"), datadir.sub("logs"))
+        ledger.ensure()
+        return ledger
+
+    @staticmethod
+    def registry(ledger: Ledger | None = None) -> JobRegistry:
+        """Return the remembered shrink jobs.
+
+        Args:
+            ledger: Ledger for the figures done; None leaves them 0.
+
+        Returns:
+            ``<state>/jobs.json``.
+        """
+        return JobRegistry(os.path.join(DataDir().sub("state"), "jobs.json"), ledger)
+
+    def _choose_job(self, args: argparse.Namespace) -> argparse.Namespace | None:
+        """Offer the earlier jobs for a plain ``mediatools shrink`` on a terminal.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            The arguments to run (those of the chosen job, or unchanged),
+            or None if the user ended the selection.
+        """
+        if self.argv != ["shrink"] or not sys.stdin.isatty():
+            return args
+        chosen = JobChooser(self.registry(self.ledger())).choose()
+        if chosen is None:
+            return None
+        if not chosen:
+            return args
+        self.argv = chosen                       # a reload continues this very job
+        return self.parser.parse_args(chosen)
+
+    @staticmethod
     def _need(*tools: str) -> None:
         """Ensure external programs are installed.
 
@@ -327,6 +418,10 @@ class Cli:
             print(f"shrink is already running (pid {active}) - watch it with "
                   f"'mediatools attach', stop it with 'mediatools stop'")
             return 3
+        chosen = self._choose_job(args)
+        if chosen is None:
+            return 0
+        args = chosen
         config = Config()
         root = self._dir(config.require_path("collection", "root", args.path))
         self._need("ffmpeg", "ffprobe")
@@ -335,9 +430,11 @@ class Cli:
         probe = MediaProbe()
         encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck())
         durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
+        jobs = args.jobs if args.jobs is not None else (config.integer("shrink", "jobs")
+                                                        if config.get("shrink", "jobs") else 1)
         opts = ShrinkOptions(args.keep_copies, MediaTypes.parse_extensions(args.ext),
                              config.db_name(), args.order, args.min_seconds,
-                             args.retry_failed)
+                             args.retry_failed, args.min_size or 0, args.newer_than, max(1, jobs))
         codecs = CodecCache(os.path.join(DataDir().sub("state"), "shrink_codecs.tsv"))
         shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations, codecs=codecs)
         shrinker.control = RunControl(
@@ -346,9 +443,15 @@ class Cli:
         shrinker.state["results"] = ResultTable(
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
-        logs = SavingsLog(DataDir().sub("logs"))
-        shrinker.state["space"] = SpaceTally.from_logs(logs, run.path)
-        shrinker.state["base"] = ProgressBase(*logs.read_all())
+        ledger = self.ledger()
+        job = JobSpec(root, opts.extensions, opts.min_seconds, opts.min_size, opts.newer_than)
+        session = os.path.basename(run.path)[:-4]
+        done = ledger.sums(job)
+        shrinker.state.update({"ledger": ledger, "registry": self.registry(ledger), "job": job,
+                               "session": session,
+                               "space": SpaceTally.from_ledger(ledger, session),
+                               "base": ProgressBase(done.read, done.files, done.since,
+                                                    written=done.freed_out)})
         shrinker.state["decode"] = DecodeCheck()
         shrinker.state["ffmpeg_logs"] = os.path.join(DataDir().sub("logs"), "ffmpeg")
         restart = SelfRestart(self.argv, run.path)
@@ -445,7 +548,12 @@ class Cli:
         forwarded += ["-y"] if args.yes else []
         forwarded += ["--downloads", args.downloads] if args.downloads else []
         forwarded += ["--repo", args.repo] if args.repo else []
-        return ReleaseUpdater(forwarded).run()
+        code = ReleaseUpdater(forwarded).run()
+        if code == 0 and not args.list:
+            entry = DesktopEntry(DesktopEntry.default_program())
+            for item in entry.repair(Config().get("gui", "desktop_entry") == "yes"):
+                print("application menu entry repaired (" + item + ")")
+        return code
 
     def cmd_progress(self, args: argparse.Namespace) -> int:
         """Run ``mediatools progress``.
@@ -684,6 +792,13 @@ class Cli:
             print()
         for line in PlacesReport().lines():
             print(line)
+        entry = DesktopEntry(DesktopEntry.default_program())
+        found = entry.problems()
+        wanted = Config().get("gui", "desktop_entry") == "yes"
+        print(f"application menu entry: {entry.path}: "
+              + ("ok" if not found else "; ".join(found))
+              + ("" if wanted or not found else
+                 "  (create it with: mediatools gui --install-desktop)"))
         return 0
 
     @staticmethod

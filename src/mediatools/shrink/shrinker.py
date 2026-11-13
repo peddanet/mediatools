@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import contextlib
+import copy
+import json
 import logging
 import os
 import shutil
 import signal
 import time
+from collections import deque
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 
 from mediatools import __version__
 from mediatools.core.codeccache import CodecCache
@@ -21,10 +25,13 @@ from mediatools.core.progressbase import ProgressBase
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.shrink.encoder import HevcEncoder
 from mediatools.shrink.fileresult import FileResult
+from mediatools.shrink.jobspec import JobSpec
 from mediatools.shrink.journal import ReplaceJournal
+from mediatools.shrink.ledgerrow import LedgerRow
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.planner import ShrinkPlanner
 from mediatools.shrink.shrinkstate import ShrinkState
+from mediatools.shrink.slottable import RunningEncode, SlotTable
 from mediatools.shrink.spacetally import SpaceTally
 from mediatools.shrink.throughput import ThroughputLog
 
@@ -58,6 +65,14 @@ class Shrinker:
     original is untouched. Signals never interrupt the replacement itself.
 
     **Crash safety.** See :class:`ReplaceJournal`.
+
+    **Parallel encodes** (``opts.jobs`` > 1, since 1.6.0). Only ffmpeg runs
+    in worker threads, one :class:`HevcEncoder` per slot; checks,
+    replacement, databases, ledger, table and display stay in the main
+    thread. Two paths of the same inode (hard links) never run at the same
+    time, and a work folder is removed only when no encode runs in it.
+    A stop or reload starts no further file and waits for the running
+    ones; an abort stops all of them.
 
     **New release during a run.** ``mediatools reload`` (also sent by
     ``mediatools update``) asks the job to switch to the installed release.
@@ -135,14 +150,17 @@ class Shrinker:
                                    "throughput": throughput,
                                    "results": None, "decode": None, "ffmpeg_logs": None,
                                    "restart": None,
-                                   "space": SpaceTally(), "base": ProgressBase()}
+                                   "space": SpaceTally(), "base": ProgressBase(),
+                                   "ledger": None, "registry": None, "job": None,
+                                   "session": "", "encoders": [], "mtimes": {}}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False, "restart": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "broken": 0, "failed_before": 0, "regrown": 0, "copies": 0,
-                      "recovered": 0}
+                      "recovered": 0, "small": 0, "older": 0}
+        self.state["encoders"] = [self.encoder]
         self.found: dict[str, list] = {"failed": [], "broken": [], "failed_before": [],
                                        "leftovers": [], "hevc": []}
         self.planner = ShrinkPlanner(self.root, logger, self.opts, probe, self.state,
@@ -173,7 +191,8 @@ class Shrinker:
                 (signum == signal.SIGINT and self.flags["stop"]):
             self.flags["abort"] = self.flags["stop"] = True
             self.log.warning("aborting the current file now - its original stays untouched")
-            self.encoder.abort()
+            for encoder in self.state["encoders"]:
+                encoder.abort()
             return
         self._mark_stopping("stopping after the current file (press Ctrl+C again to abort it)")
 
@@ -236,10 +255,16 @@ class Shrinker:
         """
         mode = "keep copies" if self.opts.keep_copies else "replace originals"
         self.log.info("shrink root: %s  mode: %s  order: %s", self.root, mode, self.opts.order)
+        job = self.state["job"]
+        if job is not None:
+            self.log.info("shrink job: %s", json.dumps({**job.as_dict(), **self.settings()},
+                                                       sort_keys=True))
         todo = self.plan()
         total = sum(size for _path, size in todo)
         rate = self.state["throughput"].rate()
         self._report_plan(todo, total, rate)
+        if job is not None and self.state["registry"] is not None:
+            self.state["registry"].planned(job, self.settings(), total, len(todo))
         if (todo or self.found["leftovers"] or self.found["hevc"]) and confirm is not None \
                 and not confirm():
             if self.found["leftovers"]:
@@ -252,20 +277,16 @@ class Shrinker:
         self._record_hevc()
         if self.display is None:
             self.display = ProgressBar(total, len(todo), rate)
-        self.state["base"].after = lambda: self.state["space"].overall()[1]
+        base = self.state["base"]
+        base.after = lambda: base.written + self.state["space"].run_out
         self.display.base = self.state["base"]
         if self.control is not None:
             self.display.status_path = self.control.status_file
         self._attach_bar_filter()
-        for path, size in todo:
-            self._poll_stop(force=True)
-            self._poll_restart()
-            if self.flags["stop"] or self.flags["restart"]:
-                break
-            if self._process(path, size):
-                self.display.file_done(size)
-            else:
-                self.display.file_skipped(size)
+        if self.opts.jobs > 1:
+            self._encode_parallel(todo)
+        else:
+            self._encode_serial(todo)
         self.display.clear()
         if self.state["results"] is not None:
             self.state["results"].finish()           # close the table before the summary
@@ -275,6 +296,136 @@ class Shrinker:
         if self.flags["stop"]:
             return 1
         return 2 if self.found["failed"] else 0
+
+    def settings(self) -> dict[str, object]:
+        """Return the settings of this run that do not define the job.
+
+        Returns:
+            ``crf``, ``order`` and ``jobs``.
+        """
+        return {"crf": getattr(self.encoder, "crf", None), "order": self.opts.order,
+                "jobs": self.opts.jobs}
+
+    def _encode_serial(self, todo: list[tuple[str, int]]) -> None:
+        """Encode the planned videos one after the other.
+
+        Args:
+            todo: Planned videos.
+        """
+        if self.display is None:
+            return
+        for path, size in todo:
+            self._poll_stop(force=True)
+            self._poll_restart()
+            if self.flags["stop"] or self.flags["restart"]:
+                break
+            if self._process(path, size):
+                self.display.file_done(size)
+            else:
+                self.display.file_skipped(size)
+            self._job_progress(size)
+
+    def _job_progress(self, size: int) -> None:
+        """Take a finished or skipped video off the job's remainder.
+
+        Args:
+            size: Its source size.
+        """
+        job, registry = self.state["job"], self.state["registry"]
+        if job is not None and registry is not None:
+            registry.finished_file(job, size)
+
+    def _slots(self) -> list[HevcEncoder]:
+        """Create one encoder per parallel slot.
+
+        Returns:
+            ``opts.jobs`` encoders; the first is :attr:`encoder`.
+        """
+        slots = [self.encoder]
+        for _number in range(1, self.opts.jobs):
+            clone = getattr(self.encoder, "clone", None)
+            slots.append(clone() if callable(clone) else copy.copy(self.encoder))
+        return slots
+
+    def _encode_parallel(self, todo: list[tuple[str, int]]) -> None:
+        """Encode up to ``opts.jobs`` videos at the same time.
+
+        Args:
+            todo: Planned videos.
+        """
+        if self.display is None:
+            return
+        self.state["encoders"] = self._slots()
+        table = SlotTable(len(self.state["encoders"]))
+        pending = deque(todo)
+        self.log.info("encoding up to %i videos at the same time", self.opts.jobs)
+        with ThreadPoolExecutor(max_workers=self.opts.jobs) as pool:
+            while True:
+                self._poll_stop(force=True)
+                self._poll_restart()
+                self._start_free_slots(pool, table, pending)
+                if not table.running:
+                    break
+                done, _rest = wait(list(table.running), timeout=0.5,
+                                   return_when=FIRST_COMPLETED)
+                busy = len(table.running)
+                for future in done:
+                    self._collect(table, future, busy)
+                self.display.show_many(table.cells(), self.state["space"].line())
+
+    def _start_free_slots(self, pool: ThreadPoolExecutor, table: SlotTable,
+                          pending: deque) -> None:
+        """Start planned videos in the free slots (not after a stop or reload).
+
+        Args:
+            pool: Worker threads.
+            table: Slot bookkeeping.
+            pending: Planned videos not yet started.
+        """
+        if self.display is None:
+            return
+        waiting = []
+        while table.free and pending and not (self.flags["stop"] or self.flags["restart"]):
+            path, size = pending.popleft()
+            if table.blocked(path):
+                waiting.append((path, size))         # hard link of a running file
+                continue
+            prepared = self._prepare(path, size)
+            if prepared is None:
+                self.display.file_skipped(size)
+                self._job_progress(size)
+                continue
+            item = RunningEncode(table.free.pop(), path, size, prepared[0], prepared[1],
+                                 table.inode(path), self._length(path))
+            item.cell = [os.path.basename(path), 0.0, size]
+            cell = item.cell
+            future = pool.submit(self.state["encoders"][item.slot].encode, path, item.out,
+                                 lambda fraction: cell.__setitem__(1, fraction))
+            table.take(future, item)
+        pending.extendleft(reversed(waiting))
+
+    def _collect(self, table: SlotTable, future: Future, busy: int) -> None:
+        """Finish one encode of a slot: check, replace, record, count.
+
+        Args:
+            table: Slot bookkeeping.
+            future: The finished encode.
+            busy: Encodes that were running (share of the speed measurement).
+        """
+        item, last_in_folder = table.release(future)
+        try:
+            ok = bool(future.result())
+        except Exception as err:                   # pylint: disable=broad-except
+            self.log.error("encode of %s failed: %s", item.path, err)
+            ok = False
+        self._complete(item.path, item.size, item.out, item.database, ok, item.length,
+                       time.monotonic() - item.started, busy)
+        if last_in_folder:
+            with contextlib.suppress(OSError):
+                os.rmdir(os.path.dirname(item.out))
+        if self.display is not None:
+            self.display.file_done(item.size)
+        self._job_progress(item.size)
 
     def _report_plan(self, todo: list[tuple[str, int]], total: int,
                      rate: float | None) -> None:
@@ -298,6 +449,10 @@ class Shrinker:
         if self.stats["failed_before"]:
             self.log.info("left out, failed in an earlier run (FAILED/BROKEN, size unchanged): "
                           "%i - retry with --retry-failed", self.stats["failed_before"])
+        if self.opts.min_size or self.opts.newer_than is not None:
+            self.log.info("left out by the filters: smaller than %s: %i | modified "
+                          "before the date: %i", JobSpec.size_text(self.opts.min_size),
+                          self.stats["small"], self.stats["older"])
         self.log.info("to encode: %i files, %.1f GiB%s", len(todo), total / 1024 ** 3,
                       estimate)
         ratio = self.state["throughput"].ratio()
@@ -351,26 +506,44 @@ class Shrinker:
             of a file shrunk earlier in this run) or its data cannot be
             decoded.
         """
+        prepared = self._prepare(path, size)
+        if prepared is None:
+            return False
+        out, database = prepared
+        try:
+            self._encode_and_replace(path, size, out, database)
+        finally:
+            with contextlib.suppress(OSError):
+                os.rmdir(os.path.dirname(out))       # only if empty (not in review mode)
+        return True
+
+    def _prepare(self, path: str, size: int) -> tuple[str, ShrinkDatabase] | None:
+        """Check one planned video and create its work folder.
+
+        Args:
+            path: Absolute path of the video.
+            size: Its size when planned.
+
+        Returns:
+            Output path and database, or None if the video needs no encode
+            (see :meth:`_process`).
+        """
         dirpath = os.path.dirname(path)
         database = self.database(dirpath)
         # recorded meanwhile (e.g. a hard link shrunk earlier in this run); a
         # regrown file was planned on purpose and is checked for HEVC below
         if not os.path.isfile(path) or database.status(path) not in ("todo", "regrown"):
-            return False                             # removed or recorded meanwhile
+            return None                              # removed or recorded meanwhile
         if self.planner.probe.video_codec(path) == "hevc":
             self._record_one_hevc(path)
-            return False
+            return None
         if self._broken(path, size):
-            return False
+            return None
         tmp_dir = os.path.join(dirpath, MediaTypes.SHRINK_TMP_DIR)
         os.makedirs(tmp_dir, exist_ok=True)
-        out = os.path.join(tmp_dir, os.path.basename(path))
-        try:
-            self._encode_and_replace(path, size, out, database)
-        finally:
-            with contextlib.suppress(OSError):
-                os.rmdir(tmp_dir)                    # only if empty (not in review mode)
-        return True
+        with contextlib.suppress(OSError):
+            self.state["mtimes"][path] = os.path.getmtime(path)
+        return os.path.join(tmp_dir, os.path.basename(path)), database
 
     def _broken(self, path: str, size: int) -> bool:
         """Set a video aside if a trial decode finds its data unusable.
@@ -464,12 +637,42 @@ class Shrinker:
             out: Output path in ``newShrinkedFiles/``.
             database: Database of its directory.
         """
-        self.log.debug("shrinking (%.0f MB): %s", size / 1e6, path)
         name = os.path.basename(path)
-        length = (self.state["durations"].get(path, os.stat(path))
-                  if self.state["durations"] is not None else None)
+        length = self._length(path)
         started = time.monotonic()
         ok = self.encoder.encode(path, out, lambda fraction: self._show(name, fraction, size))
+        self._complete(path, size, out, database, ok, length, time.monotonic() - started)
+
+    def _length(self, path: str) -> float | None:
+        """Return the playing time from the duration cache.
+
+        Args:
+            path: Video file.
+
+        Returns:
+            Seconds, or None if not cached (or no cache is used).
+        """
+        self.log.debug("shrinking (%.0f MB): %s", os.path.getsize(path) / 1e6, path)
+        if self.state["durations"] is None:
+            return None
+        return self.state["durations"].get(path, os.stat(path))
+
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
+    def _complete(self, path: str, size: int, out: str, database: ShrinkDatabase, ok: bool,
+                  length: float | None, took: float, share: int = 1) -> None:
+        """Check the result of one encode and replace the original.
+
+        Args:
+            path: Original video.
+            size: Its size.
+            out: Output path in ``newShrinkedFiles/``.
+            database: Database of its directory.
+            ok: True if the encoder validated the output.
+            length: Playing time, or None.
+            took: Wall-clock seconds of the encode.
+            share: Encodes that ran at the same time; the speed measurement
+                counts ``took / share``.
+        """
         if self.flags["abort"]:
             self._remove_quietly(out)
             self._remove_quietly(out + ".ffmpeg.log")
@@ -480,12 +683,10 @@ class Shrinker:
             self._remove_quietly(out)
             self._keep_ffmpeg_log(out, path)
             self._record_failure(path, "FAILED", "encode or validation failed")
-            self._result(FileResult(path, "FAILED", size, None, length,
-                                    time.monotonic() - started))
+            self._result(FileResult(path, "FAILED", size, None, length, took))
             return
         out_size = self._size_or_none(out)
-        took = time.monotonic() - started
-        self.state["throughput"].add(size, took, out_size)
+        self.state["throughput"].add(size, took / max(1, share), out_size)
         if self.opts.keep_copies:
             self.stats["copies"] += 1
             self._result(FileResult(path, "copy", size, out_size, length, took))
@@ -502,6 +703,15 @@ class Shrinker:
         Args:
             item: Outcome of one video.
         """
+        ledger = self.state["ledger"]
+        if ledger is not None:
+            mtime = self.state["mtimes"].pop(item.path, None)
+            if mtime is None:
+                with contextlib.suppress(OSError):
+                    mtime = os.path.getmtime(item.path)
+            ledger.add(LedgerRow(time.strftime("%Y-%m-%d %H:%M:%S"), self.state["session"],
+                                 item.status, item.source, item.result, item.took,
+                                 item.length, mtime, item.path))
         table = self.state["results"]
         if table is None:
             return

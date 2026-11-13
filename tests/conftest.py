@@ -1,8 +1,11 @@
 """Shared fixtures: isolated data directory, generated media, fake player."""
+import gc
 import os
 import shutil
 import stat
 import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,6 +14,31 @@ HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is 
 HAVE_RSYNC = shutil.which("rsync") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAVE_FFMPEG, reason="ffmpeg/ffprobe not installed")
 needs_rsync = pytest.mark.skipif(not HAVE_RSYNC, reason="rsync not installed")
+
+
+@pytest.fixture(autouse=True)
+def collect_in_main_thread() -> Iterator[None]:
+    """Detach Tk variables left over by a test, in the main thread.
+
+    A variable with a trace callback stays alive after its window is
+    destroyed: the Tcl interpreter holds the callback, which holds the form,
+    which holds the variable. When such a variable is finalised later, the
+    garbage collector may run in a worker thread (e.g. of a parallel shrink
+    test), where Tk refuses with "main thread is not in main loop". Cutting
+    the link to the interpreter here makes the finaliser a no-op. Only the
+    tests share one process between Tk and threads; the program runs the
+    GUI and a shrink in separate processes.
+
+    Yields:
+        Nothing.
+    """
+    yield
+    gc.collect()
+    tkinter = sys.modules.get("tkinter")
+    if tkinter is not None:
+        for item in gc.get_objects():
+            if isinstance(item, tkinter.Variable):
+                item._tk = None              # pylint: disable=protected-access
 
 
 @pytest.fixture(autouse=True)

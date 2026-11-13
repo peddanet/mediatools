@@ -26,7 +26,8 @@ class ShrinkPlanner:
     original restored from a backup over its shrunk version) and whose
     video is not HEVC is planned again. A video recorded as failed
     (``FAILED`` or ``BROKEN``) with unchanged size is left out unless
-    ``retry_failed`` is set. Then optionally drop
+    ``retry_failed`` is set. Videos smaller than ``min_size`` or modified
+    before ``newer_than`` are left out first. Then optionally drop
     videos shorter than ``min_seconds``, set aside videos that are already
     HEVC and sort the rest (``largest`` first, ``smallest`` first or walk
     order ``path``).
@@ -43,7 +44,7 @@ class ShrinkPlanner:
         database_of: Returns the database of a directory.
         journal: Completes interrupted replacements.
         stats: Shared counters ``skipped``, ``short``, ``recovered``,
-            ``failed_before``, ``regrown``.
+            ``failed_before``, ``regrown``, ``small``, ``older``.
         found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
     """
 
@@ -113,7 +114,7 @@ class ShrinkPlanner:
             extension, link, placeholder, recorded or recorded as failed).
         """
         size = self._video_size(path)
-        if size is None:
+        if size is None or not self._wanted(path, size):
             return None
         database = self.database_of(os.path.dirname(path))
         state = database.status(path)
@@ -129,6 +130,24 @@ class ShrinkPlanner:
             self.found["failed_before"].append(path)
             return None
         return path, size
+
+    def _wanted(self, path: str, size: int) -> bool:
+        """Apply the size and date filters.
+
+        Args:
+            path: Video file.
+            size: Its size in bytes.
+
+        Returns:
+            True if the video passes ``min_size`` and ``newer_than``.
+        """
+        if size < self.opts.min_size:
+            self.stats["small"] = self.stats.get("small", 0) + 1
+            return False
+        if self.opts.newer_than is not None and os.path.getmtime(path) < self.opts.newer_than:
+            self.stats["older"] = self.stats.get("older", 0) + 1
+            return False
+        return True
 
     def _video_size(self, path: str) -> int | None:
         """Return the size of a regular, non-empty video with a planned extension.

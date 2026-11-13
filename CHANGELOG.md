@@ -5,6 +5,45 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-13
+
+### Added
+- `mediatools shrink --jobs N` (default `[shrink] jobs`, else 1): encodes N
+  videos at the same time. Only ffmpeg runs in worker threads; checks,
+  replacement, databases and the display stay in the main thread. Hard
+  links of one file never run together; stop and reload start no further
+  file and wait for the running ones; a second Ctrl+C aborts all of them.
+  The display draws one file line per running encode.
+- Filters `--min-size SIZE` (e.g. `300M`, decimal units) and
+  `--newer-than YYYY-MM-DD` (modification time); the plan summary counts
+  what each filter left out.
+- Ledger `~/.local/share/mediatools/ledger.tsv` (mode 600, append only):
+  one line per finished video with session, status, sizes, times, playing
+  time, modification time and path. Filled in once from the result tables
+  of the existing shrink logs, so nothing counted before is lost.
+- Jobs: a job is the root plus the filters; CRF, order and `--jobs` are
+  settings of a run. `state/jobs.json` remembers every job with its
+  settings and remainder. A plain `mediatools shrink` on a terminal lists
+  the jobs with progress bars and continues the chosen one (`n`: new job
+  with the defaults); a later `reload` continues that very job.
+- GUI: list of the shrink jobs with progress in the shrink tab (selecting
+  fills the form, *Continue* or a double click starts it); menu *View* with
+  text size (Ctrl++, Ctrl+-, Ctrl+0) and a light or dark scheme
+  (`[gui] scale`, `[gui] theme`), a flat style on ttk `clam` with an accent
+  colour; a bar offers *Restart now* when a newer release is installed.
+- `mediatools where` reports the state of the application menu entry.
+
+### Changed
+- The first progress line counts the **job** (root and filters), not all
+  shrink logs: a run on a subtree or with other filters shows its own
+  percentage and ETA; it is labelled `job`. The space line shows the
+  session and the total from the ledger (`total since <date>`).
+- Each run writes its job and settings as JSON into the log
+  (`shrink job: {...}`).
+- `--install-desktop` remembers the wish (`[gui] desktop_entry = yes`);
+  the GUI start and `mediatools update` then put back a missing or
+  outdated entry and its icons.
+
 ## [1.5.1] - 2026-11-13
 
 ### Changed

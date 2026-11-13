@@ -411,6 +411,9 @@ mediatools shrink ~/Pictures/collection --min-seconds 60      # skip short clips
 mediatools shrink ~/Pictures/collection --order path --keep-copies
 mediatools shrink ~/Pictures/collection --crf 26 --threads 8 -y
 mediatools shrink ~/Pictures/collection --foreground          # stay in this terminal
+mediatools shrink ~/Pictures/collection --min-size 300M --newer-than 2026-11-01
+mediatools shrink ~/Pictures/collection --jobs 2              # two encodes at the same time
+mediatools shrink                                             # terminal: choose an earlier job
 mediatools attach                                             # (alias: front) watch the background run
 mediatools stop                                               # finish the current file, then end
 mediatools reload                                             # switch a running shrink to the installed release
@@ -421,6 +424,9 @@ mediatools status                                             # running? release
 |---|---|---|
 | `--order` | `largest` | `largest`, `smallest` or `path` (directory order) |
 | `--min-seconds S` | 0 | leave out videos shorter than S seconds |
+| `--min-size SIZE` | none | leave out videos smaller than SIZE (`300M`, `1.5G`; decimal units like the MB of the logs) |
+| `--newer-than DATE` | none | leave out videos last modified before DATE (`YYYY-MM-DD`) |
+| `--jobs N` | `[shrink] jobs`, else 1 | videos encoded at the same time |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
 | `--retry-failed` | off | include videos that failed in an earlier run (`FAILED`/`BROKEN`) |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
@@ -428,6 +434,60 @@ mediatools status                                             # running? release
 | `--ext LIST` | `mp4` | extensions to process |
 | `-y` | off | no confirmation question |
 | `-v` | off | debug logging |
+
+## Jobs and the ledger
+
+A **job** is what a run selects: the root and the filters (`--ext`,
+`--min-seconds`, `--min-size`, `--newer-than`). CRF, order and `--jobs`
+are settings of a run and may change between runs of the same job.
+
+Every finished video is appended to the **ledger**
+`~/.local/share/mediatools/ledger.tsv` (one tab-separated line: time,
+session, status, source and result bytes, seconds, playing time,
+modification time, path; mode 600). It is the source of three counts:
+
+| Count | Covers | Shown in |
+|---|---|---|
+| job | finished videos below the root that pass the filters, from all runs | first progress line, job list |
+| session | one log; `reload` continues it | space line, `savings` |
+| total | everything since the first finished video | space line |
+
+The ledger is only appended to. When it is missing it is filled in once
+from the result tables of the shrink logs (sizes in MB, rounded;
+modification time unknown, so such rows never count for a `--newer-than`
+job). Resetting the total therefore needs deleting the ledger *and* the
+logs on purpose.
+
+Every planned job is remembered in `state/jobs.json` with its settings and
+what is still to encode. `mediatools shrink` without any argument, on a
+terminal and while no shrink runs, lists them:
+
+~~~text
+Shrink jobs so far (most recent first):
+  1  2026-11-13 22:10  ███████░░░░░░░░░░░░░  37.2 %    412.0 GiB done,   695.0 GiB to go  crf 28  ~/Pictures/collection
+  2  2026-11-12 18:03  ░░░░░░░░░░░░░░░░░░░░   0.0 %      0.0 GiB done,    40.0 GiB to go  crf 26  ~/Pictures/collection/2024  --min-size 300M
+  n  new job with the defaults
+  q  quit
+Continue which job? [1]
+~~~
+
+The chosen job's arguments are used as if typed; a later `reload`
+continues the same job. With any argument, or without a terminal, the
+list is skipped.
+
+## Parallel encodes
+
+`--jobs N` encodes N videos at the same time. libx265 alone does not use
+all logical CPUs of a modern processor (lookahead and frame dependencies
+limit its threads), so a second encode often raises the throughput. Only
+ffmpeg runs in the worker threads; checks, replacement, databases, ledger,
+table and display stay in the main thread. Two names of one file (hard
+links) are never encoded together, and a work folder is removed only when
+no encode in it runs. A stop or reload starts no further file and waits
+for the running ones; a second Ctrl+C aborts all of them (originals stay
+untouched). The ETA uses the wall-clock speed of the run and so includes
+the gain. Compare the speed with `--jobs 1` and `--jobs 2` before making a
+value the default in `[shrink] jobs`; memory use grows with N.
 
 ## Plan
 
@@ -528,18 +588,20 @@ them.
 (numbers illustrative)
 
 ~~~text
-total [#############...........]  37.5 % | ETA 2d21h | since 2026-11-09: 210.0 GiB read (-> 33.6 GiB after shrinking), 350.0 GiB to go | 2500 files done, 4000 to go
+job   [#############...........]  37.5 % | ETA 2d21h | since 2026-11-09: 210.0 GiB read (-> 33.6 GiB after shrinking), 350.0 GiB to go | 2500 files done, 4000 to go
 file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
-space  session since 2026-11-12 04:56: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | since 2026-10-20: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
+space  session since 2026-11-12 04:56: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | total since 2026-10-20: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
 ~~~
 
-The first line covers the whole job (since 1.4.2): the source GiB read
-since the first shrink log, with their size after shrinking in brackets,
-and the source GiB still to go; the percentage is read / (read + to go),
-the ETA the GiB to go divided by the measured speed. Read and files done
-include all earlier runs (taken from the shrink logs), so they do not
-start at zero after a start or a `mediatools reload`. Files shrunk before
-the first shrink log (e.g. by older scripts) are not part of `read`. The second line shows
+The first line covers the job (since 1.6.0; see *Jobs and the ledger*):
+the source GiB of the job read by all runs so far, with their size after
+shrinking in brackets, and the source GiB still to go in this run's plan;
+the percentage is read / (read + to go), the ETA the GiB to go divided by
+the measured speed. Read and files done come from the ledger, so they do
+not start at zero after a start or a `mediatools reload`, and a run on a
+subtree or with other filters counts only its own job. Files shrunk
+before the first shrink log (e.g. by older scripts) are not part of
+`read`. With `--jobs 2` or more, one file line per running encode follows. The second line shows
 the file being encoded:
 its percentage, its size, the part already encoded and its remaining time
 at the current speed. The third line (since 1.2.16) shows the disk space.
@@ -562,10 +624,10 @@ line keeps the three quantities apart:
 session (the time is shown). A session is one log file; `mediatools
 reload` continues the log, so the session survives a release switch,
 while the progress counts of the first line start again after it. The
-second view adds all sessions and names the date of the first shrunk file
-(`since 2026-10-20`). Both views come from the result tables of the shrink
-logs (sizes in MB, rounded: exact to about 0.5 MB per file) and are then
-counted on per replaced file. Copies kept with `--keep-copies` free no space
+second view (`total`) adds all sessions and names the date of the first
+shrunk file (`total since 2026-10-20`). Both views come from the ledger
+(rows filled in from old logs: sizes in MB, rounded, exact to about 0.5 MB
+per file) and are then counted on per replaced file. Copies kept with `--keep-copies` free no space
 and are not counted. At the end of a run both views are written to the log,
 with the output share in percent of the source.
 
@@ -1221,7 +1283,7 @@ reload). Command line and window therefore always behave the same.
 
 | Tab | Content |
 |---|---|
-| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and of all sessions, log end, *Stop*, *Reload*, *Open log*; start form |
+| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*, list of the shrink jobs with progress (select: fill the form; *Continue*: start), log end; start form |
 | savings | freed space per session or per day, newest first, and the total |
 | update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
 | config | editor of `mediatools.ini` (checked before saving) and the effective values |
@@ -1262,6 +1324,21 @@ command line (unless `--foreground` is ticked); closing the window does not
 stop it. Commands still running in a tab are interrupted when the window is
 closed, after a question.
 
+## Appearance and updates
+
+Menu *View*: *Larger text* (Ctrl++), *Smaller text* (Ctrl+-), *Normal
+size* (Ctrl+0) and *Light / dark scheme*. The change applies at once and
+is saved in `[gui] scale` (0.8 to 2.5; 1.0 = 10 pt) and `[gui] theme`
+(`light`, `dark`) of `mediatools.ini`. The style is built on Tk's `clam`
+theme: flat surfaces, one accent colour for the selected tab, progress
+bars and the *Run* and *Continue* buttons; no extra package is needed.
+
+Every minute the window asks the installed release for its version (in
+the background). After `mediatools update` a bar above the tabs says which
+release is installed and offers *Restart now*: the window closes (asking
+first if commands of its tabs still run) and opens again with the new
+release. A shrink in the background is not affected.
+
 ## Requirements
 
 | Requirement | Why | Remedy shown by `mediatools gui` |
@@ -1289,6 +1366,16 @@ panel groups the open window with the entry. The same can be done in the
 GUI: menu *mediatools > Add to application menu*. Both commands run as
 normal user and touch only these three files. A desktop may need a new
 login, or a moment, before it shows a new entry.
+
+Since 1.6.0 the wish is remembered (`[gui] desktop_entry = yes`; the
+remove command sets `no`). The GUI start and `mediatools update` then put
+back the entry and its icons when they are missing or outdated, e.g.
+after a clean-up of `~/.local/share/applications` or a restore of the
+home folder without it. `mediatools where` shows the state:
+
+~~~text
+application menu entry: ~/.local/share/applications/mediatools.desktop: ok
+~~~
 
 # Testing
 
