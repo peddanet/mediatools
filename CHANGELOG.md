@@ -5,6 +5,29 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-13
+
+### Changed
+- CI: pull requests are tested on Python 3.10 (oldest supported) and 3.14
+  (newest) instead of 3.10, 3.12, 3.13, 3.14; the pre-push hook still
+  tests the PC's version. Required checks: `gates (3.10)`, `gates (3.14)`.
+- CI: a tag push runs only `release-check` (tag on `main`, tag = version);
+  the gates no longer repeat the run of the pull request for the same tree.
+  One full gate run less per release.
+- CI: pip downloads are cached by `actions/setup-python` (key: hash of
+  `pyproject.toml`); `actions/checkout@v5` (Node.js 24) removes the
+  deprecation annotation of v4.
+- `mediatools update` reads the Python versions it announces from the
+  workflow file.
+
+### Fixed
+- `mediatools update`: a patch that does not fit onto `main` (usually
+  because an earlier release is missing in the download folder) no longer
+  leaves a half-applied `git am` session behind that blocked the next run
+  at "update main"; the session is aborted, the local hotfix branch
+  removed and the likely cause printed. A session left by an interrupted
+  run is cleared at the start.
+
 ## [1.5.0] - 2026-11-13
 
 ### Changed

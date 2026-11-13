@@ -7,12 +7,10 @@ flowchart TB
   subgraph GH["GitHub (server side)"]
     direction TB
     D["event<br/>push / pull_request / tag"] --> E["Actions scheduler<br/>reads .github/workflows/tests.yml<br/>of the pushed commit"]
-    E --> F["matrix expands<br/>gates (3.10)<br/>gates (3.12)<br/>gates (3.13)<br/>gates (3.14)"]
+    E --> F["matrix expands<br/>gates (3.10)<br/>gates (3.14)"]
     F --> G1["fresh VM 1<br/>ubuntu-24.04"]
     F --> G2["fresh VM 2<br/>ubuntu-24.04"]
-    F --> G3["fresh VM 3<br/>ubuntu-24.04"]
-    F --> G4["fresh VM 4<br/>ubuntu-24.04"]
-    G1 & G2 & G3 & G4 --> H["check runs<br/>attached to the commit SHA"]
+    G1 & G2 --> H["check runs<br/>attached to the commit SHA"]
     H --> I{"branch protection<br/>all required checks green<br/>and branch up to date?"}
     I -- yes --> J[merge allowed]
     I -- no --> K[merge blocked]
