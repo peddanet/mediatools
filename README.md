@@ -281,7 +281,9 @@ mediatools gui --remove-desktop   # remove it again
 ```
 
 The menu entry is the file `~/.local/share/applications/mediatools.desktop`
-(freedesktop.org standard); it starts `~/scripts/mediatools gui`. The GUI
+(freedesktop.org standard) with the mediatools icon in
+`~/.local/share/icons/hicolor`; it starts `~/scripts/mediatools gui`. The
+GUI menu *mediatools > Add to application menu* does the same. The GUI
 needs a graphical session and the package `python3-tk`
 (`sudo apt install python3-tk`); without them `mediatools gui` says what is
 missing.
