@@ -165,7 +165,10 @@ directory, configuration -- lives in `core`.
 |---|---|
 | `MediaTypes` | extensions, `_flat` / `newShrinkedFiles` names, `SKIP_DIRS` |
 | `Config` | local INI file: collection root, database name, abbreviations, snapshot settings; error messages name key and expected format |
-| `DataDir` | `$MEDIATOOLS_HOME` layout: logs, state, plans, reports |
+| `DataDir` | folders: XDG layout (config, state, data; since 1.5.0), one folder from `$MEDIATOOLS_HOME`, or the old `~/scripts/mediatools.d` while it still holds data; `sub()` puts `plans`/`releases` into the data folder, the rest into the state folder |
+| `DataMigration` | `mediatools where --migrate`: moves the old folder's data into the XDG folders; refuses while another mediatools process runs or a target exists; leaves `WHERE-IS-THE-DATA.txt` |
+| `PlacesReport` | `mediatools where`: every folder and file location with the layout in use |
+| `PrivacyLists` | `mediatools privacy`: paths and sizes of the deny/allow list, `--edit` in `$EDITOR`, creates them with modes 700/600 |
 | `RunLog` | logger to terminal and time-stamped file |
 | `MediaProbe` | ffprobe: duration, codec, video stream |
 | `SelfRestart` | switch of a running shrink to the installed release: `--version` probe, command line (`--foreground -y --continue-log`), `os.execv` (same PID) |
@@ -468,23 +471,31 @@ tools/check.sh --fast                   # gates 1-4 only
 **Privacy gate.** `tools/privacy_scan.py` searches all tracked files (PDFs
 via `pdftotext`), file paths and commit messages for terms that would allow
 conclusions about the processed data. The terms are never in the
-repository; they come from `$MEDIATOOLS_HOME/privacy_denylist.txt` (one term
-per line) and from the unit directory names below `[collection] root`.
+repository; they come from the deny list
+`~/.config/mediatools/privacy/denylist.txt` (one term per line; with
+`MEDIATOOLS_HOME` set: `$MEDIATOOLS_HOME/privacy_denylist.txt`) and from the
+unit directory names below `[collection] root`.
 Matching ignores case and whole words only (`cat` does not match `concatenate`);
 terms shorter than three characters are ignored. Without local terms the
 gate is skipped, which keeps CI neutral.
 
 Ordinary words can be on the deny list and still be needed in technical
 text. Instead of rewording, such uses are permitted by **allowed phrases**
-in `$MEDIATOOLS_HOME/privacy_allowlist.txt` (same format, one phrase per
-line). They are blanked out before the search: the term stays forbidden
-everywhere else. Both lists stay outside the repository.
+in the allow list next to it (`privacy/allowlist.txt`, same format, one
+phrase per line). They are blanked out before the search: the term stays forbidden
+everywhere else. Both lists stay outside the repository; the folder has
+mode 700, the files mode 600.
 
 ~~~bash
-"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_denylist.txt
-"${EDITOR:-nano}" ~/scripts/mediatools.d/privacy_allowlist.txt
+mediatools privacy                 # both paths and the number of entries
+mediatools privacy --edit deny     # open in $EDITOR (nano if unset), created if missing
+mediatools privacy --edit allow
 python3 tools/privacy_scan.py
 ~~~
+
+`tools/privacy_scan.py` resolves the lists with `DataDir` from the source
+tree of the clone, so it finds them in the same place as the installed
+program (also before `mediatools where --migrate`, in the old folder).
 
 Notes on the configuration (`pyproject.toml`):
 
@@ -742,7 +753,7 @@ mediatools update -y         # all pending versions, no question
 | choice | a version means "all pending versions up to it, in ascending order", because each patch builds on the release before it; Enter = all |
 | per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (local gates) -> PR into `main` -> CI 1/3 -> merge -> tag `vX` -> CI 2/3 -> back-merge into `develop` via `merge/hotfix-X` (local gates) -> CI 3/3 -> merge; see "CI runs" |
 | install | `install.sh` (newest tag), then `mediatools --version` must name the last applied version |
-| tidying | used archives to `~/scripts/mediatools.d/releases/` (plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
+| tidying | used archives to the releases folder (`~/.local/share/mediatools/releases/`, plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
 
 Reading GitHub calls (`gh run list`, `gh run view`, `gh pr list`) are
 repeated up to five times, 10 s apart; an interrupted watch of a CI run is
@@ -754,7 +765,8 @@ branches and the installation rewrite the script while bash is still
 reading it.
 It finds the clone next to itself (source checkout) or uses
 `~/Projects/mediatools` (`--repo DIR`). It logs to
-`~/scripts/mediatools.d/logs/apply-release_<ts>.log` and stops at the first
+`~/.local/state/mediatools/logs/apply-release_<ts>.log` (the old folder
+until `mediatools where --migrate`; `$MEDIATOOLS_HOME/logs` if set) and stops at the first
 failing command; nothing in the download folder is removed then, and the
 same command can be repeated (hotfix branch rebuilt, open pull request
 reused). It runs as a normal user; root would leave root-owned files in

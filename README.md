@@ -1,10 +1,10 @@
 # mediatools
 
-**Maintenance tools for large local media collections on Linux.**
-Shrink videos to HEVC without losing track of what is done, review short
-clips in batches, build flat hard-link views of deeply nested download trees,
-back everything up to a second disk **without duplicating hard links**, and
-keep versioned snapshots of it with rsnapshot.
+**Keeps a dynamically growing video collection manageable on Linux - on disk
+space first.** Shrink videos to HEVC without losing track of what is done,
+review short clips in batches, build flat hard-link views of deeply nested
+folder trees, back everything up to a second disk **without duplicating hard
+links**, and keep versioned snapshots of it with rsnapshot.
 
 [![tests](https://github.com/peddanet/mediatools/actions/workflows/tests.yml/badge.svg?branch=develop)](https://github.com/peddanet/mediatools/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -20,6 +20,7 @@ mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
 mediatools config    one local file for paths and names (kept outside the repo)
 mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
+mediatools where     where configuration, logs, state and data are kept
 ```
 
 ---
@@ -45,8 +46,9 @@ mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
 
 ## In one minute
 
-You keep a local copy of videos and pictures that a download tool fetches
-folder by folder - for example an archiver for a creator platform. After some months the collection has the usual problems:
+You keep a large local collection of videos and pictures, sorted into one
+folder per source, that keeps growing - recordings, footage, downloads, any
+mix. After some months the collection has the usual problems:
 
 | Problem | Command | Result |
 |---|---|---|
@@ -56,11 +58,11 @@ folder by folder - for example an archiver for a creator platform. After some mo
 | Every file is buried four or five folder levels deep | `flatten` | one flat folder of hard links per project, no extra space |
 | The backup turns hard links into full copies, or deletes too much | `sync`, `snapshot` | rsync backup that keeps hard links; versioned snapshots |
 
-**The key idea:** the download tool decides by *file name* whether it already
-has a file. mediatools therefore never takes a name away. A shrunk video keeps
+**The key idea:** a tool that fills the collection (a download or sync tool)
+usually decides by *file name* whether it already has a file. mediatools therefore never takes a name away. A shrunk video keeps
 its name, a discarded clip leaves an empty placeholder under its name, a flat
 view consists of additional names (hard links), and `sync` never deletes. The
-next download run fetches only what is really new - not the large originals
+next run of that tool fetches only what is really new - not the large originals
 again, not the clips you discarded.
 
 > **Before you start:** `shrink` re-encodes *lossy* and then replaces the
@@ -77,21 +79,22 @@ mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
 mediatools config    one local file for paths and names (kept outside the repo)
 mediatools rename-db rename shrink databases: rename-db OLD NEW [PATH]
+mediatools where     where configuration, logs, state and data are kept
 ```
 
 ## Typical folder layout
 
 mediatools makes no assumption about a particular platform. It works on a
 **collection root** whose direct sub-directories are called **units** (one per
-project, campaign or channel); everything below a unit may be nested
+project, source or channel); everything below a unit may be nested
 arbitrarily (illustrative example):
 
 ```text
 collection/                      <- collection root ([collection] root)
 └── projectA/                    <- unit
-    ├── posts/members/987654321 2024-05-01 10-00-00/Videos/making_of_part1.mp4
-    ├── posts/public/Images/cover_2024.jpg
-    ├── attachments/...
+    ├── 2024/2024-05-01 session/Videos/making_of_part1.mp4
+    ├── 2024/stills/Images/cover_2024.jpg
+    ├── extras/...
     └── _flat/                   <- created by flatten: hard links of all media
 ```
 
@@ -178,7 +181,7 @@ Maintainers who receive hotfixes as patch archives
 (`~/Projects/mediatools`) through pull requests, tags the release, installs
 it and tidies the download folder (details in the developer documentation).
 **Remove**: `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`
-(configuration and logs in `~/scripts/mediatools.d` stay).
+(configuration, logs and data stay; `mediatools where` shows where).
 
 **Option B - pipx**
 
@@ -197,13 +200,18 @@ Ubuntu 24.04 and later block `pip install --user` for the system Python
 
 ### 3. Where mediatools keeps its files
 
-Configuration, logs, state, reports and (option A) the installed release are
-stored in one directory, default `~/scripts/mediatools.d` (see
-[Data directory](#data-directory)). To use another place, set
-`MEDIATOOLS_HOME` **before** installing, for example in `~/.profile`:
+mediatools follows the
+[XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/):
+configuration in `~/.config/mediatools`, logs and runtime state in
+`~/.local/state/mediatools`, kept data in `~/.local/share/mediatools`. The
+installed release (option A) stays in `~/scripts/mediatools.d/venv`.
+`mediatools where` prints every place; details in
+[Data directory](#data-directory). To keep everything in one folder
+instead, set `MEDIATOOLS_HOME` **before** installing, for example in
+`~/.profile`:
 
 ```bash
-echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+echo 'export MEDIATOOLS_HOME="$HOME/mediatools-data"' >> ~/.profile
 ```
 
 ## First steps
@@ -455,8 +463,8 @@ media file of a unit a hard link is created in `<unit>/_flat/`. The link name
 encodes the original location:
 
 ```text
-projectA/posts/members/987654321 2024-05-01 10-00-00/Videos/clip.mp4
-projectA/_flat/posts__members__987654321 2024-05-01 10-00-00__Videos__clip.mp4
+projectA/2024/2024-05-01 session/Videos/clip.mp4
+projectA/_flat/2024__2024-05-01 session__Videos__clip.mp4
 ```
 
 The file system's name limit is read at run time (`statvfs`; eCryptfs with
@@ -465,12 +473,12 @@ shortened step by step:
 
 | Level | Rule | Example |
 |---|---|---|
-| 0 | full path, `__` separated | `posts__public__Videos__a.mp4` |
-| 1 | configured folders abbreviated, id/date compacted | `p__m__987654321-20240501T100000__V__making_of_…_a1b2c3.mp4` |
-| 2 | level 1 + front of the file stem cut, tail (id) kept | `p__m__987654321-20240501T100000__V__~project_part_one_…_a1b2c3.mp4` |
+| 0 | full path, `__` separated | `footage__2024__Videos__a.mp4` |
+| 1 | configured folders abbreviated, id/date compacted | `f__s__987654321-20240501T100000__V__making_of_…_a1b2c3.mp4` |
+| 2 | level 1 + front of the file stem cut, tail (id) kept | `f__s__987654321-20240501T100000__V__~project_part_one_…_a1b2c3.mp4` |
 | 3 | directory part hashed | `27613887__~making_of_…_a1b2c3.mp4` |
 
-Examples for a 100-byte limit with `abbreviations = posts=p, members=m, Videos=V`.
+Examples for a 100-byte limit with `abbreviations = footage=f, sessions=s, Videos=V`.
 
 Every link is listed in `<unit>/_flat/_index.tsv` (link name → original
 path), and any link can be traced by inode: `find UNIT -samefile LINK`.
@@ -544,7 +552,7 @@ mediatools snapshot install-trigger            # run automatically when the disk
 ## Configuration
 
 Paths and names that describe a concrete collection are not part of the code.
-They live in `~/scripts/mediatools.d/mediatools.ini` (or
+They live in `~/.config/mediatools/mediatools.ini` (or
 `$MEDIATOOLS_HOME/mediatools.ini`), created by `mediatools config --init`:
 
 ```ini
@@ -603,20 +611,43 @@ flowchart LR
 
 ## Data directory
 
-All logs and state live in `$MEDIATOOLS_HOME` (default
-`~/scripts/mediatools.d`):
+Since 1.5.0 mediatools follows the XDG Base Directory layout; the variables
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` move the three base
+folders when they hold an absolute path. `mediatools where` prints every
+place.
 
 ```text
-mediatools.ini   configuration
-venv/      installed release (install.sh)
-logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
-state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
-           shrink_codecs.tsv, shrink.pid, shrink.stop (only while stopping),
-           shrink_throughput.json, sync_targets.json, snapshot_levels.json
-plans/     flatten_<ts>.tsv  (input for --undo)
-reports/   shrink_results_*.txt, progress_*.txt, sync_target_only_*.tsv, snapshot_removals_*.txt
-snapshot/  rsnapshot.conf (generated), rsnapshot.log
+~/.config/mediatools/            configuration
+  mediatools.ini
+  privacy/denylist.txt           local lists of the privacy scan (developers,
+  privacy/allowlist.txt          mediatools privacy), mode 600
+~/.local/state/mediatools/       logs and runtime state
+  logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
+  state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
+             shrink_codecs.tsv, shrink.pid, shrink.stop (only while stopping),
+             shrink_throughput.json, sync_targets.json, snapshot_levels.json
+  reports/   shrink_results_*.txt, progress_*.txt, sync_target_only_*.tsv,
+             snapshot_removals_*.txt
+  snapshot/  rsnapshot.conf (generated), rsnapshot.log
+~/.local/share/mediatools/       kept data
+  plans/     flatten_<ts>.tsv  (input for --undo)
+  releases/  applied release archives (mediatools update)
+~/scripts/mediatools.d/venv/     installed release (install.sh)
 ```
+
+**Releases before 1.5.0** kept everything in `~/scripts/mediatools.d`. As
+long as data is there, mediatools keeps using it; move it once with
+
+```bash
+mediatools stop                  # if a shrink runs: wait until it has stopped
+mediatools where --migrate       # refuses while any mediatools process runs
+```
+
+Only data moves; the installed release and unknown files stay, and a note
+`WHERE-IS-THE-DATA.txt` names the new places; with it, the old folder is
+never used again. With `MEDIATOOLS_HOME` set,
+everything stays in that one folder with the old file names
+(`privacy_denylist.txt`, `privacy_allowlist.txt`).
 
 ## Exit codes
 

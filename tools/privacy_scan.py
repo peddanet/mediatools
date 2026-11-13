@@ -4,17 +4,17 @@
 The terms are never part of the repository - a list of them would itself
 reveal what it protects. They come from two local sources:
 
-* ``$MEDIATOOLS_HOME/privacy_denylist.txt`` (default
-  ``~/scripts/mediatools.d/privacy_denylist.txt``): one term per line,
-  ``#`` starts a comment;
+* the deny list ``~/.config/mediatools/privacy/denylist.txt`` (shown by
+  ``mediatools privacy``; ``$MEDIATOOLS_HOME/privacy_denylist.txt`` when
+  that variable is set): one term per line, ``#`` starts a comment;
 * the names of the unit directories directly below ``[collection] root``
   and the components of that path below the home directory (standard
   folders such as ``Pictures`` excepted).
 
-Allowed phrases come from ``$MEDIATOOLS_HOME/privacy_allowlist.txt`` (same
-format). They are blanked out before the search, so a listed term stays
-forbidden everywhere except inside an allowed phrase - e.g. the term
-``level`` with the allowed phrase ``sea level``.
+Allowed phrases come from the allow list next to it (same format). They
+are blanked out before the search, so a listed term stays forbidden
+everywhere except inside an allowed phrase - e.g. the term ``level`` with
+the allowed phrase ``sea level``.
 
 Scanned are the contents of all tracked files (PDFs via ``pdftotext`` if
 installed), the tracked file paths and all commit messages. Matching
@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 STANDARD_DIRS = {"desktop", "documents", "downloads", "music", "pictures", "public",
                  "templates", "videos", "home", "projects", "scripts"}
@@ -88,18 +89,34 @@ class PrivacyScan:
         return start + re.escape(text) + end
 
     @staticmethod
+    def datadir() -> Any:
+        """Return the folders of mediatools from the source tree of this clone.
+
+        Returns:
+            A ``mediatools.core.datadir.DataDir``.
+        """
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+        from mediatools.core.datadir import DataDir  # pylint: disable=import-outside-toplevel
+        return DataDir()
+
+    @staticmethod
     def read_list(name: str) -> list[str]:
-        """Read a local list from the data directory.
+        """Read a local list of the configuration.
 
         Args:
-            name: File name, e.g. ``privacy_denylist.txt``.
+            name: ``privacy_denylist.txt`` or ``privacy_allowlist.txt`` (mapped
+                to the deny or allow list wherever it lives), or another file
+                name in the configuration folder.
 
         Returns:
             Entries without comments and empty lines; empty if the file is missing.
         """
-        home = os.environ.get("MEDIATOOLS_HOME", os.path.expanduser("~/scripts/mediatools.d"))
+        data = PrivacyScan.datadir()
+        kinds = {"privacy_denylist.txt": "deny", "privacy_allowlist.txt": "allow"}
+        path = (data.privacy_file(kinds[name]) if name in kinds
+                else os.path.join(data.config_dir, name))
         try:
-            with open(os.path.join(home, name), encoding="utf-8") as handle:
+            with open(path, encoding="utf-8") as handle:
                 return [entry for entry in (line.split("#", 1)[0].strip() for line in handle)
                         if entry]
         except FileNotFoundError:
@@ -113,7 +130,6 @@ class PrivacyScan:
             All local terms (unfiltered).
         """
         terms = PrivacyScan.read_list("privacy_denylist.txt")
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
         from mediatools.core.config import Config  # pylint: disable=import-outside-toplevel
         root = Config().path_value("collection", "root")
         if root and os.path.isdir(root):

@@ -28,16 +28,16 @@ def test_namer_loose_file_keeps_name() -> None:
 
 def test_namer_level1_abbreviates() -> None:
     """Level 1 abbreviates folders and compacts id/date folders."""
-    parts = ["attachments", "members", "987654321 2024-05-01 10-00-00", "Videos",
+    parts = ["extras", "sessions", "987654321 2024-05-01 10-00-00", "Videos",
              "x" * 70 + "_a1b2c3d4e5_clip.mp4"]
-    name, level = FlatNamer(143, {"attachments": "a", "members": "m", "Videos": "V"}).name(parts)
+    name, level = FlatNamer(143, {"extras": "e", "sessions": "s", "Videos": "V"}).name(parts)
     assert level == 1
-    assert name.startswith("a__m__987654321-20240501T100000__V__")
+    assert name.startswith("e__s__987654321-20240501T100000__V__")
 
 
 def test_namer_level2_keeps_tail_and_limit() -> None:
     """Level 2 cuts the front of the stem and keeps the media id."""
-    parts = ["attachments", "members", "987654321 2024-05-01 10-00-00", "Videos",
+    parts = ["extras", "sessions", "987654321 2024-05-01 10-00-00", "Videos",
              "y" * 150 + "_a1b2c3d4e5_clip.mp4"]
     namer = FlatNamer(143)
     name, level = namer.name(parts)

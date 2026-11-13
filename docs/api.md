@@ -341,6 +341,34 @@ Raises:
     SystemExit: If a ``--set`` item is not ``SECTION.KEY=VALUE``.
 ~~~
 
+**`cmd_where`**
+
+~~~text
+cmd_where(args: argparse.Namespace) -> int
+
+Run ``mediatools where``: list the folders, optionally move old data.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0 on success, 1 if the move is refused.
+~~~
+
+**`cmd_privacy`**
+
+~~~text
+cmd_privacy(args: argparse.Namespace) -> int
+
+Run ``mediatools privacy``: show or edit the local lists.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0, or the exit code of the editor.
+~~~
+
 **`cmd_snapshot`**
 
 ~~~text
@@ -707,22 +735,36 @@ Returns:
 ### `DataDir` (`mediatools.core.datadir`) {.unnumbered}
 
 ~~~text
-Runtime data directory of mediatools.
+Directories of mediatools, following the XDG Base Directory layout.
 
-The root is taken from the environment variable ``MEDIATOOLS_HOME``;
-the default is ``~/scripts/mediatools.d``. Nothing is written into the
-media collection itself except what a subcommand documents (shrink
-databases, ``_flat`` directories).
+Three places, each with a folder named after the application::
 
-Layout::
+    ~/.config/mediatools/        configuration: mediatools.ini,
+                                 privacy/denylist.txt, privacy/allowlist.txt
+    ~/.local/state/mediatools/   runtime state: logs/, state/, reports/,
+                                 snapshot/
+    ~/.local/share/mediatools/   kept data: plans/ (flatten undo),
+                                 releases/ (applied release archives)
 
-    <root>/logs/      one log file per run, date and time in the name
-    <root>/state/     persistent state, e.g. triage kept list
-    <root>/plans/     flatten plans (for review and undo)
-    <root>/reports/   progress lists and sync reports
+``$XDG_CONFIG_HOME``, ``$XDG_STATE_HOME`` and ``$XDG_DATA_HOME`` replace
+the defaults when they hold an absolute path. The installed release
+(``venv``) is not data; it stays below ``~/scripts/mediatools.d``.
+
+Two cases keep everything in one folder with the old file names:
+
+* ``$MEDIATOOLS_HOME`` is set (tests, several independent setups);
+* the old folder ``~/scripts/mediatools.d`` still holds data (releases
+  before 1.5.0) - ``mediatools where --migrate`` moves it.
+
+Nothing is written into the media collection itself except what a
+subcommand documents (shrink databases, ``_flat`` directories).
 
 Attributes:
-    root: Absolute path of the data root.
+    mode: ``xdg``, ``single`` (``$MEDIATOOLS_HOME``) or ``legacy``.
+    config_dir: Folder of the configuration.
+    state_dir: Folder of logs and runtime state.
+    data_dir: Folder of kept data.
+    root: Main folder: the state folder (``xdg``) or the single folder.
 ~~~
 
 **`__init__`**
@@ -730,11 +772,75 @@ Attributes:
 ~~~text
 __init__(self, root: str | None = None)
 
-Resolve the data root.
+Resolve the folders.
 
 Args:
-    root: Explicit root; if None, ``$MEDIATOOLS_HOME`` or the default
-        is used.
+    root: Explicit single folder; if None, ``$MEDIATOOLS_HOME``, the
+        old folder (if it still holds data) or the XDG layout is used.
+~~~
+
+**`legacy_dir`**
+
+~~~text
+legacy_dir(cls) -> str
+
+Return the absolute path of the old single folder.
+
+Returns:
+    Expanded ``~/scripts/mediatools.d``.
+~~~
+
+**`legacy_in_use`**
+
+~~~text
+legacy_in_use(cls) -> bool
+
+Tell whether the old single folder still holds data.
+
+Returns:
+    True if logs, state, reports, plans, the INI file or a privacy
+    list are there - unless the note of a finished move is there
+    (an older tool may recreate a folder afterwards).
+~~~
+
+**`xdg_dir`**
+
+~~~text
+xdg_dir(cls, kind: str) -> str
+
+Return the application folder of one XDG base directory.
+
+Args:
+    kind: ``config``, ``state`` or ``data``.
+
+Returns:
+    ``<base>/mediatools``; the variable counts only if absolute.
+~~~
+
+**`config_file`**
+
+~~~text
+config_file(self) -> str
+
+Path of the INI file.
+
+Returns:
+    ``<config_dir>/mediatools.ini``.
+~~~
+
+**`privacy_file`**
+
+~~~text
+privacy_file(self, kind: str) -> str
+
+Path of a local list of the privacy scan.
+
+Args:
+    kind: ``deny`` or ``allow``.
+
+Returns:
+    ``<config_dir>/privacy/<kind>list.txt``, or the old name
+    ``privacy_<kind>list.txt`` in the single folder.
 ~~~
 
 **`sub`**
@@ -742,13 +848,16 @@ Args:
 ~~~text
 sub(self, name: str) -> str
 
-Return a subdirectory of the data root, creating it if needed.
+Return a subfolder, creating it if needed.
+
+``plans`` and ``releases`` belong to the data folder, all others
+to the state folder.
 
 Args:
-    name: Subdirectory name, e.g. ``logs``.
+    name: Subfolder name, e.g. ``logs``.
 
 Returns:
-    Absolute path of the subdirectory.
+    Absolute path of the subfolder.
 ~~~
 
 **`file`**
@@ -756,15 +865,15 @@ Returns:
 ~~~text
 file(self, sub: str, prefix: str, suffix: str) -> str
 
-Build a time-stamped file path inside a subdirectory.
+Build a time-stamped file path inside a subfolder.
 
 Args:
-    sub: Subdirectory name, e.g. ``logs``.
+    sub: Subfolder name, e.g. ``logs``.
     prefix: File name prefix, e.g. ``shrink``.
     suffix: File name suffix including the dot, e.g. ``.log``.
 
 Returns:
-    Path such as ``<root>/logs/shrink_2026-11-03_13-12-52.log``.
+    Path such as ``<state>/logs/shrink_2026-11-03_13-12-52.log``.
 ~~~
 
 **`stamp`**
@@ -776,6 +885,89 @@ Return the current time in the format used in file names.
 
 Returns:
     Timestamp ``YYYY-MM-DD_hh-mm-ss``.
+~~~
+
+### `DataMigration` (`mediatools.core.datamigration`) {.unnumbered}
+
+~~~text
+Moves ``~/scripts/mediatools.d`` content to config, state and data folders.
+
+Only data moves; the installed release (``venv``) and anything unknown
+stay where they are. A note ``WHERE-IS-THE-DATA.txt`` with the new
+places is left in the old folder. The move refuses to start while any
+other mediatools process runs (a running shrink keeps writing to the
+old folder) or when a target already exists (nothing is overwritten).
+
+Attributes:
+    source: Old folder.
+    target: Data folders of the XDG layout.
+    proc: Root of the process table (``/proc``; replaceable in tests).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    source: str | None = None,
+    target: DataDir | None = None,
+    proc: str = '/proc',
+)
+
+Prepare a migration.
+
+Args:
+    source: Old folder; ``~/scripts/mediatools.d`` if None.
+    target: XDG folders; resolved without ``$MEDIATOOLS_HOME`` if None.
+    proc: Root of the process table.
+~~~
+
+**`moves`**
+
+~~~text
+moves(self) -> list[tuple[str, str]]
+
+List the planned moves of existing items.
+
+Returns:
+    Pairs (old path, new path), only for items that exist.
+~~~
+
+**`others`**
+
+~~~text
+others(self) -> list[tuple[int, str]]
+
+Find other running mediatools processes.
+
+Returns:
+    (pid, command line) of every process except this one whose
+    program or module (first three arguments) is mediatools.
+~~~
+
+**`problems`**
+
+~~~text
+problems(self) -> list[str]
+
+Collect the reasons that forbid the move.
+
+Returns:
+    One message per problem; empty if the move may run.
+~~~
+
+**`run`**
+
+~~~text
+run(self) -> list[tuple[str, str]]
+
+Move the items and leave the note.
+
+Returns:
+    The moves done.
+
+Raises:
+    RuntimeError: If :meth:`problems` reports anything.
 ~~~
 
 ### `DecodeCheck` (`mediatools.core.decodecheck`) {.unnumbered}
@@ -1063,6 +1255,135 @@ Args:
 
 Returns:
     Set such as ``{".mp4", ".mov", ".mkv"}``; empty items are ignored.
+~~~
+
+### `PlacesReport` (`mediatools.core.placesreport`) {.unnumbered}
+
+~~~text
+Lists configuration, state, data and installation folders.
+
+Answers "where is ...?" in one place (``mediatools where``), so no
+folder has to be remembered.
+
+Attributes:
+    datadir: Folders of mediatools.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, datadir: DataDir | None = None)
+
+Bind to the folders.
+
+Args:
+    datadir: Folders of mediatools; the default ones if None.
+~~~
+
+**`lines`**
+
+~~~text
+lines(self) -> list[str]
+
+Build the report.
+
+Returns:
+    Text lines, one place per line.
+~~~
+
+### `PrivacyLists` (`mediatools.core.privacylists`) {.unnumbered}
+
+~~~text
+Locates, counts, creates and edits the deny and allow list.
+
+The lists belong to the configuration (``~/.config/mediatools/privacy``)
+and are never part of the repository: a list of the protected terms
+would itself reveal what it protects. The scan itself is
+``tools/privacy_scan.py`` in the repository.
+
+Attributes:
+    datadir: Folders of mediatools.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, datadir: DataDir | None = None)
+
+Bind to the folders.
+
+Args:
+    datadir: Folders of mediatools; the default ones if None.
+~~~
+
+**`path`**
+
+~~~text
+path(self, kind: str) -> str
+
+Return the file of one list.
+
+Args:
+    kind: ``deny`` or ``allow``.
+
+Returns:
+    Absolute path (the file may not exist).
+~~~
+
+**`entries`**
+
+~~~text
+entries(self, kind: str) -> list[str]
+
+Read one list.
+
+Args:
+    kind: ``deny`` or ``allow``.
+
+Returns:
+    Entries without comments and empty lines; empty if the file is missing.
+~~~
+
+**`ensure`**
+
+~~~text
+ensure(self, kind: str) -> str
+
+Create a list with its explanatory header if it is missing.
+
+The folder gets mode 700 and the file mode 600: only the owner may
+read the protected terms.
+
+Args:
+    kind: ``deny`` or ``allow``.
+
+Returns:
+    Path of the list.
+~~~
+
+**`edit`**
+
+~~~text
+edit(self, kind: str) -> int
+
+Open one list in ``$EDITOR`` (``nano`` if unset).
+
+Args:
+    kind: ``deny`` or ``allow``.
+
+Returns:
+    Exit code of the editor.
+~~~
+
+**`lines`**
+
+~~~text
+lines(self) -> list[str]
+
+Describe both lists.
+
+Returns:
+    One line per list: path and number of entries (or "missing").
 ~~~
 
 ### `MediaProbe` (`mediatools.core.probe`) {.unnumbered}
@@ -1782,7 +2103,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.4.2') -> None
+__init__(self, control: RunControl, installed: str = '1.5.0') -> None
 
 Remember the job and the installed release.
 
@@ -2046,7 +2367,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.4.2')
+__init__(self, package_dir: str | None = None, version: str = '1.5.0')
 
 Locate the imported package.
 
@@ -5081,8 +5402,8 @@ Returns:
 ~~~text
 Encodes the relative path of a file into one file name.
 
-``posts/2024/Videos/clip_01.mp4`` becomes
-``posts__2024__Videos__clip_01.mp4``. The separator ``__`` is used
+``footage/2024/Videos/clip_01.mp4`` becomes
+``footage__2024__Videos__clip_01.mp4``. The separator ``__`` is used
 because it hardly ever occurs in real folder names.
 
 If the result exceeds ``limit`` bytes (UTF-8), increasingly compact
@@ -6818,7 +7139,7 @@ about_text(self) -> str
 Return the text of the About dialog.
 
 Returns:
-    Version, data folder and interpreter.
+    Version, folders and interpreter.
 ~~~
 
 **`about`**
@@ -7213,7 +7534,8 @@ Args:
     values: Form values by ``dest``.
 
 Returns:
-    False for read-only commands and previews, else True.
+    False for read-only commands, previews and ``where`` without
+    ``--migrate``, else True.
 ~~~
 
 **`__init__`**
@@ -7485,12 +7807,14 @@ Returns:
 Lists the files below the data folder and shows the selected one.
 
 Folders: ``logs`` (one log per run), ``reports`` (progress lists, sync
-reports), ``plans`` (flatten plans, usable for undo) and ``state``.
+reports) and ``state`` from the state folder, ``plans`` (flatten plans,
+usable for undo) from the data folder.
 The newest files come first. Large files are shown from their end.
 
 Attributes:
     frame: Container of the widgets (place it in the parent).
-    root: Data folder.
+    datadir: Folders of mediatools.
+    root: State folder (opened by *Open data folder*).
     opener: Opens files and folders.
     on_undo: Called with a plan file for *Use as flatten undo plan*, or None.
     tree: List of folders and files.
@@ -7513,7 +7837,8 @@ Build the browser and list the files.
 
 Args:
     master: Parent widget.
-    root: Data folder; the mediatools data folder if None.
+    root: One folder holding everything (tests); the folders of
+        mediatools if None.
     opener: Opener for files and folders; ``xdg-open`` if None.
     on_undo: Called with a plan file for an undo, or None.
 ~~~
