@@ -17,6 +17,7 @@ from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.progressbar import ProgressBar
 from mediatools.core.runcontrol import RunControl
+from mediatools.core.progressbase import ProgressBase
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.shrink.encoder import HevcEncoder
 from mediatools.shrink.fileresult import FileResult
@@ -134,7 +135,7 @@ class Shrinker:
                                    "throughput": throughput,
                                    "results": None, "decode": None, "ffmpeg_logs": None,
                                    "restart": None,
-                                   "space": SpaceTally()}
+                                   "space": SpaceTally(), "base": ProgressBase()}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
         self.flags = {"stop": False, "abort": False, "restart": False}
@@ -251,6 +252,8 @@ class Shrinker:
         self._record_hevc()
         if self.display is None:
             self.display = ProgressBar(total, len(todo), rate)
+        self.state["base"].after = lambda: self.state["space"].overall()[1]
+        self.display.base = self.state["base"]
         if self.control is not None:
             self.display.status_path = self.control.status_file
         self._attach_bar_filter()
