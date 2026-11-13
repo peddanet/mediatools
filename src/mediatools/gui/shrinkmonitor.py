@@ -8,6 +8,8 @@ from mediatools.core.datadir import DataDir
 from mediatools.core.runcontrol import RunControl
 from mediatools.core.runstatus import RunStatus
 from mediatools.gui.shrinkreading import ShrinkReading
+from mediatools.shrink.jobregistry import JobRegistry
+from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.savingslog import SavingsLog
 from mediatools.shrink.spacetally import SpaceTally
 
@@ -24,6 +26,7 @@ class ShrinkMonitor:
     Attributes:
         control: Run control of the shrink job.
         logs: Reader of the shrink logs (cached between readings).
+        ledger: Ledger of finished videos (cached between readings), or None.
     """
 
     PERCENT = re.compile(r"\]\s+([0-9.]+) %")
@@ -37,6 +40,7 @@ class ShrinkMonitor:
         """
         self.control = control or RunControl("shrink")
         self.logs = logs or SavingsLog(DataDir().sub("logs"))
+        self.ledger: Ledger | None = None
 
     def read(self) -> ShrinkReading:
         """Read the current state.
@@ -50,7 +54,12 @@ class ShrinkMonitor:
             state.log_path = self.control.active_log()
         logs = self.logs.logs()
         session = state.log_path or (logs[-1] if logs else None)
-        line = SpaceTally.from_logs(self.logs, session).line()
+        ledger = self.registry().ledger
+        if ledger is not None and os.path.exists(ledger.path):
+            name = os.path.basename(session)[:-4] if session else None
+            line = SpaceTally.from_ledger(ledger, name).line()
+        else:
+            line = SpaceTally.from_logs(self.logs, session).line()
         state.overall = line.replace("space  session", "space  last session", 1) \
             if pid is None else line
         if pid is None:
@@ -64,6 +73,28 @@ class ShrinkMonitor:
             match = self.PERCENT.search(state.progress[0])
             state.percent = float(match.group(1)) if match else None
         return state
+
+    @staticmethod
+    def job_files() -> list[str]:
+        """Return the files the job list is built from.
+
+        Returns:
+            Paths of ``jobs.json`` and ``ledger.tsv``.
+        """
+        datadir = DataDir()
+        return [os.path.join(datadir.sub("state"), "jobs.json"),
+                os.path.join(datadir.data_dir, "ledger.tsv")]
+
+    def registry(self) -> JobRegistry:
+        """Return the remembered shrink jobs with the ledger figures.
+
+        Returns:
+            The registry.
+        """
+        state, ledger = self.job_files()
+        if self.ledger is None or self.ledger.path != ledger:
+            self.ledger = Ledger(ledger, DataDir().sub("logs"))
+        return JobRegistry(state, self.ledger)
 
     @staticmethod
     def tail(path: str | None, lines: int = 400, chunk: int = 65536) -> list[str]:

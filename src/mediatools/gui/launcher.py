@@ -5,6 +5,7 @@ import argparse
 import importlib
 import os
 
+from mediatools.core.config import Config
 from mediatools.gui.catalog import CommandCatalog
 from mediatools.gui.desktopentry import DesktopEntry
 
@@ -64,19 +65,24 @@ class GuiLauncher:
             Process exit code.
         """
         entry = DesktopEntry(self.program)
+        config = Config()
         if install_desktop:
             print("application menu entry written: " + entry.install())
+            config.set_value("gui", "desktop_entry", "yes")
             return 0
         if remove_desktop:
             print("application menu entry removed" if entry.remove() else "there was no entry")
+            config.set_value("gui", "desktop_entry", "no")
             return 0
         reason = self.problem()
         if reason:
             print("mediatools gui: " + reason)
             return 2
+        for item in entry.repair(config.get("gui", "desktop_entry") == "yes"):
+            print("application menu entry repaired (" + item + ")")
         tkinter = importlib.import_module("tkinter")
         app_module = importlib.import_module("mediatools.gui.app")
         root = tkinter.Tk(className="mediatools")
-        app_module.MediaToolsApp(root, CommandCatalog(self.parser))
+        app_module.MediaToolsApp(root, CommandCatalog(self.parser), config=config)
         root.mainloop()
         return 0
