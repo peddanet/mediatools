@@ -490,12 +490,19 @@ them.
 (numbers illustrative)
 
 ~~~text
-total [#############...........]  37.5 % | 2500/6500 files | 210.0/560.0 GiB source | ETA 2d21h
+total [#############...........]  37.5 % | ETA 2d21h | since 2026-11-09: 210.0 GiB read (-> 33.6 GiB after shrinking), 350.0 GiB to go | 2500 files done, 4000 to go
 file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
 space  session since 2026-11-12 04:56: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | since 2026-10-20: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
 ~~~
 
-The first line covers the whole run, the second the file being encoded:
+The first line covers the whole job (since 1.4.2): the source GiB read
+since the first shrink log, with their size after shrinking in brackets,
+and the source GiB still to go; the percentage is read / (read + to go),
+the ETA the GiB to go divided by the measured speed. Read and files done
+include all earlier runs (taken from the shrink logs), so they do not
+start at zero after a start or a `mediatools reload`. Files shrunk before
+the first shrink log (e.g. by older scripts) are not part of `read`. The second line shows
+the file being encoded:
 its percentage, its size, the part already encoded and its remaining time
 at the current speed. The third line (since 1.2.16) shows the disk space.
 All lines are redrawn in place and cut to the terminal width (a long file
@@ -503,7 +510,8 @@ name is shortened in the middle), so a narrow window does not fill up with
 lines.
 
 **Read, written, freed.** The GiB of the first line are *source* bytes:
-how much was read and encoded, not how much space became free. The space
+how much was read and encoded (every encoded file, also failures and kept
+copies) and how much is still to go, not how much space became free. The space
 line keeps the three quantities apart:
 
 | Quantity | Meaning |

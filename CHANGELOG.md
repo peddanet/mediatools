@@ -5,6 +5,18 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-13
+
+### Changed
+- First progress line: `ETA | since <date>: <read> GiB read (-> <after>
+  GiB after shrinking), <to go> GiB to go | <n> files done, <m> to go`, all
+  source bytes of the whole job since the first shrink log; the percentage
+  is read / (read + to go). Read and files done include all earlier runs
+  (from the shrink logs), so they no longer start at zero after a start or
+  a `mediatools reload`.
+  The ETA was and is computed from the source GiB to go and the measured
+  speed.
+
 ## [1.4.1] - 2026-11-12
 
 ### Added
