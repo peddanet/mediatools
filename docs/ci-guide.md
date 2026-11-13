@@ -20,8 +20,9 @@ abstract: |
   `apply-release.sh`. A chapter shows the branches (`main` = former
   `master`, `develop`, `feature`, `release`, `hotfix`) as parallel lanes
   and marks for every step which gate run belongs to it. State: release
-  1.2.14 (CI only for pull requests and tags, Python 3.10 to 3.14,
-  retries of GitHub calls in `mediatools update`). The document is part
+  1.5.1 (CI for pull requests on Python 3.10 and 3.14, the tag run only
+  checks the tag, pip downloads cached, retries of GitHub calls in
+  `mediatools update`). The document is part
   of the repository (`docs/ci-guide.md`) and changes with every release
   that changes the CI. Branch protection, costs and limits, self-hosted and
   Forgejo runners, a command cheat sheet, a glossary and the sources close
@@ -69,8 +70,8 @@ Two numbers recur everywhere and are worth fixing first:
 | Repository | `github.com/peddanet/mediatools`, **public** |
 | Workflow file | `.github/workflows/tests.yml`, workflow name `quality-gates` |
 | Gate script | `tools/check.sh` (privacy, format, lint, types, security, tests) |
-| Test matrix | CPython 3.10, 3.12, 3.13, 3.14 on `ubuntu-24.04` (since 1.2.13) |
-| Required checks | `gates (3.10)`, `gates (3.12)`, `gates (3.13)`, `gates (3.14)` |
+| Test matrix | CPython 3.10 and 3.14 on `ubuntu-24.04` (since 1.5.1; 3.10, 3.12, 3.13, 3.14 before) |
+| Required checks | `gates (3.10)`, `gates (3.14)` |
 
 # The big picture: executed twice, not mirrored
 
@@ -98,7 +99,7 @@ The identity of the script is what makes the local run a good
 | Aspect | Local (pre-push) | GitHub (CI) |
 |---|---|---|
 | Machine | own PC, state accumulates | fresh VM per job, deleted afterwards |
-| Python | the one in the local venv | 3.10, 3.12, 3.13, 3.14, one VM each |
+| Python | the one in the local venv | 3.10 and 3.14, one VM each |
 | Tools | as installed (`pip install -e ".[dev]"`) | installed anew on every run |
 | Files | working tree incl. untracked files | only what is committed |
 | Privileges | normal user | user `runner` with passwordless `sudo` |
@@ -125,7 +126,7 @@ on:
 | Key | Meaning |
 |---|---|
 | `name` | display name; also used by `gh workflow run quality-gates` |
-| `on.push.tags` | run when a tag `v*` is pushed (release) |
+| `on.push.tags` | run when a tag `v*` is pushed (release); only `release-check` runs then |
 | `on.pull_request.branches` | run for a PR whose **target** is `main` or `develop`; the run tests the merge result of PR head and target |
 | `workflow_dispatch` | allows a manual start: `gh workflow run quality-gates --ref BRANCH` |
 
@@ -139,16 +140,19 @@ read. Chapter 4 shows every run per branch.
 ~~~yaml
 jobs:
   gates:
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.12", "3.13", "3.14"]
+        python: ["3.10", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: system tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb
       - name: python tools
@@ -159,23 +163,25 @@ jobs:
 
 | Key | Meaning |
 |---|---|
-| `jobs.gates` | job id; the check names become `gates (3.10)` ... `gates (3.14)` (job id plus matrix value) |
+| `jobs.gates` | job id; the check names become `gates (3.10)` and `gates (3.14)` (job id plus matrix value) |
+| `if: github.ref_type != 'tag'` | the gates do not run for a tag push: the tagged merge commit has the tree its pull request already tested |
 | `runs-on` | runner **label**: selects the machine type (chapter 5) |
-| `strategy.matrix.python` | one job per list element, all started in parallel |
-| `fail-fast: false` | a failing version does not cancel the other two; default would be `true` |
-| `uses:` | runs a published **action** (a versioned program from another repository) |
-| `${{ matrix.python }}` | expression; replaced by `3.10`, `3.12` or `3.13` in the respective job |
+| `strategy.matrix.python` | one job per list element, all started in parallel; the oldest supported and the newest version, the pre-push hook covers the PC's version in between |
+| `fail-fast: false` | a failing version does not cancel the other one; default would be `true` |
+| `uses:` | runs a published **action** (a versioned program from another repository); `checkout@v5` runs on Node.js 24 |
+| `cache: pip` | `setup-python` keeps pip's download cache between runs, keyed on the hash of `pyproject.toml` |
+| `${{ matrix.python }}` | expression; replaced by `3.10` or `3.14` in the respective job |
 | `run:` | shell command on the VM (bash on Linux runners); a non-zero exit code fails the step and the job |
 
-The second job only runs for release tags:
+The second job only runs for release tags, and it is the only job of a
+tag run:
 
 ~~~yaml
   release-check:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: gates
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: tag is on main
@@ -186,8 +192,9 @@ The second job only runs for release tags:
           test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$v"; exit 1; }
 ~~~
 
-`needs: gates` makes it wait until all four matrix jobs succeeded.
-`fetch-depth: 0` fetches the full history (default is only the one
+Until 1.5.0 the tag run repeated all gate jobs first (`needs: gates`);
+since 1.5.1 it only checks the tag, which shortens every release by one
+full gate run. `fetch-depth: 0` fetches the full history (default is only the one
 commit), which `git merge-base` needs. `GITHUB_SHA` and `GITHUB_REF_NAME`
 are environment variables that GitHub sets in every job (commit and tag
 name). Tags are not covered by branch protection, therefore this job is
@@ -223,7 +230,7 @@ the gate run of the step:
 | Badge | Where | What |
 |---|---|---|
 | **LOCAL** | this PC, pre-push hook | `tools/check.sh` with the Python of the venv, on the working tree; can be bypassed with `--no-verify` |
-| **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.10 to 3.14 on the committed tree; for a tag also `release-check`; binding for branch protection |
+| **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.10 and 3.14 on the committed tree (pull requests); for a tag only `release-check`; binding for branch protection |
 | **none** | - | no test: the pull request tested the same tree before |
 
 ![Feature and release, done by hand](img/lanes_release.png){width=100%}
@@ -245,7 +252,7 @@ closes with a table of all CI runs (also when a step fails):
 --- local gates (pre-push hook): tools/check.sh on this PC with Python 3.13.x;
     GitHub starts no run for this push (hotfix/1.2.13 has no push trigger)
 --- 1.2.13 CI 1/3: pull_request on hotfix/1.2.13 (commit 3f2a9c1)
-    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.12/3.13/3.14
+    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.14
     purpose: required check: branch protection allows the merge into main only when green
     run:     https://github.com/peddanet/mediatools/actions/runs/<id>
 
@@ -363,11 +370,13 @@ images with advance notice (Python 3.9 was removed on 2026-01-12) and
 announces a removal from the manifest about six months ahead. 3.10 will
 therefore work for some time, but not indefinitely.
 
-Since 1.2.13 the matrix is 3.10, 3.12, 3.13, 3.14 and the action is
-`actions/setup-python@v6`. 3.10 stays as long as
-`requires-python = ">=3.10"` must hold for a target system (Ubuntu 22.04
-ships 3.10 as system Python). The required checks of the branch
-protection include `gates (3.14)` (chapter 9).
+Since 1.5.1 the matrix is 3.10 and 3.14 (from 1.2.13 to 1.5.0 it was
+3.10, 3.12, 3.13, 3.14); the action is `actions/setup-python@v6`. The
+oldest and the newest supported version catch most version-dependent
+errors; the pre-push hook adds the version of the developer PC. 3.10
+stays as long as `requires-python = ">=3.10"` must hold for a target
+system (Ubuntu 22.04 ships 3.10 as system Python). The required checks of
+the branch protection are `gates (3.10)` and `gates (3.14)` (chapter 9).
 
 # Docker containers
 
@@ -540,7 +549,7 @@ call (normal user, repository owner):
 ~~~bash
 gh api -X PUT "repos/peddanet/mediatools/branches/main/protection" --input - <<'EOF'
 { "required_status_checks": { "strict": true,
-    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)", "gates (3.14)"] },
+    "contexts": ["gates (3.10)", "gates (3.14)"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },
   "restrictions": null, "allow_force_pushes": false, "allow_deletions": false }
@@ -680,6 +689,12 @@ Workflow
 
 # Sources
 
+* actions/checkout, release v5.0.0 (runtime Node.js 24; removes the
+  "Node.js 20 is deprecated" annotation of v4):
+  <https://github.com/actions/checkout/releases/tag/v5.0.0>
+* actions/setup-python, README, *Caching packages dependencies* (`cache: pip`,
+  `cache-dependency-path`, `pyproject.toml` as dependency file):
+  <https://github.com/actions/setup-python#caching-packages-dependencies>
 * GitHub Docs, *GitHub-hosted runners reference* (labels, hardware,
   fresh VM per job, sudo):
   <https://docs.github.com/en/actions/reference/runners/github-hosted-runners>

@@ -108,10 +108,10 @@ def test_summary_empty_and_local_announcement(tmp_path: Path, body: str) -> None
 
 
 def test_workflow_triggers_and_matrix() -> None:
-    """Only tags and pull requests start runs; the matrix covers 3.10 to 3.14."""
+    """Only tags and pull requests start runs; the matrix holds the oldest and newest Python."""
     flow = WORKFLOW.read_text(encoding="utf-8")
     trigger = flow.split("\non:\n", 1)[1].split("\njobs:", 1)[0]
     assert trigger.split() == ["push:", "tags:", '["v*"]', "pull_request:", "branches:",
                                "[main,", "develop]", "workflow_dispatch:"]
-    assert 'python: ["3.10", "3.12", "3.13", "3.14"]' in flow
+    assert 'python: ["3.10", "3.14"]' in flow
     assert "actions/setup-python@v6" in flow and "setup-python@v5" not in flow

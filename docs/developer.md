@@ -57,7 +57,7 @@ mediatools/
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
   install.sh                installs a release tag into a venv (~/scripts/mediatools)
-  .github/workflows/        CI: tools/check.sh on Python 3.10, 3.12, 3.13, 3.14
+  .github/workflows/        CI: tools/check.sh on Python 3.10 and 3.14
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
   src/mediatools/gui/       Tk window (mediatools gui)
@@ -527,14 +527,14 @@ GitHub API, branch protection, costs) is explained in `docs/ci-guide.md`
 
 The same `tools/check.sh` runs in two places: **locally** in the pre-push
 hook (one Python version, the working tree of this PC) and **on GitHub**
-(fresh virtual machine per job, one job per Python version 3.10, 3.12,
-3.13, 3.14, only committed files). Only the GitHub result counts for branch
+(fresh virtual machine per job, one job per Python version 3.10 and 3.14,
+only committed files). Only the GitHub result counts for branch
 protection. Since 1.2.13 GitHub starts a run for exactly two events:
 
 | Event | Run on GitHub | Checks | Purpose |
 |---|---|---|---|
-| pull request into `main` or `develop` | `gates (3.10)` ... `gates (3.14)` | the **merge result** of the PR branch and its target | required check: the merge button stays locked until all are green |
-| push of a tag `v*` | the gates plus `release-check` | the tagged commit; tag on `main`, tag = `__version__` | release gate |
+| pull request into `main` or `develop` | `gates (3.10)`, `gates (3.14)` | the **merge result** of the PR branch and its target | required check: the merge button stays locked until all are green |
+| push of a tag `v*` | `release-check` only (since 1.5.1) | tag on `main`, tag = `__version__`; the gates ran on the pull request for the same tree | release gate |
 | push of a branch (any) | none | - | work branches are checked through their PR; a merge into `main`/`develop` has the tree its PR already tested (`strict` protection, no direct pushes) |
 | `gh workflow run quality-gates --ref BRANCH` | the gates | that branch | manual run for a branch without PR |
 
@@ -544,7 +544,7 @@ branch to another (create a branch, merge); a dashed arrow is a pull
 request, i.e. the proposal to merge, which GitHub tests before the merge
 is allowed. The badge on the right names the gate run of the step:
 **LOCAL** = pre-push hook on this PC (one Python version), **CI** = run on
-GitHub (Python 3.10 to 3.14; for a tag also `release-check`), **none** =
+GitHub (Python 3.10 and 3.14; for a tag only `release-check`), **none** =
 nothing is tested at this step because the pull request tested the same
 tree before. The numbers in the hotfix diagram are the steps of
 `apply-release.sh` (shown as `=== 1.2.13: 4 pull request into main` in
@@ -567,7 +567,7 @@ a table of all CI runs at the end (also when a step fails):
 
 ~~~text
 --- 1.2.13 CI 1/3: pull_request on hotfix/1.2.13 (commit 3f2a9c1)
-    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.12/3.13/3.14
+    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.14
     purpose: required check: branch protection allows the merge into main only when green
     run:     https://github.com/peddanet/mediatools/actions/runs/<id>
 
@@ -606,17 +606,16 @@ Roles: developers work on `feature/*` and open pull requests into
 a whole and decides when a release is cut.
 
 CI (`.github/workflows/tests.yml`) runs the gates on pull requests into
-`main` and `develop` and on tags `v*` (section "CI runs" shows every run
-per branch). Branch pushes start no run. A branch without a pull request
+`main` and `develop` (section "CI runs" shows every run per branch). Branch pushes start no run. A branch without a pull request
 can be checked on demand: `gh workflow run quality-gates --ref BRANCH`.
-For a tag, the extra job
-`release-check` verifies that the tagged commit lies on `main` and that the
+For a tag `v*` only the job
+`release-check` runs; it verifies that the tagged commit lies on `main` and that the
 tag equals `v` + `__version__`.
 
 ## Branch protection
 
 `main` and `develop` are protected on GitHub: changes only by pull request,
-merge only with all four `gates` jobs green and the branch up to date, the
+merge only with both `gates` jobs green and the branch up to date, the
 rule applies to administrators too, no force push, no deletion. Set once
 per branch by the repository owner (normal user; `gh` acts with the owner's
 token):
@@ -627,7 +626,7 @@ gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - 
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["gates (3.10)", "gates (3.12)", "gates (3.13)", "gates (3.14)"]
+    "contexts": ["gates (3.10)", "gates (3.14)"]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },

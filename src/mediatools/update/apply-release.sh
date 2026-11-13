@@ -18,7 +18,8 @@
 #      summary table of all CI runs closes the output:
 #        local  push hotfix/X           gates on this PC, one Python version
 #        CI 1   PR hotfix/X -> main     merge result; required check for the merge
-#        CI 2   tag vX                  released commit + release-check
+#        CI 2   tag vX                  release-check only (tag on main, tag = version);
+#                                       the gates already ran on CI 1 for the same tree
 #        local  push merge/hotfix-X     gates on this PC, one Python version
 #        CI 3   PR merge/hotfix-X -> develop   merge result; required check
 #      Merges into main and develop start no further run (no push trigger).
@@ -295,9 +296,17 @@ apply_one() {
   git pull --ff-only
 
   step "$VERSION: 2 apply the patch on hotfix/$VERSION (rebuilt from main if it exists)"
-  git am --abort 2>/dev/null || true         # leftover of a failed earlier attempt
   git switch -C "hotfix/$VERSION" main
-  git am "$dir"/*/*.patch
+  if ! git am "$dir"/*/*.patch; then
+    # leave no half-applied session behind: the next run would fail at "git switch"
+    git am --abort 2>/dev/null || true
+    git switch -q main
+    git branch -q -D "hotfix/$VERSION"
+    echo
+    echo "The patch of $VERSION does not fit onto main (released: $(released_version))."
+    echo "Usually an earlier release is missing in $DL; nothing was pushed."
+    exit 1
+  fi
   git log --oneline -1
 
   step "$VERSION: 3 push (pre-push hook runs all quality gates)"
@@ -313,7 +322,7 @@ apply_one() {
   echo "PR: $pr"
   sleep 15                                   # let GitHub register the new push
   ci_run "$VERSION CI 1/3" "hotfix/$VERSION" pull_request "$(git rev-parse HEAD)" \
-    "merge result of hotfix/$VERSION and main, Python 3.10/3.12/3.13/3.14" \
+    "merge result of hotfix/$VERSION and main, Python $PYTHONS" \
     "required check: branch protection allows the merge into main only when green" "$pr"
 
   step "$VERSION: 5 merge into main"
@@ -326,7 +335,7 @@ apply_one() {
   git tag -a "v$VERSION" -m "mediatools $VERSION"
   git push origin "v$VERSION"                # tag push: the hook skips the gates
   ci_run "$VERSION CI 2/3" "v$VERSION" push "$(git rev-parse HEAD)" \
-    "the released commit on main, all versions, then release-check (tag on main, tag = version)" \
+    "release-check only: tag on main, tag = version (the gates ran on CI 1)" \
     "release gate: the back-merge into develop starts only after it is green"
 
   step "$VERSION: 7 back-merge into develop (helper branch)"
@@ -340,7 +349,7 @@ apply_one() {
   [ -n "$pr" ] || pr=$(gh pr create --base develop --title "Merge hotfix $VERSION into develop" --fill)
   echo "PR: $pr"
   ci_run "$VERSION CI 3/3" "merge/hotfix-$VERSION" pull_request "$(git rev-parse HEAD)" \
-    "merge result of the release and develop, Python 3.10/3.12/3.13/3.14" \
+    "merge result of the release and develop, Python $PYTHONS" \
     "required check: branch protection allows the merge into develop only when green" "$pr"
   gh pr merge "$pr" --merge --delete-branch
   git switch develop
@@ -354,6 +363,11 @@ if [ -n "$TARGET" ]; then
   # shellcheck disable=SC1091
   source "$VENV/bin/activate"
   cd "$REPO"
+  git am --abort 2>/dev/null || true         # leftover of an interrupted earlier run
+  # Python versions of the CI matrix, for the announcements
+  PYTHONS=$(sed -n 's/^ *python: *\[\(.*\)\]/\1/p' .github/workflows/tests.yml 2>/dev/null \
+            | tr -d '" ' | tr , / || true)
+  [ -n "$PYTHONS" ] || PYTHONS="of the CI matrix"
   if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "uncommitted changes in $REPO"; exit 1
   fi
