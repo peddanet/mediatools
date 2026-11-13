@@ -301,9 +301,10 @@ class Shrinker:
         """Return the settings of this run that do not define the job.
 
         Returns:
-            ``crf``, ``order`` and ``jobs``.
+            ``crf``, ``preset``, ``order`` and ``jobs``.
         """
-        return {"crf": getattr(self.encoder, "crf", None), "order": self.opts.order,
+        return {"crf": getattr(self.encoder, "crf", None),
+                "preset": getattr(self.encoder, "preset", None), "order": self.opts.order,
                 "jobs": self.opts.jobs}
 
     def _encode_serial(self, todo: list[tuple[str, int]]) -> None:

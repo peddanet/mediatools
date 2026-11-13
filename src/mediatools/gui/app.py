@@ -40,9 +40,10 @@ class MediaToolsApp:
 
     Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
     fills the form, *Continue* runs it); the menu *View* changes the font
-    size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme
-    (:class:`Appearance`); a newly installed release is noticed (checked
-    every :attr:`UPDATE_SECONDS`) and a restart offered in a bar above the tabs.
+    size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
+    (default, followed live), light or dark (:class:`Appearance`); a newly
+    installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
+    a restart offered in a bar above the tabs.
 
     Attributes:
         root: Tk main window.
@@ -125,6 +126,7 @@ class MediaToolsApp:
         self.appearance.apply()
         if refresh_ms:
             root.after(self.UPDATE_SECONDS * 1000, self.check_update)
+            self.appearance.watch()
 
     def _menu(self) -> None:
         """Build the menu bar."""
@@ -141,7 +143,11 @@ class MediaToolsApp:
                          command=lambda: self.zoom(-1))
         view.add_command(label="Normal size", accelerator="Ctrl+0", command=lambda: self.zoom(0))
         view.add_separator()
-        view.add_command(label="Light / dark scheme", command=self.appearance.toggle_theme)
+        choice = self.appearance.choice
+        for label, value in (("Scheme of the desktop", "auto"), ("Light scheme", "light"),
+                             ("Dark scheme", "dark")):
+            view.add_radiobutton(label=label, value=value, variable=choice,
+                                 command=lambda: self.appearance.set_theme(choice.get()))
         menubar.add_cascade(label="View", menu=view)
         helpmenu = tk.Menu(menubar, tearoff=False)
         helpmenu.add_command(label="About", command=self.about)
@@ -223,6 +229,7 @@ class MediaToolsApp:
         newer = spec.as_dict()["newer_than"]
         jobs = entry.settings.get("jobs")
         return {"path": spec.root, "crf": str(entry.settings.get("crf") or 28),
+                "preset": str(entry.settings.get("preset") or ""),
                 "order": str(entry.settings.get("order") or "largest"),
                 "jobs": "" if jobs in (None, 1) else str(jobs),
                 "ext": ",".join(ext.lstrip(".") for ext in sorted(spec.extensions)),

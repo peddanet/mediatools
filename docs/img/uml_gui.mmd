@@ -37,16 +37,27 @@ classDiagram
     +scale
     +theme
     +style
-    +init(root, config)
+    +system
+    +detected
+    +probed
+    +choice
+    +init(root, config, system)
     -_number(key, fallback)
     +clamp(scale)
+    +scheme()
     +colors()
+    +channel(text)
+    +luminance(color)
+    +mix(first, second, share)
+    +probe()
+    +take_probe()
+    +watch(interval_ms)
     +points()
     +apply()
     -_styles(size)
     -_classic(widget)
     +zoom(steps)
-    +toggle_theme()
+    +set_theme(theme)
     +save(key, value)
   }
   class CommandCatalog {
@@ -260,6 +271,14 @@ classDiagram
     +overall
     +init(pid, report, progress, percent, log_path, overall)
   }
+  class SystemLook {
+    +run
+    +gdbus
+    +init(run, gdbus)
+    +read(key)
+    +scheme()
+    +accent()
+  }
   class UpdateBar {
     +frame
     +text
@@ -281,6 +300,7 @@ classDiagram
   MediaToolsApp --> SavingsPanel
   MediaToolsApp --> ShrinkPanel
   MediaToolsApp --> UpdateBar
+  Appearance --> SystemLook
   CommandCatalog ..> CommandSpec
   CommandCatalog ..> OptionSpec
   CommandForm --> CommandSpec
