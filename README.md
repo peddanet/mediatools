@@ -319,19 +319,22 @@ mediatools status        # running? which release, current or not, which log
    `newShrinkedFiles/`, validate, copy over the original *in place* (same
    inode, so `_flat` links see the new content), record.
 
-Three progress lines show the whole run (percentage by volume, files,
-source GiB, remaining time), the current file (percentage, size, encoded
+Three progress lines show the whole job (percentage by volume, remaining
+time, source GiB read since the first shrink log with their size after
+shrinking, source GiB still to go, files), the current file (percentage, size, encoded
 part, remaining time) and the disk space (read, written and freed, for this
 session and for all sessions); the speed is measured in this and earlier runs:
 
 ~~~text
-total [###.....................]  12.4 % | 380/3076 files | 189.2/1525.8 GiB source | ETA 9d23h
+total [###.....................]  15.8 % | ETA 13d14h | since 2026-11-09: 327.7 GiB read (-> 57.3 GiB after shrinking), 1746.2 GiB to go | 412 files done, 18398 to go
 file   35 % of 2.40 GiB (0.84 GiB encoded) | 17m left | example_clip.mp4
 space  session since 2026-11-12 04:56: 32.6 GiB read -> 5.2 GiB written = 27.4 GiB freed | since 2026-10-20: ...
 ~~~
 
-The GiB of the first line are what was *read*, not what was freed, and
-they count this process only; the space line tells the two apart. A session
+The first line counts source GiB: what was *read* since the first shrink
+log (all sessions) and what is still *to go*; percentage and ETA follow from these (the ETA divides
+the source GiB to go by the measured speed). The size after shrinking is
+given in brackets; the space line shows written and freed space. A session
 lasts from `mediatools shrink` until the run ends and survives `mediatools
 reload`. `mediatools savings` lists the freed space per session
 (`--by day`: per day), read from the shrink logs.

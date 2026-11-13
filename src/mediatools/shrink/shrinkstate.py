@@ -7,6 +7,7 @@ from mediatools.core.codeccache import CodecCache
 from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.durationcache import DurationCache
+from mediatools.core.progressbase import ProgressBase
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.spacetally import SpaceTally
 from mediatools.shrink.throughput import ThroughputLog
@@ -27,6 +28,7 @@ class ShrinkState(TypedDict):
         restart: Switch to a newly installed release on request, or None
             (requests are ignored).
         space: Space read, written and freed, this session and overall.
+        base: Work of all shrink runs before this process (progress line).
     """
 
     durations: DurationCache | None
@@ -37,3 +39,4 @@ class ShrinkState(TypedDict):
     ffmpeg_logs: str | None
     restart: SelfRestart | None
     space: SpaceTally
+    base: ProgressBase

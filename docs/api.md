@@ -1177,8 +1177,11 @@ lines are redrawn in place and cut to the terminal width, so they never
 wrap; otherwise (output redirected to a file) nothing is drawn and only
 the log is written.
 
-The GiB figures of the overall line are *source* bytes (read and
-encoded), not the space freed on disk; they count this run only.
+The first line counts *source* bytes of the whole job (since 1.4.2):
+how much was read and encoded since the first shrink log, with the
+size after shrinking in brackets, and how much is still to go;
+percentage and ETA follow from these (:attr:`base`). A start or a
+reload therefore does not reset the figures.
 
 Attributes:
     total_bytes: Bytes of all files of the run.
@@ -1191,9 +1194,9 @@ Attributes:
     enabled: True if the stream is a terminal.
     note: Text shown at the start of the first line, e.g. a pending stop.
     drawn: Number of lines on the screen (0: nothing drawn).
-    status_path: If set, both lines are also written to this file (at
-        most once per :attr:`STATUS_SECONDS`), for ``mediatools attach``.
-    last_status: Monotonic time of the last status file update.
+    status: Status file for ``mediatools attach`` (lines written at most
+        once per :attr:`STATUS_SECONDS`); see :attr:`status_path`.
+    base: Work of all shrink runs before this process.
 ~~~
 
 **`__init__`**
@@ -1214,6 +1217,22 @@ Args:
     total_files: Number of files of the run.
     initial_rate: Bytes per second from earlier runs, or None.
     stream: Output stream; ``sys.stderr`` if None.
+~~~
+
+**`status_path`**
+
+~~~text
+status_path(self) -> str | None
+
+Status file, or None (the lines are then only drawn).
+~~~
+
+**`last_status`**
+
+~~~text
+last_status(self) -> float
+
+Monotonic time of the last status file update.
 ~~~
 
 **`rate`**
@@ -1372,6 +1391,54 @@ Args:
 
 Returns:
     Text such as ``2d03h``, ``5h12m`` or ``42m``.
+~~~
+
+### `ProgressBase` (`mediatools.core.progressbase`) {.unnumbered}
+
+~~~text
+What all shrink runs had already read when this process started.
+
+The first progress line shows the whole job: everything read since the
+first shrink log (``since``) plus what this process reads, against what
+is still to go. Without this base the line would only count the current
+process and start at zero after every start or ``mediatools reload``.
+
+Attributes:
+    read: Source bytes encoded before this process (all shrink logs).
+    files: Files encoded before this process.
+    since: Date of the first shrink log, e.g. ``2026-11-09``; empty if none.
+    after: Returns the size after shrinking of everything shrunk so far,
+        or None to leave that figure out.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    read: int = 0,
+    files: int = 0,
+    since: str = '',
+    after: Callable[[], int] | None = None,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
 ~~~
 
 ### `Prompt` (`mediatools.core.prompt`) {.unnumbered}
@@ -1715,7 +1782,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.4.1') -> None
+__init__(self, control: RunControl, installed: str = '1.4.2') -> None
 
 Remember the job and the installed release.
 
@@ -1926,6 +1993,40 @@ Args:
     message: Warning text.
 ~~~
 
+### `StatusFile` (`mediatools.core.statusfile`) {.unnumbered}
+
+~~~text
+Where the progress lines are mirrored for ``mediatools attach``.
+
+Attributes:
+    path: Status file, or None for none.
+    last: Monotonic time of the last update.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str | None = None, last: float = 0.0) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
 ### `VersionInfo` (`mediatools.core.versioninfo`) {.unnumbered}
 
 ~~~text
@@ -1945,7 +2046,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.4.1')
+__init__(self, package_dir: str | None = None, version: str = '1.4.2')
 
 Locate the imported package.
 
@@ -3373,6 +3474,36 @@ Returns:
     Time, source bytes and output bytes per shrunk file.
 ~~~
 
+**`read`**
+
+~~~text
+read(self, path: str) -> tuple[int, int]
+
+Return how much a session has encoded so far.
+
+Counts every file that was encoded, whatever the result (``shrunk``,
+``copy``, ``FAILED``); skipped files (``HEVC``, ``BROKEN``) cost no
+encoding and are not counted, like in the progress line.
+
+Args:
+    path: Log of the session.
+
+Returns:
+    Source bytes and number of files; zeros if the log is missing.
+~~~
+
+**`read_all`**
+
+~~~text
+read_all(self) -> tuple[int, int, str]
+
+Return how much all shrink runs have encoded so far.
+
+Returns:
+    Source bytes, number of files and the date of the first log
+    (``YYYY-MM-DD``; empty if there is none).
+~~~
+
 **`started`**
 
 ~~~text
@@ -3884,6 +4015,7 @@ Attributes:
     restart: Switch to a newly installed release on request, or None
         (requests are ignored).
     space: Space read, written and freed, this session and overall.
+    base: Work of all shrink runs before this process (progress line).
 ~~~
 
 ### `SpaceTally` (`mediatools.shrink.spacetally`) {.unnumbered}
