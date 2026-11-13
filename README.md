@@ -304,7 +304,9 @@ original again.
 
 ```bash
 mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S] [--foreground]
+                  [--min-size 300M] [--newer-than YYYY-MM-DD] [--jobs N]
                   [--keep-copies] [--crf 28] [--threads N] [--ext mp4] [-y] [-v]
+mediatools shrink                 # on a terminal: list the earlier jobs and continue one
 mediatools attach        # (alias: front) watch a shrink running in the background
 mediatools update        # apply delivered release patches from ~/Downloads, then install
 mediatools stop          # ask it to finish its current file and end
@@ -400,6 +402,9 @@ with the lowest CPU priority (`nice` 19), so the desktop stays responsive
 |---|---|
 | `--order` | `largest` (default), `smallest` or `path` (directory order) |
 | `--min-seconds S` | leave out videos shorter than S seconds (durations cached) |
+| `--min-size SIZE` | leave out videos smaller than SIZE, e.g. `300M` |
+| `--newer-than DATE` | leave out videos last modified before DATE (`YYYY-MM-DD`) |
+| `--jobs N` | encode N videos at the same time (default `[shrink] jobs`, else 1) |
 | `--keep-copies` | leave originals untouched, keep shrunk copies for review, record nothing |
 | `--crf N` | libx265 constant rate factor, default 28 |
 | `--threads N` | CPU threads for decoding and the x265 pool, default logical CPUs - 1 |

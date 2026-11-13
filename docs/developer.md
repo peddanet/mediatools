@@ -193,11 +193,17 @@ directory, configuration -- lives in `core`.
 | `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and full decode of the output (`DecodeCheck.verify`); message file kept on failure |
 | `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, regrown originals (larger than recorded, not HEVC: planned again), minimum duration, HEVC set-aside, order |
 | `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |
-| `Shrinker` | per-file decision (HEVC, trial decode, encode), failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |
+| `Shrinker` | per-file decision (HEVC, trial decode, encode), serial or parallel encodes (`--jobs`), ledger and job registry, failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |
 | `ProgressReport` | read-only done/changed/todo lists, orphan rows, time estimate |
-| `ShrinkOptions` | settings of a run (order, minimum duration, review mode, DB name) |
+| `ShrinkOptions` | settings of a run (order, minimum duration and size, date filter, parallel encodes, review mode, DB name) |
+| `JobSpec` | the set of a job: root and filters; key, options, membership of a ledger row |
+| `Ledger`, `LedgerRow`, `LedgerSums` | append-only `ledger.tsv`, one row per finished video; sums per job, session, total |
+| `LogBackfill` | rebuilds ledger rows from the result tables of old shrink logs (wrapped paths, MB sizes) |
+| `JobRegistry`, `JobEntry` | remembered jobs in `state/jobs.json`: settings, remainder, progress |
+| `JobChooser` | selection of an earlier job for a plain `mediatools shrink` |
+| `SlotTable`, `RunningEncode` | bookkeeping of parallel encodes: free slots, running futures, inodes, folders |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
-| `SpaceTally` | read, written and freed space of the session and of all sessions (space line) |
+| `SpaceTally` | read, written and freed space of the session and in total (space line), from the ledger or the logs |
 | `SavingsLog`, `Savings` | freed space per session, per day and in total, read from the result tables of the shrink logs (`mediatools savings`) |
 | `ShrinkState` | typed collection of the run helpers (caches, throughput, result table, trial decode) |
 | `FileResult` | outcome of one video (status, sizes, times) |
@@ -273,7 +279,10 @@ directory, configuration -- lives in `core`.
 | `JobRunner` | runs `python -m mediatools ...` as a child in its own process group; output, answers, SIGINT/SIGTERM |
 | `ShrinkMonitor`, `ShrinkReading` | reads PID file, status file, log end and throughput totals; stop and reload requests |
 | `FormStore` | last values per form in `state/gui.json` |
-| `DesktopEntry`, `Opener` | menu entry (`.desktop`), `xdg-open` |
+| `DesktopEntry`, `Opener` | menu entry (`.desktop`) with check and repair, `xdg-open` |
+| `Appearance` | ttk style on `clam`, font scale and light/dark scheme (`[gui]`) |
+| `JobList` | list of the shrink jobs with progress; selection fills the shrink form |
+| `UpdateBar` | notices a newer installed release, offers a restart |
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
 | `ShrinkPanel`, `SavingsPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, savings table, INI editor, data folder browser |
@@ -360,6 +369,10 @@ Invariants:
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
 <data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
+<data>/ledger.tsv                     Ledger           when session status source result seconds
+                                                       length mtime path (TAB, mode 600)
+<data>/state/jobs.json                JobRegistry      {key: {spec, settings, last, todo_bytes,
+                                                       todo_files}}
 <dir>/newShrinkedFiles/<n>.replace    ReplaceJournal   journal marker during copy-back
 <data>/logs/ffmpeg/<ts>_<n>.ffmpeg.log Shrinker         complete ffmpeg messages of a failed encode
 <data>/reports/sync_target_only_*.tsv TargetReport     status size path same_as

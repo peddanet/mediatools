@@ -1,6 +1,7 @@
 """Read, written and freed space of shrinking, for this session and overall."""
 from __future__ import annotations
 
+from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.savingslog import SavingsLog
 
 
@@ -10,13 +11,14 @@ class SpaceTally:
     The overall progress line counts *source* bytes, i.e. how much was read
     and encoded. The space freed on disk is the source size minus the size of
     the shrunk file. This class keeps two views, both taken from the result
-    tables of the shrink logs (:class:`SavingsLog`) when the run starts and
-    then counted on per replaced file:
+    tables of the shrink logs (:class:`SavingsLog`) or, since 1.6.0, from the
+    ledger (:meth:`from_ledger`) when the run starts and then counted on per
+    replaced file:
 
     * this session: everything shrunk since the session started. A session
       is one log; ``mediatools reload`` continues the log, so the session
       (unlike the process) survives a release switch;
-    * overall: all shrink logs, labelled with the date of the first shrunk
+    * overall (``total``): all finished files, labelled with the date of the first shrunk
       file (``since 2026-10-20``).
 
     Copies kept with ``--keep-copies`` free no space and are not counted.
@@ -68,6 +70,26 @@ class SpaceTally:
                    total.name if total.files else "overall",
                    f"{session.start:%Y-%m-%d %H:%M}"
                    if session and logs.started(current or "") else "")
+
+    @classmethod
+    def from_ledger(cls, ledger: Ledger, session: str | None) -> SpaceTally:
+        """Start from the ledger.
+
+        Args:
+            ledger: The ledger of all finished videos.
+            session: Name of this session (log name without ``.log``), or None.
+
+        Returns:
+            A tally with all entries as overall state and the entries of the
+            session as session state.
+        """
+        total = ledger.sums()
+        part = ledger.sums(session=session) if session else None
+        started = SavingsLog.started(session + ".log") if session else None
+        return cls((total.freed_src, total.freed_out),
+                   (part.freed_src, part.freed_out) if part else (0, 0),
+                   f"total since {total.since}" if total.since else "total",
+                   f"{started:%Y-%m-%d %H:%M}" if started else "")
 
     def add(self, src: int, out: int) -> None:
         """Count one original replaced by its shrunk version.
