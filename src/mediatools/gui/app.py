@@ -128,10 +128,12 @@ class MediaToolsApp:
         """Return the text of the About dialog.
 
         Returns:
-            Version, data folder and interpreter.
+            Version, folders and interpreter.
         """
         return (f"mediatools {VersionInfo().describe()}\n\n"
-                f"data folder: {DataDir().root}\n"
+                f"configuration: {DataDir().config_dir}\n"
+                f"logs and state: {DataDir().state_dir}\n"
+                f"kept data: {DataDir().data_dir}\n"
                 f"Python: {sys.version.split()[0]} ({sys.executable})\n"
                 f"Tk: {tk.TkVersion}")
 

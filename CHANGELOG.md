@@ -5,6 +5,37 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-13
+
+### Changed
+- Folders follow the XDG Base Directory Specification: configuration
+  (`mediatools.ini`, privacy lists) in `~/.config/mediatools`, logs and
+  runtime state (`logs/`, `state/`, `reports/`, `snapshot/`) in
+  `~/.local/state/mediatools`, kept data (`plans/`, `releases/`) in
+  `~/.local/share/mediatools`. Absolute `XDG_CONFIG_HOME`,
+  `XDG_STATE_HOME` and `XDG_DATA_HOME` are honoured. The installed release
+  stays in `~/scripts/mediatools.d/venv`. `MEDIATOOLS_HOME` still keeps
+  everything in one folder with the old names.
+- The privacy lists are `privacy/denylist.txt` and `privacy/allowlist.txt`
+  in the configuration folder (folder mode 700, files 600);
+  `tools/privacy_scan.py` finds them through `DataDir`.
+- `mediatools update` writes its log to the state folder and keeps applied
+  archives in the data folder.
+- README and handbook describe mediatools by its purpose - keeping a
+  dynamically growing video collection manageable, on disk space first -
+  without naming any platform; example folder names are neutral.
+
+### Added
+- `mediatools where`: every folder and file location and the layout in
+  use. `mediatools where --migrate` moves the data of releases before 1.5.0
+  out of `~/scripts/mediatools.d` (refuses while any mediatools process
+  runs or a target exists; leaves `WHERE-IS-THE-DATA.txt`). Until then the
+  old folder stays in use.
+- `mediatools privacy [--edit deny|allow]`: paths and sizes of the privacy
+  lists; `--edit` opens a list in `$EDITOR` and creates it if missing.
+- GUI: tab *where* (confirmation only with `--migrate`); the *files* tab
+  reads `plans/` from the data folder; About names all three folders.
+
 ## [1.4.2] - 2026-11-13
 
 ### Changed

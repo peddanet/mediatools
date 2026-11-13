@@ -48,14 +48,16 @@ header-includes: |
 
 ## Purpose
 
-mediatools maintains a local copy of videos and pictures that a download
-tool fetches folder by folder, for example an archiver for a creator
-platform. Such collections grow into deeply nested trees with large H.264
-videos, many unwanted short clips and backups that silently turn hard links
-into full copies.
+mediatools keeps a dynamically growing video collection manageable - on disk
+space first. Such a collection is organised in one folder per source and
+keeps growing, whether it is filled by hand, by a camera import or by a
+download tool. It turns into a deeply nested tree with large H.264 videos,
+many unwanted short clips and backups that silently turn hard links into
+full copies.
 
-The central design rule follows from how download tools work: they decide
-by **file name** whether a file is already present. mediatools therefore
+The central design rule follows from how tools that fill a collection work:
+download and sync tools usually decide by **file name** whether a file is
+already present. mediatools therefore
 never takes a name away -- a shrunk video keeps its name, a discarded clip
 leaves an empty placeholder, a flat view consists of additional names (hard
 links), and `sync` never deletes. The next download run fetches only what
@@ -86,8 +88,8 @@ Shared rules, implemented once in `mediatools.core`:
 * `_flat`, `newShrinkedFiles` and hidden directories are never entered by a
   scan (`TreeWalker`, `MediaTypes.SKIP_DIRS`).
 * Symbolic links are never followed or processed.
-* Every run writes `logs/<command>_<timestamp>.log` into the data directory
-  `$MEDIATOOLS_HOME` (default `~/scripts/mediatools.d`).
+* Every run writes `logs/<command>_<timestamp>.log` into the state folder
+  (default `~/.local/state/mediatools`; see [Data directory](#data-directory)).
 * External programs are called with argument lists, never through a shell,
   so file names with spaces, quotes or `$` are safe.
 
@@ -136,8 +138,8 @@ mediatools --version
 * `BIN_DIR=~/.local/bin bash install.sh` -- link the command elsewhere.
 
 Everything runs as normal user; the installer writes only below
-`$MEDIATOOLS_HOME` and `BIN_DIR`. It needs `git` and the venv module
-(`sudo apt install git python3-venv`).
+`~/scripts/mediatools.d` (or `$MEDIATOOLS_HOME`) and `BIN_DIR`. It needs
+`git` and the venv module (`sudo apt install git python3-venv`).
 
 Update: run `bash install.sh` again. Remove:
 `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`.
@@ -172,12 +174,48 @@ The installed release is not affected by anything in the clone.
 
 ## Data directory
 
-Configuration, logs, state, reports and the installed release (`venv/`)
-are kept in `$MEDIATOOLS_HOME`, default `~/scripts/mediatools.d`. Another
-location is set in `~/.profile` before installing:
+Since 1.5.0 mediatools follows the XDG Base Directory Specification
+(freedesktop.org): configuration, runtime state and kept data each have
+their own base folder, and below it a folder named `mediatools`. Absolute
+values of `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` replace
+the defaults.
+
+| Kind | Default folder | Content |
+|---|---|---|
+| configuration | `~/.config/mediatools` | `mediatools.ini`, `privacy/denylist.txt`, `privacy/allowlist.txt` |
+| runtime state | `~/.local/state/mediatools` | `logs/`, `state/`, `reports/`, `snapshot/` |
+| kept data | `~/.local/share/mediatools` | `plans/` (flatten undo), `releases/` (applied archives) |
+| installed release | `~/scripts/mediatools.d/venv` | the program itself (`install.sh`) |
+
+`mediatools where` prints every place with its full path, the layout in
+use and the size of the privacy lists, so no folder has to be remembered.
+
+**Moving the data of older releases.** Releases before 1.5.0 kept
+everything in `~/scripts/mediatools.d`. While data is there, mediatools
+keeps using that folder and `mediatools where` says so. The move is one
+command; it refuses while any mediatools process runs (a running shrink
+would keep writing into the old folder) and never overwrites an existing
+target:
 
 ~~~bash
-echo 'export MEDIATOOLS_HOME="$HOME/.local/share/mediatools"' >> ~/.profile
+mediatools stop                  # only if a shrink runs; wait until it has stopped
+mediatools where --migrate
+mediatools where                 # check: "layout: XDG layout (since 1.5.0)"
+~~~
+
+Only data moves. The installed release (`venv/`) and unknown files stay;
+a note `WHERE-IS-THE-DATA.txt` in the old folder names the new places and
+marks the move as done: from then on the old folder is never used again,
+even if an older tool recreates something in it.
+Moved configuration files and privacy lists get mode 600.
+
+**One folder instead.** With `MEDIATOOLS_HOME` set, everything is kept in
+that folder with the old names (`mediatools.ini`, `privacy_denylist.txt`,
+`privacy_allowlist.txt`, `logs/`, `plans/` ...). Set it in `~/.profile`
+before installing:
+
+~~~bash
+echo 'export MEDIATOOLS_HOME="$HOME/mediatools-data"' >> ~/.profile
 ~~~
 
 ## First steps
@@ -229,7 +267,7 @@ INI file outside the repository, so neither the code nor its history allows
 conclusions about the data:
 
 ~~~text
-$MEDIATOOLS_HOME/mediatools.ini      default: ~/scripts/mediatools.d/mediatools.ini
+~/.config/mediatools/mediatools.ini     ($MEDIATOOLS_HOME/mediatools.ini if set)
 ~~~
 
 ~~~bash
@@ -676,7 +714,7 @@ so the lock belongs to the process that does the work.
 shrink continues in the background (pid 12345); the terminal may be closed.
   watch: mediatools attach   (Ctrl+C leaves the view)
   stop:  mediatools stop     (after the current file)
-  log:   /home/user/scripts/mediatools.d/logs/shrink_2026-11-09_11-30-00.log
+  log:   /home/user/.local/state/mediatools/logs/shrink_2026-11-09_11-30-00.log
 ~~~
 
 `mediatools attach` (alias `front`) prints the last 30 log lines, then
@@ -752,7 +790,7 @@ shrink: running (pid 459729)
 running:   1.2.12  (started 2026-11-10 03:21:47)
 installed: 1.2.15
 status:    'mediatools reload' switches to the installed release after the current file
-log:       /home/<user>/scripts/mediatools.d/logs/shrink_2026-11-10_03-21-47.log
+log:       /home/<user>/.local/state/mediatools/logs/shrink_2026-11-10_03-21-47.log
 pending:   reload requested, takes effect after the current file
 ~~~
 
@@ -930,7 +968,7 @@ mediatools flatten ~/Pictures/collection --dry-run
 mediatools flatten ~/Pictures/collection
 mediatools flatten ~/Pictures/collection --prune
 mediatools flatten --undo \
-  ~/scripts/mediatools.d/plans/flatten_2026-11-03_13-12-52.tsv
+  ~/.local/share/mediatools/plans/flatten_2026-11-03_13-12-52.tsv
 ~~~
 
 ## Naming
@@ -946,11 +984,11 @@ on a lower file system with 255; ext4 and fscrypt report 255.
 | 2 | level 1, then the front of the file stem is cut; the tail (usually an id) is kept; `~` marks the cut |
 | 3 | directory part replaced by an 8-digit SHA-1 prefix, stem cut |
 
-Example of level 2 (limit 80 bytes, `abbreviations = posts=p, members=m,
+Example of level 2 (limit 80 bytes, `abbreviations = footage=f, sessions=s,
 Videos=V`):
 
 ~~~text
-p__m__987654321-20240501T100000__V__~h_extended_commentary_and_extras_a1b2c3.mp4
+f__s__987654321-20240501T100000__V__~h_extended_commentary_and_extras_a1b2c3.mp4
 ~~~
 
 In a simulation over a real collection of more than 100,000 media files

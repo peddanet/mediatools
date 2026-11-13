@@ -369,11 +369,11 @@ def test_app_tabs_undo_about_and_close(root: tk.Tk, tmp_path: Path,
                         ask=lambda _t, _x: answers.pop(0), refresh_ms=0)
     tabs = [app.notebook.tab(tab, "text") for tab in app.notebook.tabs()]
     assert tabs == ["shrink", "update", "progress", "triage", "flatten", "sync", "rename-db",
-                    "snapshot", "savings", "config", "files"]
+                    "where", "snapshot", "savings", "config", "files"]
     app.undo_plan("/data/plans/p.json")
     assert app.forms["flatten"].values()["undo"] == "/data/plans/p.json"
     assert app.notebook.tab(app.notebook.select(), "text") == "flatten"
-    assert "data folder:" in app.about_text()
+    assert "logs and state:" in app.about_text()
     app.about()
     app.install_desktop()
     assert shown[-1].startswith("written: ")

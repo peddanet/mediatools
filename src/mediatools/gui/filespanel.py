@@ -15,12 +15,14 @@ class FilesPanel:
     """Lists the files below the data folder and shows the selected one.
 
     Folders: ``logs`` (one log per run), ``reports`` (progress lists, sync
-    reports), ``plans`` (flatten plans, usable for undo) and ``state``.
+    reports) and ``state`` from the state folder, ``plans`` (flatten plans,
+    usable for undo) from the data folder.
     The newest files come first. Large files are shown from their end.
 
     Attributes:
         frame: Container of the widgets (place it in the parent).
-        root: Data folder.
+        datadir: Folders of mediatools.
+        root: State folder (opened by *Open data folder*).
         opener: Opens files and folders.
         on_undo: Called with a plan file for *Use as flatten undo plan*, or None.
         tree: List of folders and files.
@@ -37,12 +39,14 @@ class FilesPanel:
 
         Args:
             master: Parent widget.
-            root: Data folder; the mediatools data folder if None.
+            root: One folder holding everything (tests); the folders of
+                mediatools if None.
             opener: Opener for files and folders; ``xdg-open`` if None.
             on_undo: Called with a plan file for an undo, or None.
         """
         self.frame = ttk.Frame(master)
-        self.root = root or DataDir().root
+        self.datadir = DataDir(root)
+        self.root = self.datadir.root
         self.opener = opener or Opener()
         self.on_undo = on_undo
         self.message = tk.StringVar()
@@ -91,7 +95,9 @@ class FilesPanel:
         """List the folders and their files, newest first."""
         self.tree.delete(*self.tree.get_children())
         for folder in self.FOLDERS:
-            path = os.path.join(self.root, folder)
+            base = (self.datadir.data_dir if folder in DataDir.DATA_SUBS
+                    else self.datadir.state_dir)
+            path = os.path.join(base, folder)
             node = self.tree.insert("", "end", iid=path, text=folder + "/", open=folder == "logs")
             try:
                 entries = [entry for entry in os.scandir(path) if entry.is_file()]

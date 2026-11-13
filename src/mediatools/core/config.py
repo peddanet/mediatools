@@ -1,4 +1,4 @@
-"""Local configuration file ``<data root>/mediatools.ini``."""
+"""Local configuration file ``<config folder>/mediatools.ini``."""
 from __future__ import annotations
 
 import configparser
@@ -21,7 +21,7 @@ class Config:
         parser: The loaded :class:`configparser.ConfigParser`.
     """
 
-    FILE = "mediatools.ini"
+    FILE = DataDir.CONFIG_FILE
     DEFAULT_DB_NAME = "shrink.db"
 
     TEMPLATE = """\
@@ -77,7 +77,7 @@ max_deletions = 500
         Args:
             datadir: Data directory; the default one if None.
         """
-        self.path = os.path.join((datadir or DataDir()).root, self.FILE)
+        self.path = (datadir or DataDir()).config_file
         self.parser = configparser.ConfigParser(interpolation=None)
         setattr(self.parser, "optionxform", str)       # keep the case of keys
         self.parser.read_string(self.TEMPLATE)
