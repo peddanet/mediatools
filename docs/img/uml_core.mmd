@@ -95,9 +95,11 @@ classDiagram
     +enabled
     +note
     +drawn
-    +status_path
-    +last_status
+    +status
+    +base
     +init(total_bytes, total_files, initial_rate, stream)
+    +status_path()
+    +last_status()
     +rate(current_bytes)
     +remaining_seconds(current_bytes)
     +line(_name, file_fraction, file_bytes)
@@ -108,6 +110,13 @@ classDiagram
     +file_skipped(size)
     +clear()
     +duration_text(seconds)
+  }
+  class ProgressBase {
+    +read
+    +files
+    +since
+    +after
+    +init(read, files, since, after)
   }
   class Prompt {
     +assume_yes
@@ -177,6 +186,11 @@ classDiagram
     +stop()
     -_warn(message)
   }
+  class StatusFile {
+    +path
+    +last
+    +init(path, last)
+  }
   class VersionInfo {
     +package_dir
     +version
@@ -194,6 +208,8 @@ classDiagram
   AttachView --> RunControl
   CodecCache ..> DurationCache
   Config --> DataDir
+  ProgressBar --> ProgressBase
+  ProgressBar --> StatusFile
   RunControl --> DataDir
   RunControl ..> SelfRestart
   RunControl --> SleepInhibitor

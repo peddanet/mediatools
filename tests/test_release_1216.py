@@ -53,7 +53,7 @@ def test_overall_line_says_source() -> None:
     """The GiB of the overall line are marked as source bytes."""
     pbar = ProgressBar(2 * GIB, 2, stream=io.StringIO())
     pbar.file_done(GIB)
-    assert "| 1.0/2.0 GiB source | ETA" in pbar.line()
+    assert "| 1.0 GiB read, 1.0 GiB to go |" in pbar.line()     # 1.4.2: read / to go
 
 
 def test_third_line_is_drawn_and_cleared() -> None:

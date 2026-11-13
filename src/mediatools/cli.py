@@ -22,6 +22,7 @@ from mediatools.core.sleepinhibitor import SleepInhibitor
 from mediatools.core.runlog import RunLog
 from mediatools.core.selfrestart import SelfRestart
 from mediatools.core.versioninfo import VersionInfo
+from mediatools.core.progressbase import ProgressBase
 from mediatools.flatten import FlatPlan, Flattener
 from mediatools.gui.launcher import GuiLauncher
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
@@ -332,8 +333,9 @@ class Cli:
         shrinker.state["results"] = ResultTable(
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
-        shrinker.state["space"] = SpaceTally.from_logs(SavingsLog(DataDir().sub("logs")),
-                                                       run.path)
+        logs = SavingsLog(DataDir().sub("logs"))
+        shrinker.state["space"] = SpaceTally.from_logs(logs, run.path)
+        shrinker.state["base"] = ProgressBase(*logs.read_all())
         shrinker.state["decode"] = DecodeCheck()
         shrinker.state["ffmpeg_logs"] = os.path.join(DataDir().sub("logs"), "ffmpeg")
         restart = SelfRestart(self.argv, run.path)
