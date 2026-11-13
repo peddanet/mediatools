@@ -77,6 +77,8 @@ class JobList:
         gib = 1024 ** 3
         for entry in registry.entries():
             settings = f"crf {entry.settings.get('crf', 28)}"
+            if entry.settings.get("preset") not in (None, "medium"):
+                settings += f", {entry.settings['preset']}"
             if entry.settings.get("jobs") not in (None, 1):
                 settings += f", {entry.settings['jobs']} jobs"
             item = self.jobs.insert("", "end", values=(

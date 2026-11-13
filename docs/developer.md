@@ -280,7 +280,8 @@ directory, configuration -- lives in `core`.
 | `ShrinkMonitor`, `ShrinkReading` | reads PID file, status file, log end and throughput totals; stop and reload requests |
 | `FormStore` | last values per form in `state/gui.json` |
 | `DesktopEntry`, `Opener` | menu entry (`.desktop`) with check and repair, `xdg-open` |
-| `Appearance` | ttk style on `clam`, font scale and light/dark scheme (`[gui]`) |
+| `Appearance` | ttk style on `clam`, font scale and scheme `auto`/light/dark (`[gui]`), follows the desktop |
+| `SystemLook` | scheme and accent colour of the desktop from the XDG settings portal (`gdbus`) |
 | `JobList` | list of the shrink jobs with progress; selection fills the shrink form |
 | `UpdateBar` | notices a newer installed release, offers a restart |
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |

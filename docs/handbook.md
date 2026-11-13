@@ -427,6 +427,7 @@ mediatools status                                             # running? release
 | `--min-size SIZE` | none | leave out videos smaller than SIZE (`300M`, `1.5G`; decimal units like the MB of the logs) |
 | `--newer-than DATE` | none | leave out videos last modified before DATE (`YYYY-MM-DD`) |
 | `--jobs N` | `[shrink] jobs`, else 1 | videos encoded at the same time |
+| `--preset NAME` | `[shrink] preset`, else `medium` | libx265 preset: `faster` encodes quicker at nearly the same quality, `slow` compresses more |
 | `--keep-copies` | off | do not touch originals; keep copies in `newShrinkedFiles/`; record nothing |
 | `--retry-failed` | off | include videos that failed in an earlier run (`FAILED`/`BROKEN`) |
 | `--crf N` | 28 | libx265 constant rate factor (lower = better quality, larger) |
@@ -1327,9 +1328,25 @@ closed, after a question.
 ## Appearance and updates
 
 Menu *View*: *Larger text* (Ctrl++), *Smaller text* (Ctrl+-), *Normal
-size* (Ctrl+0) and *Light / dark scheme*. The change applies at once and
-is saved in `[gui] scale` (0.8 to 2.5; 1.0 = 10 pt) and `[gui] theme`
-(`light`, `dark`) of `mediatools.ini`. The style is built on Tk's `clam`
+size* (Ctrl+0) and the scheme: *Scheme of the desktop*, *Light scheme*,
+*Dark scheme*. The change applies at once and is saved in `[gui] scale`
+(0.8 to 2.5; 1.0 = 10 pt) and `[gui] theme` (`auto`, `light`, `dark`) of
+`mediatools.ini`.
+
+`auto` (default since 1.6.1) follows the desktop: every 3 s the window
+reads the preferred scheme and accent colour from the XDG settings portal
+(namespace `org.freedesktop.appearance`, keys `color-scheme` and
+`accent-color`) with `gdbus`. Without a portal or preference it is dark.
+To see what the desktop reports (normal user; the portal lives on the
+user's session bus):
+
+~~~bash
+gdbus call --session --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop \
+  --method org.freedesktop.portal.Settings.ReadOne org.freedesktop.appearance color-scheme
+~~~
+
+`(<uint32 1>,)` means dark, `2` light, `0` no preference. The style is built on Tk's `clam`
 theme: flat surfaces, one accent colour for the selected tab, progress
 bars and the *Run* and *Continue* buttons; no extra package is needed.
 
