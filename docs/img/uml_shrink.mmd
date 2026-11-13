@@ -34,6 +34,7 @@ classDiagram
   }
   class HevcEncoder {
     +crf
+    +preset
     +threads
     +niceness
     +probe
@@ -42,7 +43,7 @@ classDiagram
     +ffmpeg
     +process
     +aborted
-    +init(crf, threads, probe, logger, ffmpeg, niceness, decode)
+    +init(crf, threads, probe, logger, ffmpeg, niceness, decode, preset)
     +clone()
     +default_threads()
     +command(src, dst)

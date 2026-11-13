@@ -5,6 +5,25 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-13
+
+### Added
+- GUI scheme `auto` (new default of `[gui] theme`): follows the light or
+  dark preference and the accent colour of the desktop, read from the XDG
+  settings portal (`org.freedesktop.appearance`, via `gdbus`) and checked
+  every 3 s, so a switch of the desktop takes effect at once. Without a
+  portal or preference the window is dark. Menu *View*: *Scheme of the
+  desktop*, *Light scheme*, *Dark scheme*.
+- `mediatools shrink --preset NAME` (default `[shrink] preset`, else
+  `medium`): libx265 preset; `faster` measured 1.57 times as fast at
+  nearly the same SSIM on a test excerpt. The preset is a setting of the
+  job list and the GUI form.
+
+### Fixed
+- Tests: Tk variables left over by GUI tests are detached in the main
+  thread, so a later garbage collection inside a worker thread of the
+  parallel shrink tests cannot fail with "main thread is not in main loop".
+
 ## [1.6.0] - 2026-11-13
 
 ### Added
@@ -32,6 +51,10 @@ All notable changes are documented here. Versions follow
   (`[gui] scale`, `[gui] theme`), a flat style on ttk `clam` with an accent
   colour; a bar offers *Restart now* when a newer release is installed.
 - `mediatools where` reports the state of the application menu entry.
+
+### Fixed
+- Tests: Tk variables left over by GUI tests are detached in the main
+  thread (see 1.6.1).
 
 ### Changed
 - The first progress line counts the **job** (root and filters), not all
