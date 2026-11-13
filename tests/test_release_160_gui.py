@@ -22,6 +22,39 @@ from mediatools.shrink.jobspec import JobSpec
 from mediatools.shrink.ledgerrow import LedgerRow
 
 
+class FakeLook:
+    """Desktop settings double.
+
+    Attributes:
+        values: Scheme and accent colour returned.
+    """
+
+    def __init__(self, scheme: str | None = None, accent: str | None = None) -> None:
+        """Store the answers.
+
+        Args:
+            scheme: Scheme returned by :meth:`scheme`.
+            accent: Colour returned by :meth:`accent`.
+        """
+        self.values = [scheme, accent]
+
+    def scheme(self) -> str | None:
+        """Return the stored scheme.
+
+        Returns:
+            ``dark``, ``light`` or None.
+        """
+        return self.values[0]
+
+    def accent(self) -> str | None:
+        """Return the stored accent colour.
+
+        Returns:
+            ``#rrggbb`` or None.
+        """
+        return self.values[1]
+
+
 def test_appearance_zoom_theme_and_saving(root: tk.Tk) -> None:
     """Zoom is clamped and saved; the dark scheme colours classic widgets.
 
@@ -30,19 +63,19 @@ def test_appearance_zoom_theme_and_saving(root: tk.Tk) -> None:
     """
     text = tk.Text(root)
     config = Config()
-    look = Appearance(root, config)
+    look = Appearance(root, config, FakeLook())
     look.apply()
     assert look.points() == 10 and look.style.theme_use() == "clam"
     for _step in range(30):
         look.zoom(1)
     assert look.scale == Appearance.MAX_SCALE and Config().get("gui", "scale") == "2.5"
     assert look.zoom(0) == 1.0
-    assert look.toggle_theme() == "dark" and Config().get("gui", "theme") == "dark"
+    assert look.set_theme("dark") == "dark" and Config().get("gui", "theme") == "dark"
     assert text.cget("background") == Appearance.PALETTES["dark"]["surface"]
-    again = Appearance(root, Config())
+    again = Appearance(root, Config(), FakeLook())
     assert again.theme == "dark" and again.scale == 1.0
     config.set_value("gui", "scale", "huge")
-    assert Appearance(root, Config()).scale == 1.0 and Appearance.clamp(0.1) == 0.8
+    assert Appearance(root, Config(), FakeLook()).scale == 1.0 and Appearance.clamp(0.1) == 0.8
 
 
 def test_job_list_fills_and_picks(root: tk.Tk, datadir: Path) -> None:

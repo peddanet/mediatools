@@ -78,6 +78,9 @@ class Cli:
                          help="stay in this terminal; by default shrink moves into the "
                               "background after the confirmation (see 'mediatools attach')")
         cmd.add_argument("--crf", type=int, default=28, help="libx265 CRF (default 28)")
+        cmd.add_argument("--preset", choices=HevcEncoder.PRESETS, default=None,
+                         help="libx265 preset: faster is quicker, slower compresses more "
+                              "(default: [shrink] preset, else medium)")
         cmd.add_argument("--threads", type=int, default=None,
                          help="CPU threads for decoding and x265 (default: logical CPUs - 1)")
         cmd.add_argument("--ext", default="mp4", help="video extensions (default mp4)")
@@ -389,6 +392,26 @@ class Cli:
         return self.parser.parse_args(chosen)
 
     @staticmethod
+    def _preset(given: str | None, config: Config) -> str:
+        """Choose the libx265 preset: option, else ``[shrink] preset``, else medium.
+
+        Args:
+            given: Value of ``--preset``, or None.
+            config: Configuration file.
+
+        Returns:
+            The preset.
+
+        Raises:
+            SystemExit: If the configured preset is unknown.
+        """
+        preset = given or config.get("shrink", "preset") or "medium"
+        if preset not in HevcEncoder.PRESETS:
+            raise SystemExit(f"Error: [shrink] preset must be one of "
+                             f"{', '.join(HevcEncoder.PRESETS)}, found {preset!r}")
+        return preset
+
+    @staticmethod
     def _need(*tools: str) -> None:
         """Ensure external programs are installed.
 
@@ -428,7 +451,8 @@ class Cli:
         mode = "keep shrunk copies" if args.keep_copies else "REPLACE the originals"
         run = RunLog("shrink", args.verbose, continue_path=args.continue_log)
         probe = MediaProbe()
-        encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck())
+        encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck(),
+                              preset=self._preset(args.preset, config))
         durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
         jobs = args.jobs if args.jobs is not None else (config.integer("shrink", "jobs")
                                                         if config.get("shrink", "jobs") else 1)
