@@ -62,7 +62,8 @@ class CommandForm:
             row=row, column=0, columnspan=4, sticky="we", pady=(8, 4))
         toolbar = ttk.Frame(self.frame)
         toolbar.grid(row=row + 1, column=0, columnspan=4, sticky="w")
-        ttk.Button(toolbar, text="Run", command=self.run).pack(side="left")
+        ttk.Button(toolbar, text="Run", style="Accent.TButton",
+                   command=self.run).pack(side="left")
         if self.preview_option() is not None:
             ttk.Button(toolbar, text="Preview (" + str(self.preview_option()) + ")",
                        command=self.preview).pack(side="left", padx=4)
@@ -118,7 +119,7 @@ class CommandForm:
         """
         known = option.default in (None, "", False) or "default" in option.help
         text = option.help + ("" if known else f"  (default {option.default})")
-        ttk.Label(self.frame, text=text, foreground="gray30", wraplength=520,
+        ttk.Label(self.frame, text=text, style="Hint.TLabel", wraplength=520,
                   justify="left").grid(row=row, column=3, sticky="w", padx=6)
 
     def values(self) -> dict[str, object]:

@@ -17,7 +17,7 @@ def test_line_counts_job_read_and_to_go() -> None:
     pbar.base = ProgressBase(2 * GIB, 3, "2026-11-09", lambda: GIB // 2)
     pbar.file_done(2 * GIB)
     line = pbar.line("x", 0.5, 2 * GIB)
-    assert line.startswith("total [")
+    assert line.startswith("job   [")
     assert ("| since 2026-11-09: 5.0 GiB read (-> 0.5 GiB after shrinking), "
             "5.0 GiB to go |") in line
     assert " 50.0 % | ETA " in line and line.endswith("4 files done, 3 to go")

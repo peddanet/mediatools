@@ -10,16 +10,44 @@ classDiagram
     +notebook
     +icon
     +ask
-    +init(root, catalog, store, ask, refresh_ms)
+    +appearance
+    +updates
+    +restarter
+    +init(root, catalog, store, ask, refresh_ms, config)
     -_menu()
     +program_path()
     +about_text()
     +about()
     +install_desktop()
     +remove_desktop()
+    -_zoom_key(steps)
+    +zoom(steps)
+    +job_values(entry)
+    +pick_job(entry, start)
+    +check_update()
+    +restart()
+    -_exec_gui()
     +undo_plan(plan)
     +running()
     +close()
+  }
+  class Appearance {
+    +root
+    +config
+    +scale
+    +theme
+    +style
+    +init(root, config)
+    -_number(key, fallback)
+    +clamp(scale)
+    +colors()
+    +points()
+    +apply()
+    -_styles(size)
+    -_classic(widget)
+    +zoom(steps)
+    +toggle_theme()
+    +save(key, value)
   }
   class CommandCatalog {
     +parser
@@ -98,6 +126,9 @@ classDiagram
     +program
     +icons
     +init(program, path)
+    +default_program()
+    +problems()
+    +repair(wanted)
     +text()
     +install()
     +remove()
@@ -125,6 +156,17 @@ classDiagram
     -_all()
     +load(command)
     +save(command, values)
+  }
+  class JobList {
+    +jobs
+    +monitor
+    +entries
+    +on_pick
+    +signature
+    +init(master, monitor, on_pick)
+    +refresh()
+    -_stamp(path)
+    +pick(start)
   }
   class JobRunner {
     +program
@@ -181,8 +223,11 @@ classDiagram
   class ShrinkMonitor {
     +control
     +logs
+    +ledger
     +init(control, logs)
     +read()
+    +job_files()
+    +registry()
     +tail(path, lines, chunk)
     +stop()
     +reload()
@@ -199,7 +244,8 @@ classDiagram
     +log
     +message
     +log_path
-    +init(master, monitor, opener, refresh_ms)
+    +joblist
+    +init(master, monitor, opener, refresh_ms, on_pick)
     +refresh()
     +stop()
     +reload()
@@ -214,6 +260,17 @@ classDiagram
     +overall
     +init(pid, report, progress, percent, log_path, overall)
   }
+  class UpdateBar {
+    +frame
+    +text
+    +installed
+    +running
+    +version_of
+    +init(root, on_restart, version_of)
+    +check(background)
+    +show(before)
+  }
+  MediaToolsApp --> Appearance
   MediaToolsApp --> CommandCatalog
   MediaToolsApp --> CommandForm
   MediaToolsApp --> ConfigPanel
@@ -223,6 +280,7 @@ classDiagram
   MediaToolsApp --> FormStore
   MediaToolsApp --> SavingsPanel
   MediaToolsApp --> ShrinkPanel
+  MediaToolsApp --> UpdateBar
   CommandCatalog ..> CommandSpec
   CommandCatalog ..> OptionSpec
   CommandForm --> CommandSpec
@@ -233,10 +291,12 @@ classDiagram
   ConfigPanel --> Opener
   ConsoleView --> JobRunner
   FilesPanel --> Opener
+  JobList --> ShrinkMonitor
   GuiLauncher ..> CommandCatalog
   GuiLauncher ..> DesktopEntry
   GuiLauncher ..> MediaToolsApp
   OptionSpec ..> CommandCatalog
   ShrinkMonitor ..> ShrinkReading
+  ShrinkPanel --> JobList
   ShrinkPanel --> Opener
   ShrinkPanel --> ShrinkMonitor
