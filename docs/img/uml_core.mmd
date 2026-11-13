@@ -33,11 +33,30 @@ classDiagram
     +render()
   }
   class DataDir {
+    +mode
+    +config_dir
+    +state_dir
+    +data_dir
     +root
     +init(root)
+    +legacy_dir()
+    +legacy_in_use()
+    +xdg_dir(kind)
+    +config_file()
+    +privacy_file(kind)
     +sub(name)
     +file(sub, prefix, suffix)
     +stamp()
+  }
+  class DataMigration {
+    +source
+    +target
+    +proc
+    +init(source, target, proc)
+    +moves()
+    +others()
+    +problems()
+    +run()
   }
   class DecodeCheck {
     +ffmpeg
@@ -74,6 +93,20 @@ classDiagram
     +is_media(name)
     +is_video(name)
     +parse_extensions(csv)
+  }
+  class PlacesReport {
+    +datadir
+    +init(datadir)
+    +lines()
+  }
+  class PrivacyLists {
+    +datadir
+    +init(datadir)
+    +path(kind)
+    +entries(kind)
+    +ensure(kind)
+    +edit(kind)
+    +lines()
   }
   class MediaProbe {
     +ffprobe
@@ -208,6 +241,10 @@ classDiagram
   AttachView --> RunControl
   CodecCache ..> DurationCache
   Config --> DataDir
+  DataMigration --> DataDir
+  PlacesReport --> DataDir
+  PlacesReport ..> PrivacyLists
+  PrivacyLists --> DataDir
   ProgressBar --> ProgressBase
   ProgressBar --> StatusFile
   RunControl --> DataDir
