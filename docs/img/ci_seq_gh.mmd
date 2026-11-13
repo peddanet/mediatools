@@ -11,7 +11,7 @@ sequenceDiagram
   G->>API: POST /repos/{owner}/{repo}/pulls
   API-->>G: 201 Created, PR URL
   API->>ACT: event pull_request (opened)
-  ACT->>R: queue 4 matrix jobs (gates 3.10/3.12/3.13/3.14)
+  ACT->>R: queue 2 matrix jobs (gates 3.10/3.14)
   U->>G: gh pr checks URL --watch
   loop every --interval seconds (default 10)
     G->>API: query check states of the PR head
