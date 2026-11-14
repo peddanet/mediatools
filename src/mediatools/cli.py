@@ -369,7 +369,9 @@ class Cli:
         Returns:
             ``<state>/jobs.json``.
         """
-        return JobRegistry(os.path.join(DataDir().sub("state"), "jobs.json"), ledger)
+        datadir = DataDir()
+        return JobRegistry(os.path.join(datadir.sub("state"), "jobs.json"), ledger,
+                           datadir.sub("logs"))
 
     def _choose_job(self, args: argparse.Namespace) -> argparse.Namespace | None:
         """Offer the earlier jobs for a plain ``mediatools shrink`` on a terminal.
