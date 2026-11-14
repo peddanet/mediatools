@@ -66,7 +66,10 @@ class ShrinkMonitor:
             return state
         try:
             with open(self.control.status_file, encoding="utf-8") as handle:
-                state.progress = handle.read().splitlines()[:3]
+                # job line and one file line per running encode; the space
+                # line is shown separately (state.overall)
+                state.progress = [line for line in handle.read().splitlines()
+                                  if line.strip() and not line.startswith("space")]
         except FileNotFoundError:
             state.progress = []
         if state.progress:

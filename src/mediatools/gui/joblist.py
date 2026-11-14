@@ -51,7 +51,7 @@ class JobList:
         for name, title, chars, stretch in (("last", "last activity", 18, False),
                                             ("progress", "progress", 28, False),
                                             ("done", "done / to go", 22, False),
-                                            ("settings", "settings", 16, False),
+                                            ("settings", "settings", 28, False),
                                             ("job", "folder and filters", 40, True)):
             self.jobs.heading(name, text=title, anchor="w")
             self.jobs.column(name, width=chars * digit, stretch=stretch, anchor="w")

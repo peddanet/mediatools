@@ -161,7 +161,8 @@ class ProgressBar:
                 f"{max(0, self.total_files - self.done_files)} to go")
 
     def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
-                  width: int | None = None, share: int = 1) -> str:
+                  width: int | None = None, share: int = 1,
+                  speed: float | None = None) -> str:
         """Build the line of the current file.
 
         Args:
@@ -172,13 +173,15 @@ class ProgressBar:
                 so that its start and end stay visible. None: no limit.
             share: Number of files encoded at the same time; each gets this
                 part of the measured speed.
+            speed: Speed of the whole run in bytes per second (all running
+                files counted); measured from this file alone if None.
 
         Returns:
             Text without line break, e.g.
             ``file  35 % of 2.40 GiB (0.84 GiB encoded) | 12m left | clip.mp4``.
         """
         current = file_fraction * file_bytes
-        rate = self.rate(current)
+        rate = speed if speed is not None else self.rate(current)
         left = ("?" if not rate
                 else self.duration_text((file_bytes - current) / rate * max(1, share)))
         head = (f"file  {file_fraction * 100:3.0f} % of {file_bytes / 1024 ** 3:.2f} GiB "
@@ -228,8 +231,9 @@ class ProgressBar:
         """
         current = sum(fraction * size for _name, fraction, size in files)
         share = max(1, len(files))
+        speed = self.rate(current)                # all running files count
         plain = ([self.line("", 1.0, int(current))]
-                 + [self.file_line(name, fraction, size, share=share)
+                 + [self.file_line(name, fraction, size, share=share, speed=speed)
                     for name, fraction, size in files]
                  + ([extra] if extra else []))
         self._write_status(plain)
@@ -237,7 +241,7 @@ class ProgressBar:
             return
         width = max(20, shutil.get_terminal_size().columns - 1)
         lines = ([self.line("", 1.0, int(current))[:width]]
-                 + [self.file_line(name, fraction, size, width, share)[:width]
+                 + [self.file_line(name, fraction, size, width, share, speed)[:width]
                     for name, fraction, size in files]
                  + ([extra[:width]] if extra else []))
         up = "\033[1A" * (self.drawn - 1) if self.drawn > 1 else ""   # back to line 1
