@@ -57,7 +57,10 @@ class ConsoleView:
         ttk.Label(self.frame, textvariable=self.state).pack(fill="x")
 
     def write(self, text: str) -> None:
-        """Append text to the output area and scroll to it.
+        """Append text to the output area.
+
+        The view follows the new text only while it shows the end; after
+        scrolling up it stays where the user put it.
 
         Args:
             text: Text to append.
@@ -65,9 +68,11 @@ class ConsoleView:
         if not text:
             return
         text = text.replace("\r\n", "\n").replace("\r", "\n")
+        at_end = self.text.yview()[1] >= 0.999
         self.text.configure(state="normal")
         self.text.insert("end", text)
-        self.text.see("end")
+        if at_end:
+            self.text.see("end")
         self.text.configure(state="disabled")
 
     def clear(self) -> None:

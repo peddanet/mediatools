@@ -5,6 +5,24 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-14
+
+### Added
+- GUI: *Run* in the shrink tab first opens a dialog with the shrink jobs
+  so far (from the command line and the GUI), with progress and settings:
+  *Continue* or a double click runs the selected job, *Run as in the form*
+  the form values, *Cancel* nothing. Without any job the form runs at once.
+- Jobs run before 1.6.0 are taken once from the shrink logs (root and
+  order; logs since 1.6.0 give the whole job). Their remainder shows as
+  `not planned yet` until the job runs again.
+- An explicit `--threads` is remembered with the job (list, dialog,
+  form and the arguments of a continued job).
+
+### Fixed
+- GUI: the log of the shrink tab and the command output no longer jump
+  back while new lines arrive; the view follows the end only while the
+  end is shown.
+
 ## [1.6.1] - 2026-11-13
 
 ### Added

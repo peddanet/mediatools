@@ -81,9 +81,12 @@ class JobList:
                 settings += f", {entry.settings['preset']}"
             if entry.settings.get("jobs") not in (None, 1):
                 settings += f", {entry.settings['jobs']} jobs"
+            if entry.settings.get("threads"):
+                settings += f" x {entry.settings['threads']} threads"
             item = self.jobs.insert("", "end", values=(
-                entry.last, f"{entry.gauge(16)} {entry.fraction * 100:5.1f} %",
-                f"{entry.read / gib:.1f} / {entry.todo_bytes / gib:.1f} GiB", settings,
+                entry.last, f"{entry.gauge(16)} {entry.progress()}",
+                f"{entry.read / gib:.1f} / "
+                + (f"{entry.todo_bytes / gib:.1f} GiB" if entry.planned else "? GiB"), settings,
                 entry.spec.label()))
             self.entries[item] = entry
             if entry.spec.key == chosen:

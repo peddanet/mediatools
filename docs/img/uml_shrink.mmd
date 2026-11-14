@@ -36,6 +36,7 @@ classDiagram
     +crf
     +preset
     +threads
+    +threads_given
     +niceness
     +probe
     +log
@@ -79,17 +80,22 @@ classDiagram
     +todo_files
     +read
     +done_files
+    +planned()
     +fraction()
     +argv()
     +gauge(width)
+    +progress()
     +init(spec, settings, last, todo_bytes, todo_files, read, done_files)
   }
   class JobRegistry {
     +path
     +ledger
-    +init(path, ledger)
+    +logs
+    +init(path, ledger, logs)
     -_load()
     -_save(data)
+    +from_log(path)
+    +backfill()
     +planned(spec, settings, todo_bytes, todo_files)
     +finished_file(spec, size)
     +entries()
@@ -392,6 +398,7 @@ classDiagram
   JobRegistry ..> JobEntry
   JobRegistry ..> JobSpec
   JobRegistry --> Ledger
+  JobRegistry ..> SavingsLog
   JobSpec ..> Ledger
   JobSpec ..> LedgerRow
   ReplaceJournal ..> ShrinkDatabase

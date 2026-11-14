@@ -2211,7 +2211,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.6.1') -> None
+__init__(self, control: RunControl, installed: str = '1.6.2') -> None
 
 Remember the job and the installed release.
 
@@ -2475,7 +2475,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.6.1')
+__init__(self, package_dir: str | None = None, version: str = '1.6.2')
 
 Locate the imported package.
 
@@ -2913,6 +2913,8 @@ Attributes:
     crf: libx265 constant rate factor.
     preset: libx265 preset (speed against compression), e.g. ``medium``.
     threads: Decoder threads and size of the x265 thread pool.
+    threads_given: ``threads`` as requested (``--threads``), or None for
+        the default.
     niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
     probe: :class:`MediaProbe` used for validation.
     log: Optional logger.
@@ -3179,13 +3181,23 @@ A remembered job.
 
 Attributes:
     spec: Root and filters.
-    settings: Settings of the last run: ``crf``, ``preset``, ``order``, ``jobs``.
+    settings: Settings of the last run: ``crf``, ``preset``, ``order``,
+        ``jobs``, ``threads``.
     last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
     todo_bytes: Source bytes still to encode (as of the last plan, minus
-        the files finished since).
-    todo_files: Files still to encode.
+        the files finished since); -1 if not planned since 1.6.0 (job
+        taken from an old log).
+    todo_files: Files still to encode; -1 if unknown.
     read: Source bytes encoded so far (from the ledger).
     done_files: Files encoded so far (from the ledger).
+~~~
+
+**`planned`**
+
+~~~text
+planned(self) -> bool
+
+True if the remainder is known (planned by 1.6.0 or later).
 ~~~
 
 **`fraction`**
@@ -3193,7 +3205,7 @@ Attributes:
 ~~~text
 fraction(self) -> float
 
-Share of the job that is done (0..1).
+Share of the job that is done (0..1); 0 if the remainder is unknown.
 ~~~
 
 **`argv`**
@@ -3219,6 +3231,17 @@ Args:
 
 Returns:
     Text such as ``███████░░░░░░░░░░░░░``.
+~~~
+
+**`progress`**
+
+~~~text
+progress(self) -> str
+
+Return the progress as text.
+
+Returns:
+    E.g. ``37.2 %``, or ``not planned yet`` for a job from an old log.
 ~~~
 
 **`__init__`**
@@ -3264,21 +3287,28 @@ is still to encode, and updated after every finished video, so the list
 shows the progress of a running job as well. The figures already done
 come from the :class:`Ledger` when the list is read.
 
+Jobs run before the registry existed are taken once from the shrink
+logs (:meth:`backfill`): each log names its root and order, logs since
+1.6.0 the whole job as JSON. Their remainder is unknown until the job
+runs again.
+
 Attributes:
     path: Location of the JSON file.
     ledger: Source of the figures already done, or None.
+    logs: Folder of the shrink logs for :meth:`backfill`, or None.
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, path: str, ledger: Ledger | None = None)
+__init__(self, path: str, ledger: Ledger | None = None, logs: str | None = None)
 
 Bind the registry to its file.
 
 Args:
     path: Location of ``jobs.json``.
     ledger: Ledger for the figures already done; None leaves them 0.
+    logs: Folder of the shrink logs; None takes no jobs from logs.
 ~~~
 
 **`_load`**
@@ -3301,6 +3331,33 @@ Write the file atomically.
 
 Args:
     data: Raw entries by job key.
+~~~
+
+**`from_log`**
+
+~~~text
+from_log(cls, path: str) -> tuple[JobSpec, dict[str, object]] | None
+
+Return the job of a shrink log (its last start line).
+
+Args:
+    path: Shrink log.
+
+Returns:
+    Job and settings, or None if the log names no job.
+~~~
+
+**`backfill`**
+
+~~~text
+backfill(self) -> int
+
+Take the jobs of the shrink logs into the registry, once.
+
+Jobs already in the registry are kept as they are.
+
+Returns:
+    Number of jobs added.
 ~~~
 
 **`planned`**
@@ -5079,7 +5136,8 @@ settings(self) -> dict[str, object]
 Return the settings of this run that do not define the job.
 
 Returns:
-    ``crf``, ``preset``, ``order`` and ``jobs``.
+    ``crf``, ``preset``, ``order``, ``jobs`` and ``threads`` (None:
+    default).
 ~~~
 
 **`_encode_serial`**
@@ -8365,7 +8423,8 @@ with the same interpreter as the GUI; one command per tab may run at a
 time, different tabs may run at the same time.
 
 Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
-fills the form, *Continue* runs it); the menu *View* changes the font
+fills the form, *Continue* runs it), and since 1.6.2 its *Run* first
+offers them in a dialog (:class:`JobPicker`); the menu *View* changes the font
 size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
 (default, followed live), light or dark (:class:`Appearance`); a newly
 installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
@@ -8518,6 +8577,33 @@ Args:
 
 Returns:
     True if the form was filled (and, with ``start``, started).
+~~~
+
+**`choose_shrink_run`**
+
+~~~text
+choose_shrink_run(self) -> bool
+
+*Run* of the shrink tab: offer the earlier jobs first (:class:`JobPicker`).
+
+Without any remembered job the form runs at once.
+
+Returns:
+    True if the shrink was started now; False while the dialog is open.
+~~~
+
+**`run_choice`**
+
+~~~text
+run_choice(self, entry: JobEntry | None) -> bool
+
+Start the shrink chosen in the dialog.
+
+Args:
+    entry: An earlier job (fills the form first), or None for the form.
+
+Returns:
+    True if the shrink was started.
 ~~~
 
 **`check_update`**
@@ -8956,6 +9042,8 @@ Attributes:
     variables: Tk variables (or text boxes) by ``dest``.
     line: Text of the command-line preview.
     ask: Confirmation dialog, replaceable in tests.
+    chooser: Called by *Run* instead of starting directly (e.g. the
+        job selection of the shrink tab), or None.
 ~~~
 
 **`__init__`**
@@ -9090,7 +9178,18 @@ Returns:
 ~~~text
 run(self) -> bool
 
-Run the command with the current values.
+Run the command: through :attr:`chooser` if set, else directly.
+
+Returns:
+    True if the command was started now.
+~~~
+
+**`start`**
+
+~~~text
+start(self) -> bool
+
+Run the command with the current values (no chooser).
 
 Returns:
     True if the command was started.
@@ -9326,7 +9425,10 @@ Args:
 ~~~text
 write(self, text: str) -> None
 
-Append text to the output area and scroll to it.
+Append text to the output area.
+
+The view follows the new text only while it shows the end; after
+scrolling up it stays where the user put it.
 
 Args:
     text: Text to append.
@@ -9719,6 +9821,69 @@ Args:
 
 Returns:
     The result of ``on_pick``, or None without a selection.
+~~~
+
+### `JobPicker` (`mediatools.gui.jobpicker`) {.unnumbered}
+
+~~~text
+Offers the earlier shrink jobs before a shrink is started from the GUI.
+
+The GUI counterpart of a plain ``mediatools shrink`` on a terminal
+(:class:`JobChooser`): *Run* in the shrink tab opens this dialog with
+the jobs so far - from the command line or the GUI, the most recently
+active first, with progress and settings - and one button for the
+values currently in the form. *Continue* (or a double click) takes the
+selected job, *Run as in the form* the form; either way ``on_choice``
+is called once and the dialog closes. *Cancel* or closing the window
+starts nothing.
+
+Attributes:
+    window: The dialog window.
+    jobs: The job list inside it.
+    on_choice: Receives the chosen job, or None for the form values.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    monitor: ShrinkMonitor,
+    form_line: str,
+    on_choice: Callable[[JobEntry | None], object],
+)
+
+Open the dialog.
+
+Args:
+    master: Main window.
+    monitor: Source of the job registry.
+    form_line: Command line of the current form values (shown).
+    on_choice: Called with the chosen job, or None for the form.
+~~~
+
+**`_picked`**
+
+~~~text
+_picked(self, entry: JobEntry, start: bool) -> None
+
+React to the job list: start only on *Continue* or a double click.
+
+Args:
+    entry: Selected job.
+    start: True for *Continue* or a double click.
+~~~
+
+**`choose`**
+
+~~~text
+choose(self, entry: JobEntry | None) -> None
+
+Close the dialog and hand over the choice.
+
+Args:
+    entry: The chosen job, or None for the form values.
 ~~~
 
 ### `JobRunner` (`mediatools.gui.jobrunner`) {.unnumbered}
@@ -10248,6 +10413,21 @@ Request a stop after the current file.
 reload(self) -> None
 
 Request a switch to the installed release.
+~~~
+
+**`show_log`**
+
+~~~text
+show_log(self, text: str) -> None
+
+Show the end of the log without taking the scroll position away.
+
+The text is replaced only when it changed. If the view showed the
+end, it follows the new end; otherwise it keeps its position, so the
+log can be read while the run goes on.
+
+Args:
+    text: Last lines of the log.
 ~~~
 
 **`open_log`**

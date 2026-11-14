@@ -94,7 +94,7 @@ class ShrinkMonitor:
         state, ledger = self.job_files()
         if self.ledger is None or self.ledger.path != ledger:
             self.ledger = Ledger(ledger, DataDir().sub("logs"))
-        return JobRegistry(state, self.ledger)
+        return JobRegistry(state, self.ledger, DataDir().sub("logs"))
 
     @staticmethod
     def tail(path: str | None, lines: int = 400, chunk: int = 65536) -> list[str]:
