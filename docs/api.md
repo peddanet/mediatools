@@ -1709,6 +1709,7 @@ file_line(
     file_bytes: int = 0,
     width: int | None = None,
     share: int = 1,
+    speed: float | None = None,
 ) -> str
 
 Build the line of the current file.
@@ -1721,6 +1722,8 @@ Args:
         so that its start and end stay visible. None: no limit.
     share: Number of files encoded at the same time; each gets this
         part of the measured speed.
+    speed: Speed of the whole run in bytes per second (all running
+        files counted); measured from this file alone if None.
 
 Returns:
     Text without line break, e.g.
@@ -2211,7 +2214,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.6.2') -> None
+__init__(self, control: RunControl, installed: str = '1.6.3') -> None
 
 Remember the job and the installed release.
 
@@ -2475,7 +2478,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.6.2')
+__init__(self, package_dir: str | None = None, version: str = '1.6.3')
 
 Locate the imported package.
 
@@ -5200,6 +5203,25 @@ Args:
     pool: Worker threads.
     table: Slot bookkeeping.
     pending: Planned videos not yet started.
+~~~
+
+**`_progress_into`**
+
+~~~text
+_progress_into(cell: list) -> Callable[[float], None]
+
+Return the progress callback of one slot.
+
+Each callback is bound to its own display cell when it is created.
+(A lambda in the start loop would read the loop variable when
+ffmpeg reports, i.e. the cell of the encode started last, and the
+other slot would stay at 0 %.)
+
+Args:
+    cell: ``[name, fraction, size]`` of the slot.
+
+Returns:
+    Callback that stores the encoded fraction in ``cell``.
 ~~~
 
 **`_collect`**
