@@ -24,6 +24,8 @@ classDiagram
     +zoom(steps)
     +job_values(entry)
     +pick_job(entry, start)
+    +choose_shrink_run()
+    +run_choice(entry)
     +check_update()
     +restart()
     -_exec_gui()
@@ -77,6 +79,7 @@ classDiagram
     +variables
     +line
     +ask
+    +chooser
     +init(master, spec, console, store, ask)
     -_field(row, option, value)
     -_help(row, option)
@@ -89,6 +92,7 @@ classDiagram
     +reset()
     +preview()
     +run()
+    +start()
     -_start(values)
   }
   class CommandSpec {
@@ -179,6 +183,14 @@ classDiagram
     -_stamp(path)
     +pick(start)
   }
+  class JobPicker {
+    +window
+    +jobs
+    +on_choice
+    +init(master, monitor, form_line, on_choice)
+    -_picked(entry, start)
+    +choose(entry)
+  }
   class JobRunner {
     +program
     +process
@@ -260,6 +272,7 @@ classDiagram
     +refresh()
     +stop()
     +reload()
+    +show_log(text)
     +open_log()
   }
   class ShrinkReading {
@@ -297,7 +310,9 @@ classDiagram
   MediaToolsApp --> DesktopEntry
   MediaToolsApp --> FilesPanel
   MediaToolsApp --> FormStore
+  MediaToolsApp ..> JobPicker
   MediaToolsApp --> SavingsPanel
+  MediaToolsApp ..> ShrinkMonitor
   MediaToolsApp --> ShrinkPanel
   MediaToolsApp --> UpdateBar
   Appearance --> SystemLook
@@ -312,6 +327,8 @@ classDiagram
   ConsoleView --> JobRunner
   FilesPanel --> Opener
   JobList --> ShrinkMonitor
+  JobPicker --> JobList
+  JobPicker --> ShrinkMonitor
   GuiLauncher ..> CommandCatalog
   GuiLauncher ..> DesktopEntry
   GuiLauncher ..> MediaToolsApp
