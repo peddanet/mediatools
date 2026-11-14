@@ -476,6 +476,24 @@ The chosen job's arguments are used as if typed; a later `reload`
 continues the same job. With any argument, or without a terminal, the
 list is skipped.
 
+In the GUI, *Run* in the shrink tab opens the same choice as a dialog:
+*Continue* (or a double click) runs the selected job, *Run as in the form*
+the values of the form, *Cancel* nothing. Jobs started from the GUI are
+remembered like those of the command line.
+
+To change a remembered job before running it, select it in the job list
+of the shrink tab (this fills the form), change the options in the form
+(e.g. `--jobs 2`, `--threads 11`, clear `--min-seconds`), then *Run* and
+*Run as in the form*. Settings (CRF, preset, order, jobs, threads) update
+the same job; other filters or another folder make a new job, because a
+job is defined by its folder and filters.
+
+Jobs run before 1.6.0 are taken once from the shrink logs: every log
+names its root and order (logs since 1.6.0 the whole job with filters,
+CRF and preset). Their remainder is unknown (`not planned yet`, `to go:
+?`) until the job runs again; filters of old runs (e.g. `--min-seconds`)
+were not logged and are missing.
+
 ## Parallel encodes
 
 `--jobs N` encodes N videos at the same time. libx265 alone does not use

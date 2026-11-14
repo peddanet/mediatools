@@ -20,6 +20,8 @@ from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.filespanel import FilesPanel
 from mediatools.gui.formstore import FormStore
 from mediatools.gui.savingspanel import SavingsPanel
+from mediatools.gui.jobpicker import JobPicker
+from mediatools.gui.shrinkmonitor import ShrinkMonitor
 from mediatools.gui.shrinkpanel import ShrinkPanel
 from mediatools.gui.updatebar import UpdateBar
 from mediatools.shrink.jobregistry import JobEntry
@@ -39,7 +41,8 @@ class MediaToolsApp:
     time, different tabs may run at the same time.
 
     Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
-    fills the form, *Continue* runs it); the menu *View* changes the font
+    fills the form, *Continue* runs it), and since 1.6.2 its *Run* first
+    offers them in a dialog (:class:`JobPicker`); the menu *View* changes the font
     size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
     (default, followed live), light or dark (:class:`Appearance`); a newly
     installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
@@ -114,6 +117,8 @@ class MediaToolsApp:
                                       on_pick=self.pick_job).frame, weight=2)
             console = ConsoleView(panes, height=6 if spec.name == "shrink" else 12)
             form = CommandForm(panes, spec, console, self.store, ask)
+            if spec.name == "shrink":
+                form.chooser = self.choose_shrink_run
             panes.add(form.frame, weight=1)
             panes.add(console.frame, weight=2)
             self.forms[spec.name] = form
@@ -232,6 +237,7 @@ class MediaToolsApp:
                 "preset": str(entry.settings.get("preset") or ""),
                 "order": str(entry.settings.get("order") or "largest"),
                 "jobs": "" if jobs in (None, 1) else str(jobs),
+                "threads": str(entry.settings.get("threads") or ""),
                 "ext": ",".join(ext.lstrip(".") for ext in sorted(spec.extensions)),
                 "min_seconds": f"{spec.min_seconds:g}",
                 "min_size": JobSpec.size_text(spec.min_size) if spec.min_size else "",
@@ -253,7 +259,35 @@ class MediaToolsApp:
         for dest, value in self.job_values(entry).items():
             if dest in form.variables:
                 form.set_value(dest, value)
-        return form.run() if start else True
+        return form.start() if start else True
+
+    def choose_shrink_run(self) -> bool:
+        """*Run* of the shrink tab: offer the earlier jobs first (:class:`JobPicker`).
+
+        Without any remembered job the form runs at once.
+
+        Returns:
+            True if the shrink was started now; False while the dialog is open.
+        """
+        form = self.forms["shrink"]
+        monitor = ShrinkMonitor()
+        if not monitor.registry().entries():
+            return form.start()
+        JobPicker(self.root, monitor, form.line.get(), self.run_choice)
+        return False
+
+    def run_choice(self, entry: JobEntry | None) -> bool:
+        """Start the shrink chosen in the dialog.
+
+        Args:
+            entry: An earlier job (fills the form first), or None for the form.
+
+        Returns:
+            True if the shrink was started.
+        """
+        if entry is not None:
+            return self.pick_job(entry, start=True)
+        return self.forms["shrink"].start()
 
     def check_update(self) -> None:
         """Check for a newly installed release; show the bar a little later."""
