@@ -401,11 +401,29 @@ class Shrinker:
             item = RunningEncode(table.free.pop(), path, size, prepared[0], prepared[1],
                                  table.inode(path), self._length(path))
             item.cell = [os.path.basename(path), 0.0, size]
-            cell = item.cell
             future = pool.submit(self.state["encoders"][item.slot].encode, path, item.out,
-                                 lambda fraction: cell.__setitem__(1, fraction))
+                                 self._progress_into(item.cell))
             table.take(future, item)
         pending.extendleft(reversed(waiting))
+
+    @staticmethod
+    def _progress_into(cell: list) -> Callable[[float], None]:
+        """Return the progress callback of one slot.
+
+        Each callback is bound to its own display cell when it is created.
+        (A lambda in the start loop would read the loop variable when
+        ffmpeg reports, i.e. the cell of the encode started last, and the
+        other slot would stay at 0 %.)
+
+        Args:
+            cell: ``[name, fraction, size]`` of the slot.
+
+        Returns:
+            Callback that stores the encoded fraction in ``cell``.
+        """
+        def report(fraction: float) -> None:
+            cell[1] = fraction
+        return report
 
     def _collect(self, table: SlotTable, future: Future, busy: int) -> None:
         """Finish one encode of a slot: check, replace, record, count.

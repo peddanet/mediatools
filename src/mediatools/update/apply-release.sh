@@ -46,7 +46,10 @@
 # Every step is logged; the first failing command stops the script and names
 # the step. On failure nothing in the download folder is removed, so the same
 # command can be repeated (an existing hotfix branch is rebuilt, an open pull
-# request reused).
+# request reused). Since 1.6.3 a branch that an interrupted run already
+# pushed with exactly the same content on the same base is taken over
+# instead of pushed again (see same_as_pushed): no second gate run, and the
+# CI run already started for it is reused.
 set -Eeuo pipefail
 
 # -- run from a temporary copy ----------------------------------------------
@@ -184,6 +187,34 @@ version_of() { basename "$1" | sed -E 's/^[a-z-]*-([0-9]+\.[0-9]+\.[0-9]+).*/\1/
 version_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
 
 # released version on main (origin/main if known)
+# True if origin/<branch> holds exactly the content of HEAD on the same
+# parent commit(s). Such a branch can only have come from an earlier run of
+# this script that was interrupted later (e.g. lost connection while waiting
+# for CI): it was pushed through the pre-push hook, so the local gates have
+# passed for exactly this content, and GitHub still has to report the
+# required checks green before anything is merged (branch protection).
+same_as_pushed() {
+  git rev-parse -q --verify "origin/$1" >/dev/null || return 1
+  [ "$(git rev-parse "origin/$1^{tree}")" = "$(git rev-parse "HEAD^{tree}")" ] || return 1
+  [ "$(git rev-parse "origin/$1^@" | tr '\n' ' ')" = "$(git rev-parse "HEAD^@" | tr '\n' ' ')" ]
+}
+
+# push a branch through the gates - or take over the identical pushed one
+# (see same_as_pushed); sets PUSHED=yes|no
+push_or_resume() {
+  if same_as_pushed "$1"; then
+    echo "--- origin/$1 holds exactly this content on the same base, pushed through the"
+    echo "    gates by an earlier, interrupted run: taken over (no new push, no new gate run)"
+    git reset -q --keep "origin/$1"
+    git branch -q --set-upstream-to="origin/$1"
+    PUSHED=no
+  else
+    local_gates "$1"
+    git push -u --force-with-lease origin "$1"
+    PUSHED=yes
+  fi
+}
+
 released_version() {
   local ref=main
   git -C "$REPO" rev-parse -q --verify origin/main >/dev/null && ref=origin/main
@@ -310,9 +341,8 @@ apply_one() {
   git log --oneline -1
 
   step "$VERSION: 3 push (pre-push hook runs all quality gates)"
-  local_gates "hotfix/$VERSION"
   git fetch origin
-  git push -u --force-with-lease origin "hotfix/$VERSION"
+  push_or_resume "hotfix/$VERSION"
 
   step "$VERSION: 4 pull request into main"
   local pr
@@ -320,7 +350,7 @@ apply_one() {
          --jq '.[0].url // empty')
   [ -n "$pr" ] || pr=$(gh pr create --base main --title "Hotfix $VERSION" --fill)
   echo "PR: $pr"
-  sleep 15                                   # let GitHub register the new push
+  [ "$PUSHED" = no ] || sleep 15             # let GitHub register the new push
   ci_run "$VERSION CI 1/3" "hotfix/$VERSION" pull_request "$(git rev-parse HEAD)" \
     "merge result of hotfix/$VERSION and main, Python $PYTHONS" \
     "required check: branch protection allows the merge into main only when green" "$pr"
@@ -342,8 +372,7 @@ apply_one() {
   git switch -C "merge/hotfix-$VERSION"
   git fetch origin
   git merge --no-ff origin/develop -m "Merge develop into merge/hotfix-$VERSION"
-  local_gates "merge/hotfix-$VERSION"
-  git push -u --force-with-lease origin "merge/hotfix-$VERSION"
+  push_or_resume "merge/hotfix-$VERSION"
   pr=$(gh_read pr list --head "merge/hotfix-$VERSION" --base develop --state open --json url \
          --jq '.[0].url // empty')
   [ -n "$pr" ] || pr=$(gh pr create --base develop --title "Merge hotfix $VERSION into develop" --fill)
