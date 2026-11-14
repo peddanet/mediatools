@@ -5,6 +5,31 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-11-14
+
+### Fixed
+- Parallel shrink: every slot shows its own progress. The progress
+  callback of a slot read the loop variable of the start loop when ffmpeg
+  reported, so all reports went into the cell of the encode started last
+  and the other slot stayed at 0 % (the encodes themselves were correct).
+- File lines of a parallel run estimate their remaining time from the
+  speed of the whole run, so a file that has just started no longer shows
+  days left.
+- GUI: the settings column of the job list is wide enough for
+  "jobs x threads".
+- GUI: the shrink panel shows every file line of a parallel run and the
+  space line only once (it was cut after three lines and showed the space
+  line twice when one encode was running).
+
+### Changed
+- `mediatools update` after an interruption (e.g. lost connection while
+  waiting for CI): a hotfix or back-merge branch that the interrupted run
+  already pushed with exactly the same content (Git tree) on the same
+  parent commit(s) is taken over instead of rebuilt and pushed again; the
+  local gates are not run a second time and the CI run already started
+  for it is reused. Any difference in content or base leads to the full
+  path as before; merges still need the required checks green.
+
 ## [1.6.2] - 2026-11-14
 
 ### Added

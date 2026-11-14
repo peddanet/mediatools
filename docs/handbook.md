@@ -476,6 +476,11 @@ The chosen job's arguments are used as if typed; a later `reload`
 continues the same job. With any argument, or without a terminal, the
 list is skipped.
 
+After an interrupted `mediatools update` (power, network), simply run it
+again: a branch the interrupted run had already pushed with exactly the
+same content on the same base is taken over, so the gates and the CI run
+are not repeated; anything else is rebuilt as before.
+
 In the GUI, *Run* in the shrink tab opens the same choice as a dialog:
 *Continue* (or a double click) runs the selected job, *Run as in the form*
 the values of the form, *Cancel* nothing. Jobs started from the GUI are
