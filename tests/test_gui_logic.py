@@ -237,7 +237,7 @@ def test_monitor_reads_a_running_shrink(datadir: Path) -> None:
     monitor = ShrinkMonitor()
     state = monitor.read()
     assert state.pid == os.getpid() and state.log_path == log
-    assert state.progress == ["total [##......]  12.5 % | 1/8 files", "file 3 %", "space x"]
+    assert state.progress == ["total [##......]  12.5 % | 1/8 files", "file 3 %"]  # space: overall
     assert state.percent == 12.5 and state.report[0].startswith("shrink: running")
     assert state.overall.startswith("space  session: 0.0 GiB read")
     Path(monitor.control.status_file).write_text("starting\n", encoding="utf-8")
