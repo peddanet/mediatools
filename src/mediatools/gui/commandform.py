@@ -31,6 +31,8 @@ class CommandForm:
         variables: Tk variables (or text boxes) by ``dest``.
         line: Text of the command-line preview.
         ask: Confirmation dialog, replaceable in tests.
+        chooser: Called by *Run* instead of starting directly (e.g. the
+            job selection of the shrink tab), or None.
     """
 
     def __init__(self, master: tk.Misc, spec: CommandSpec, console: ConsoleView,
@@ -46,6 +48,7 @@ class CommandForm:
             ask: Confirmation dialog (title, text) -> yes.
         """
         self.frame = ttk.Frame(master)
+        self.chooser: Callable[[], bool] | None = None
         self.spec = spec
         self.console = console
         self.store = store
@@ -209,7 +212,17 @@ class CommandForm:
         return self._start(values)
 
     def run(self) -> bool:
-        """Run the command with the current values.
+        """Run the command: through :attr:`chooser` if set, else directly.
+
+        Returns:
+            True if the command was started now.
+        """
+        if self.chooser is not None:
+            return self.chooser()
+        return self.start()
+
+    def start(self) -> bool:
+        """Run the command with the current values (no chooser).
 
         Returns:
             True if the command was started.

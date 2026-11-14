@@ -45,6 +45,8 @@ class HevcEncoder:
         crf: libx265 constant rate factor.
         preset: libx265 preset (speed against compression), e.g. ``medium``.
         threads: Decoder threads and size of the x265 thread pool.
+        threads_given: ``threads`` as requested (``--threads``), or None for
+            the default.
         niceness: Scheduling priority of ffmpeg (0 normal, 19 lowest).
         probe: :class:`MediaProbe` used for validation.
         log: Optional logger.
@@ -91,6 +93,7 @@ class HevcEncoder:
         self.crf = crf
         self.niceness = niceness
         self.threads = threads if threads and threads > 0 else self.default_threads()
+        self.threads_given = threads if threads and threads > 0 else None
         self.probe = probe or MediaProbe()
         self.log = logger
         self.ffmpeg = ffmpeg
