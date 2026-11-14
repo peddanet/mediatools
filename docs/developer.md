@@ -199,7 +199,7 @@ directory, configuration -- lives in `core`.
 | `JobSpec` | the set of a job: root and filters; key, options, membership of a ledger row |
 | `Ledger`, `LedgerRow`, `LedgerSums` | append-only `ledger.tsv`, one row per finished video; sums per job, session, total |
 | `LogBackfill` | rebuilds ledger rows from the result tables of old shrink logs (wrapped paths, MB sizes) |
-| `JobRegistry`, `JobEntry` | remembered jobs in `state/jobs.json`: settings, remainder, progress |
+| `JobRegistry`, `JobEntry` | remembered jobs in `state/jobs.json`: settings, remainder, progress; jobs of old logs taken in once |
 | `JobChooser` | selection of an earlier job for a plain `mediatools shrink` |
 | `SlotTable`, `RunningEncode` | bookkeeping of parallel encodes: free slots, running futures, inodes, folders |
 | `ThroughputLog` | measured encoding speed and size ratio for estimates |
@@ -283,6 +283,7 @@ directory, configuration -- lives in `core`.
 | `Appearance` | ttk style on `clam`, font scale and scheme `auto`/light/dark (`[gui]`), follows the desktop |
 | `SystemLook` | scheme and accent colour of the desktop from the XDG settings portal (`gdbus`) |
 | `JobList` | list of the shrink jobs with progress; selection fills the shrink form |
+| `JobPicker` | dialog of *Run* in the shrink tab: continue an earlier job or run the form |
 | `UpdateBar` | notices a newer installed release, offers a restart |
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |

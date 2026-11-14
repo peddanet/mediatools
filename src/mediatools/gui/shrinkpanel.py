@@ -93,13 +93,7 @@ class ShrinkPanel:
         self.overall.set(state.overall)
         self.meter["value"] = state.percent or 0.0
         self.log_path = state.log_path
-        at_end = self.log.yview()[1] >= 0.999
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.insert("1.0", "\n".join(self.monitor.tail(state.log_path)))
-        if at_end:
-            self.log.see("end")
-        self.log.configure(state="disabled")
+        self.show_log("\n".join(self.monitor.tail(state.log_path)))
         self.joblist.refresh()
         if self.refresh_ms:
             self.frame.after(self.refresh_ms, self.refresh)
@@ -111,6 +105,28 @@ class ShrinkPanel:
     def reload(self) -> None:
         """Request a switch to the installed release."""
         self.message.set(self.monitor.reload())
+
+    def show_log(self, text: str) -> None:
+        """Show the end of the log without taking the scroll position away.
+
+        The text is replaced only when it changed. If the view showed the
+        end, it follows the new end; otherwise it keeps its position, so the
+        log can be read while the run goes on.
+
+        Args:
+            text: Last lines of the log.
+        """
+        if self.log.get("1.0", "end-1c") == text:
+            return
+        first, last = self.log.yview()
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.insert("1.0", text)
+        if last >= 0.999:
+            self.log.see("end")
+        else:
+            self.log.yview_moveto(first)
+        self.log.configure(state="disabled")
 
     def open_log(self) -> None:
         """Open the log of the run in the desktop's viewer."""
