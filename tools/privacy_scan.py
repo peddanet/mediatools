@@ -130,14 +130,19 @@ class PrivacyScan:
             All local terms (unfiltered).
         """
         terms = PrivacyScan.read_list("privacy_denylist.txt")
-        from mediatools.core.config import Config  # pylint: disable=import-outside-toplevel
+        # pylint: disable-next=import-outside-toplevel
+        from mediatools.core.config import Config
+        # pylint: disable-next=import-outside-toplevel
+        from mediatools.core.mediatypes import MediaTypes
         root = Config().path_value("collection", "root")
         if root and os.path.isdir(root):
             below_home = os.path.relpath(root, os.path.expanduser("~"))
             if not below_home.startswith(".."):
                 terms += [part for part in below_home.split(os.sep)
                           if part.lower() not in STANDARD_DIRS]
-            terms += [entry.name for entry in os.scandir(root) if entry.is_dir()]
+            # folders mediatools creates itself (e.g. _broken) name no content
+            terms += [entry.name for entry in os.scandir(root)
+                      if entry.is_dir() and entry.name not in MediaTypes.SKIP_DIRS]
         return [term for term in terms if term]
 
     def _git(self, *args: str) -> str:

@@ -15,6 +15,7 @@ links**, and keep versioned snapshots of it with rsnapshot.
 mediatools shrink    re-encode videos to HEVC in place, tracked per directory
 mediatools progress  read-only report: which videos are already shrunk
 mediatools triage    open short clips in batches, close a window to discard it
+mediatools broken    set damaged videos aside, then play, repair, keep or delete them
 mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
 mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
@@ -33,7 +34,7 @@ mediatools where     where configuration, logs, state and data are kept
 - [Installation](#installation)
 - [First steps](#first-steps)
 - [Subcommands](#subcommands)
-  - [shrink](#shrink) · [progress](#progress) · [triage](#triage) · [flatten](#flatten) · [sync](#sync) · [snapshot](#snapshot)
+  - [shrink](#shrink) · [progress](#progress) · [triage](#triage) · [broken](#broken) · [flatten](#flatten) · [sync](#sync) · [snapshot](#snapshot)
 - [Configuration](#configuration)
 - [How the pieces fit together](#how-the-pieces-fit-together)
 - [Data directory](#data-directory)
@@ -55,6 +56,7 @@ mix. After some months the collection has the usual problems:
 | The disk is full of large H.264 videos | `shrink` | HEVC re-encode, often half the size or less, same file name |
 | How much is still left to shrink? | `progress` | read-only report with a time estimate |
 | Many short clips you never wanted | `triage` | watch them in batches, close a window to discard the clip |
+| Some videos do not decode (cut-off or damaged downloads) | `broken` | set aside in `_broken`, measured, repaired where possible, otherwise deleted |
 | Every file is buried four or five folder levels deep | `flatten` | one flat folder of hard links per project, no extra space |
 | The backup turns hard links into full copies, or deletes too much | `sync`, `snapshot` | rsync backup that keeps hard links; versioned snapshots |
 
@@ -74,6 +76,7 @@ again, not the clips you discarded.
 mediatools shrink    re-encode videos to HEVC in place, tracked per directory
 mediatools progress  read-only report: which videos are already shrunk
 mediatools triage    open short clips in batches, close a window to discard it
+mediatools broken    set damaged videos aside, then play, repair, keep or delete them
 mediatools flatten   one flat folder of hard links per unit (<unit>/_flat)
 mediatools sync      rsync backup that keeps hard links and never deletes
 mediatools snapshot  versioned backups with rsnapshot on a removable disk
@@ -109,10 +112,12 @@ never entered, how files are identified, where logs go).
 |---|---|
 | Originals are replaced only by a **validated** encode (exit code, video stream, duration) | `shrink` |
 | Copy-back and database entry are never separated by an interruption | `shrink` |
-| `_flat` and `newShrinkedFiles` are never entered by any scan | all |
+| `_flat`, `newShrinkedFiles` and `_broken` are never entered by any scan | all |
 | `flatten` writes **only** inside `<unit>/_flat/`; originals are never touched | `flatten` |
 | Nothing is removed without an explicit confirmation; default is the trash | `triage` |
 | A player that exits immediately is treated as an error, its file is kept | `triage` |
+| A damaged video moves aside under all its names and can be put back exactly (manifest) | `broken` |
+| A repair replaces a damaged video only after a full decode without errors | `broken` |
 | `rsync --delete` is **never** used; target-only files are reported, not removed | `sync` |
 | A newer file on the receiving side is never overwritten (`rsync -u`) | `sync` |
 | Empty placeholders are never copied over a full file (`rsync --min-size=1`) | `sync` |
@@ -129,9 +134,9 @@ Everything except the system packages in step 1 runs as a **normal user**.
 | Tool | Needed by | Debian/Ubuntu package |
 |---|---|---|
 | Python ≥ 3.10 (standard library only) | all | `python3` |
-| ffmpeg, ffprobe with libx265 | shrink, triage | `ffmpeg` |
-| VLC or mpv | triage | `vlc` / `mpv` |
-| gio (trash) | triage | `libglib2.0-bin` |
+| ffmpeg, ffprobe with libx265 | shrink, triage, broken | `ffmpeg` |
+| VLC or mpv | triage, broken | `vlc` / `mpv` |
+| gio (trash) | triage, broken | `libglib2.0-bin` |
 | rsync ≥ 3.0 | sync, snapshot | `rsync` |
 | rsnapshot ≥ 1.4 | snapshot | `rsnapshot` |
 | git, Python venv module | installation option A | `git`, `python3-venv` |
@@ -456,6 +461,43 @@ VLC is started with `--no-one-instance --no-playlist-enqueue`; a player that
 exits within three seconds counts as an error and its file is kept. Trashed
 files can be restored with `gio trash --list` / `gio trash --restore URI`.
 
+### broken
+
+```bash
+mediatools broken [PATH] [--collect] [--report TSV] [--dry-run] [-y]
+                         [--review] [--player vlc] [--audio] [--delete]
+```
+
+Damaged videos - cut off by an interrupted download, or with data no decoder
+can use - waste space and fail every encode. `broken` sets them aside per
+shrink root and lets you decide about each one.
+
+1. `--collect` takes every video that `shrink` recorded as `BROKEN` (its
+   trial decode failed) and, with `--report`, the videos of a report file
+   (tab-separated, column `path`). Each one is decoded once at the lowest
+   CPU priority and measured: how much decodes, how much of that is a frozen
+   or black picture, how many decoder errors.
+2. Class **hopeless**: does not open, less than 10 % decodes, or more than
+   90 % of the decoded part is still or black. Every other video is
+   **promising**.
+3. The videos move into `<PATH>/_broken/aussichtsreich/` or
+   `<PATH>/_broken/hoffnungslos/`, keeping their path relative to `PATH`, so
+   unit and origin stay visible. All hard link names move along;
+   `_broken/manifest.jsonl` records them for an exact way back.
+4. `--review` shows the promising videos first, the most usable first:
+   **p** play, **r** repair, **k** keep (put back unchanged), **d** delete,
+   **s** skip, **q** quit. Then the hopeless ones as a group: view a few,
+   delete all, or one by one.
+5. **Repair** encodes what decodes into a clean HEVC file; after you have
+   played it you accept it (it takes the place of the damaged video under
+   all its names) or discard it. Advised from 50 % usable content on.
+6. **Delete** removes all names (trash; `--delete`: permanently). If
+   `[broken] downloader_db` names a downloader's database relative to a unit
+   folder, the video is marked there as not downloaded, so the next download
+   run fetches it again.
+
+`broken` without options lists what is set aside. `--review` needs a terminal.
+
 ### flatten
 
 ```bash
@@ -570,6 +612,9 @@ source = ~
 [shrink]
 db_name = shrink.db
 
+[broken]
+downloader_db =
+
 [flatten]
 abbreviations = Videos=V, Images=I, Audios=U
 
@@ -596,6 +641,7 @@ change a default permanently:
 ```bash
 mediatools config --set collection.root=~/Pictures/other   # shrink, triage, flatten, ...
 mediatools config --set sync.source=~                      # default source of sync
+mediatools config --set broken.downloader_db=Metadata/media.db   # see broken
 ```
 
 ## How the pieces fit together
