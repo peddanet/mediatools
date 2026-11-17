@@ -5,6 +5,53 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-17
+
+### Added
+- `mediatools broken`: damaged videos of a shrink root are set aside in
+  `<root>/_broken/` and reviewed there.
+  - `--collect` takes every video recorded as `BROKEN` in the shrink
+    databases (its data failed the trial decode) and, with `--report`, the
+    videos of a report file (column `path`; with a column `check` only
+    rows naming an error or a broken file). Videos recorded as `FAILED`
+    (only the encode failed) are not taken. Each video is measured once
+    (full trial decode at the lowest CPU priority: decodable share, frozen
+    or black parts, decoder errors) and classified: *hopeless* if it does
+    not open, if less than 10 % of it decodes or if more than 90 % of the
+    decoded part is a still or black picture; otherwise *promising*.
+  - The videos move with `rename` (no copy) into
+    `_broken/aussichtsreich/` or `_broken/hoffnungslos/`, keeping their
+    path relative to the root, so the unit and every folder of the origin
+    stay visible. All hard link names inside the root move along (also
+    `_flat`); `_broken/manifest.jsonl` (mode 600) records every name pair,
+    the measurement and the reason. Videos whose output lies in shrink's
+    work folder (running or interrupted encode) stay in place.
+  - `--review` shows the promising videos first, the most usable first,
+    each with play, repair, keep, delete, skip, quit; then the hopeless
+    ones as a group (view samples, delete all, one by one).
+  - Repair encodes the decodable part with error-tolerant input into a
+    clean HEVC file (same quality settings as shrink), validated by a full
+    decode without errors; after playing it, it can be accepted (it
+    replaces the damaged video under all its names and is recorded as
+    shrunk) or discarded. Advised from 50 % usable content on.
+  - Keep puts the video back unchanged and records it as `BROKEN` with
+    the reason "kept after review", so neither shrink nor `--collect`
+    takes it again while its size is unchanged.
+  - Delete removes all names (trash, or `--delete`) and, if
+    `[broken] downloader_db` names a downloader database relative to a
+    unit folder, marks the video there as not downloaded, so the
+    downloader fetches it again.
+  - Without `--collect` / `--review` the command lists what is set aside.
+    `--review` needs a terminal.
+
+### Changed
+- `_broken` is a reserved directory like `_flat` and `newShrinkedFiles`:
+  no scan of shrink, progress, triage or flatten enters it.
+- The privacy scan no longer takes folders that mediatools creates itself
+  (`_broken`, `_flat`, `newShrinkedFiles`) in the collection root as
+  terms.
+- New database helper `ShrinkDatabase.failure_reason()`.
+
 ## [1.6.3] - 2026-11-14
 
 ### Fixed
