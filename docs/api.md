@@ -49,6 +49,17 @@ Returns:
     The parser.
 ~~~
 
+**`_add_broken_parser`**
+
+~~~text
+_add_broken_parser(sub) -> None
+
+Define the subcommand broken.
+
+Args:
+    sub: Sub-parser collection of the main parser.
+~~~
+
 **`_add_admin_parsers`**
 
 ~~~text
@@ -153,10 +164,10 @@ Raises:
     argparse.ArgumentTypeError: If the text is not a date.
 ~~~
 
-**`ledger`**
+**`_ledger`**
 
 ~~~text
-ledger() -> Ledger
+_ledger() -> Ledger
 
 Return the ledger of finished videos (filled in from the logs once).
 
@@ -353,6 +364,26 @@ Returns:
 
 Raises:
     SystemExit: If the duration range is invalid.
+~~~
+
+**`cmd_broken`**
+
+~~~text
+cmd_broken(self, args: argparse.Namespace) -> int
+
+Run ``mediatools broken``.
+
+Without ``--collect`` or ``--review`` the open videos of
+``_broken`` are listed.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    Exit code.
+
+Raises:
+    SystemExit: If ``--review`` is not started from a terminal.
 ~~~
 
 **`cmd_flatten`**
@@ -1286,6 +1317,8 @@ directories are never entered" is defined in exactly one place.
 Attributes:
     FLAT_DIR: Name of the per-unit directory created by ``flatten``.
     SHRINK_TMP_DIR: Temporary output directory of ``shrink``.
+    BROKEN_DIR: Directory of a shrink root that holds damaged videos
+        set aside by ``mediatools broken``.
     SKIP_DIRS: Directory names no subcommand descends into.
     VIDEO: Lower-case video extensions including the dot.
     IMAGE: Lower-case image extensions including the dot.
@@ -2214,7 +2247,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.6.3') -> None
+__init__(self, control: RunControl, installed: str = '1.7.0') -> None
 
 Remember the job and the installed release.
 
@@ -2478,7 +2511,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.6.3')
+__init__(self, package_dir: str | None = None, version: str = '1.7.0')
 
 Locate the imported package.
 
@@ -2515,7 +2548,7 @@ Returns:
 ~~~text
 Deterministic :func:`os.walk` that never enters reserved directories.
 
-Skipped are ``_flat``, ``newShrinkedFiles``, hidden directories (``.*``)
+Skipped are ``_flat``, ``newShrinkedFiles``, ``_broken``, hidden directories (``.*``)
 and any additional names given. Directory and file lists are sorted so
 that runs are reproducible.
 
@@ -2795,6 +2828,20 @@ Return the recorded failures (cached).
 Returns:
     Mapping file name to ``(size, status)``; empty if the database
     or its failures table does not exist.
+~~~
+
+**`failure_reason`**
+
+~~~text
+failure_reason(self, name: str) -> str | None
+
+Return the recorded reason of a failure.
+
+Args:
+    name: File name in this directory.
+
+Returns:
+    The reason text, or None if no failure is recorded.
 ~~~
 
 **`clear_failure`**
@@ -6538,6 +6585,1152 @@ Args:
 
 Returns:
     The kept list object.
+~~~
+
+## `mediatools.broken`
+
+### `Assessment` (`mediatools.broken.assessment`) {.unnumbered}
+
+~~~text
+What a trial decode found in a video.
+
+The class of a video follows from three measurements: the container
+duration, the part of it that decodes (``decoded``) and, inside that
+part, the seconds that show nothing (``still``: a frozen or black
+picture, e.g. grey frames). A video is *hopeless* if it cannot be opened
+at all, if less than :attr:`MIN_DECODED` of its duration decodes, or if
+more than :attr:`MAX_STILL` of the decoded part is still; every other
+video is *promising* and is shown to the user first.
+
+Attributes:
+    opened: The file has a readable container with a video stream.
+    duration: Container duration in seconds (0 if unknown).
+    decoded: Seconds of video that decoded.
+    still: Seconds of the decoded part with a frozen or black picture.
+    errors: Number of error lines of the decoder.
+    note: First error message or the reason why the file did not open.
+~~~
+
+**`decoded_share`**
+
+~~~text
+decoded_share(self) -> float
+
+Share of the duration that decodes.
+
+Returns:
+    0.0 to 1.0; 0.0 if the duration is unknown.
+~~~
+
+**`usable_share`**
+
+~~~text
+usable_share(self) -> float
+
+Share of the duration that decodes and shows a moving picture.
+
+Returns:
+    0.0 to 1.0.
+~~~
+
+**`kind`**
+
+~~~text
+kind(self) -> str
+
+Class of the video.
+
+Returns:
+    ``hopeless`` or ``promising``.
+~~~
+
+**`repair_advised`**
+
+~~~text
+repair_advised(self) -> bool
+
+Tell whether a repair is likely to give a useful video.
+
+Returns:
+    True if at least :attr:`REPAIR_FROM` of the duration is usable.
+~~~
+
+**`summary`**
+
+~~~text
+summary(self) -> str
+
+Describe the measurement in one line.
+
+Returns:
+    Text such as ``12:00 min, 98 % decodes, 97 % usable, 3 errors``.
+~~~
+
+**`to_dict`**
+
+~~~text
+to_dict(self) -> dict
+
+Return the fields for the manifest.
+
+Returns:
+    Plain dictionary.
+~~~
+
+**`from_dict`**
+
+~~~text
+from_dict(cls, data: dict) -> Assessment
+
+Rebuild an assessment from the manifest.
+
+Args:
+    data: Dictionary written by :meth:`to_dict`.
+
+Returns:
+    The assessment; unknown keys are ignored.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    opened: bool,
+    duration: float = 0.0,
+    decoded: float = 0.0,
+    still: float = 0.0,
+    errors: int = 0,
+    note: str = '',
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `Assessor` (`mediatools.broken.assessor`) {.unnumbered}
+
+~~~text
+Decodes the video stream of a file once and measures it.
+
+One ffmpeg run decodes the first video stream to nothing (``-f null``)
+and passes it through two filters of ffmpeg:
+
+* ``freezedetect`` reports intervals in which the picture does not
+  change (a grey or otherwise still image),
+* ``blackdetect`` reports intervals with a black picture.
+
+The progress output (``-progress pipe:1``, key ``out_time_us``) tells
+how far decoding got; a cut-off file stops early. Messages are read with
+the log flag ``level``, which puts ``[error]`` in front of every error
+line, so errors can be counted while the filters report at level info.
+Still intervals of both filters are merged before they are added up, so
+a black frozen part counts once. A freeze that lasts until the end is
+reported by ffmpeg only with its start; it is closed at the decoded end.
+
+The run is read-only and uses the lowest CPU priority (``nice`` 19).
+
+Attributes:
+    ffmpeg: Name or path of the ffmpeg executable.
+    probe: Probe for the container duration and the video stream.
+    timeout_factor: Time limit as a multiple of the duration.
+    timeout_min: Minimum time limit in seconds.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    ffmpeg: str = 'ffmpeg',
+    probe: MediaProbe | None = None,
+    timeout_min: float = 600.0,
+    timeout_factor: float = 2.0,
+)
+
+Store the settings.
+
+Args:
+    ffmpeg: Name or path of the ffmpeg executable.
+    probe: Probe; a new one if None.
+    timeout_min: Minimum time limit in seconds.
+    timeout_factor: Time limit as a multiple of the duration.
+~~~
+
+**`command`**
+
+~~~text
+command(self, path: str) -> list[str]
+
+Build the ffmpeg command of the measurement.
+
+Args:
+    path: Video file.
+
+Returns:
+    Argument list for :func:`subprocess.run` (no shell).
+~~~
+
+**`assess`**
+
+~~~text
+assess(self, path: str) -> Assessment
+
+Measure a video.
+
+Args:
+    path: Video file.
+
+Returns:
+    The assessment; ``opened`` is False if ffprobe finds no video
+    stream or ffmpeg cannot open the file.
+~~~
+
+**`decoded_seconds`**
+
+~~~text
+decoded_seconds(progress: str) -> float
+
+Read how far decoding got from ffmpeg's progress output.
+
+Args:
+    progress: Text of ``-progress pipe:1``.
+
+Returns:
+    Last ``out_time_us`` in seconds; 0.0 if there is none.
+~~~
+
+**`still_seconds`**
+
+~~~text
+still_seconds(cls, messages: str, decoded: float) -> float
+
+Add up the frozen and black intervals without counting overlaps.
+
+Args:
+    messages: ffmpeg's message output.
+    decoded: Decoded seconds; closes an interval without an end.
+
+Returns:
+    Seconds with a still or black picture.
+~~~
+
+**`merged_length`**
+
+~~~text
+merged_length(spans: list[tuple[float, float]], limit: float) -> float
+
+Return the length of the union of intervals, cut at a limit.
+
+Args:
+    spans: ``(start, end)`` intervals.
+    limit: Upper bound of every interval.
+
+Returns:
+    Total length in seconds.
+~~~
+
+**`clean`**
+
+~~~text
+clean(line: str) -> str
+
+Strip the component and level tags of an ffmpeg message.
+
+Args:
+    line: Message line such as ``[h264 @ 0x1] [error] text``.
+
+Returns:
+    The text, at most 200 characters.
+~~~
+
+### `BrokenCollector` (`mediatools.broken.collector`) {.unnumbered}
+
+~~~text
+Measures every damaged video, shows the plan and moves the videos.
+
+Steps: find (:class:`BrokenFinder`), measure each video once
+(:class:`Assessor`, a full trial decode at the lowest CPU priority),
+list the class and the measurement of each video, ask, and move the
+videos with all their names into ``_broken`` (:class:`Quarantine`).
+Videos that are already set aside are left out, and so are videos whose
+output lies in shrink's work folder (an encode runs or waits for
+recovery).
+
+Attributes:
+    quarantine: The ``_broken`` directory of the root.
+    finder: Source of damaged videos.
+    assessor: Measurement.
+    prompt: Prompt for the confirmation.
+    log: Logger.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    quarantine: Quarantine,
+    finder: BrokenFinder,
+    assessor: Assessor,
+    prompt: Prompt | None = None,
+)
+
+Wire the collaborators.
+
+Args:
+    quarantine: The ``_broken`` directory of the root.
+    finder: Source of damaged videos.
+    assessor: Measurement.
+    prompt: Prompt; a default :class:`Prompt` if None.
+~~~
+
+**`plan`**
+
+~~~text
+plan(self) -> list[tuple[str, str, Assessment]]
+
+Find and measure the damaged videos.
+
+Returns:
+    ``(path, reason, assessment)`` triples, promising first.
+~~~
+
+**`in_work`**
+
+~~~text
+in_work(path: str) -> bool
+
+Tell whether shrink has output of a video in its work folder.
+
+Such a video is being encoded right now, or its replacement waits
+for the recovery of an interrupted run; it must stay in place.
+
+Args:
+    path: Video file.
+
+Returns:
+    True if ``<dir>/newShrinkedFiles/<name>`` exists.
+~~~
+
+**`run`**
+
+~~~text
+run(self, dry_run: bool = False, ask: bool = True) -> int
+
+Set the damaged videos aside.
+
+Args:
+    dry_run: Only measure and list.
+    ask: Ask before moving.
+
+Returns:
+    0.
+~~~
+
+### `DownloaderDatabase` (`mediatools.broken.downloaderdb`) {.unnumbered}
+
+~~~text
+Lets a downloader fetch a deleted video again.
+
+Some downloaders keep a SQLite database per collection unit and skip
+every medium marked as downloaded there - also when the file was cut off
+by an interrupted download. After a damaged video is deleted, its row is
+set back to "not downloaded", so the next run of the downloader fetches
+it again (if the source still offers it).
+
+The database is searched at :attr:`relative` (e.g. a ``Metadata``
+folder) in the video's directory and every directory above it up to the
+shrink root. Expected table: ``medias`` with the columns ``directory``,
+``filename`` and ``downloaded``. The row is chosen by file name; if the
+name occurs more than once, the row whose directory ends with the
+video's folder relative to the database's unit is taken. Nothing is
+changed when no row or no unique row matches.
+
+The feature is off until ``[broken] downloader_db`` names the relative
+path of the database file.
+
+Attributes:
+    relative: Path of the database relative to a unit directory.
+    log: Logger.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, relative: str, logger)
+
+Store the settings.
+
+Args:
+    relative: Path of the database file relative to a unit
+        directory; empty switches the feature off.
+    logger: :class:`logging.Logger`.
+~~~
+
+**`enabled`**
+
+~~~text
+enabled(self) -> bool
+
+Tell whether a database path is configured.
+
+Returns:
+    True if :attr:`relative` is set.
+~~~
+
+**`locate`**
+
+~~~text
+locate(self, video: str, root: str) -> str | None
+
+Find the database responsible for a video.
+
+Args:
+    video: Original path of the video.
+    root: Shrink root (highest directory searched).
+
+Returns:
+    Path of the database file, or None.
+~~~
+
+**`reset`**
+
+~~~text
+reset(self, video: str, root: str) -> str
+
+Mark a video as not downloaded.
+
+Args:
+    video: Original path of the deleted video.
+    root: Shrink root.
+
+Returns:
+    Short result text for the log.
+~~~
+
+**`_update`**
+
+~~~text
+_update(self, database: str, name: str, sub: str) -> str
+
+Set ``downloaded = 0`` in the matching row.
+
+Args:
+    database: Database file.
+    name: File name of the video.
+    sub: Folder of the video relative to the unit (``.`` for the unit).
+
+Returns:
+    Short result text.
+~~~
+
+### `BrokenFinder` (`mediatools.broken.finder`) {.unnumbered}
+
+~~~text
+Lists the videos of a root that are known to be damaged.
+
+Two sources are read:
+
+* the shrink databases: every video recorded as ``BROKEN`` (its data
+  failed the trial decode before encoding) with an unchanged size,
+  except videos a user kept after a review;
+* optionally a report: a tab-separated file with a ``path`` column, e.g.
+  the report of a full trial decode. If it has a ``check`` column, only
+  rows whose check names an error or a broken file are taken.
+
+Videos recorded as ``FAILED`` (the encode failed, the source may be
+fine) are not listed.
+
+Attributes:
+    root: Absolute shrink root.
+    db_name: File name of the shrink databases.
+    report: Optional report file.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: str, db_name: str = 'shrink.db', report: str | None = None)
+
+Configure the finder.
+
+Args:
+    root: Shrink root.
+    db_name: File name of the shrink databases.
+    report: Optional report file.
+~~~
+
+**`find`**
+
+~~~text
+find(self) -> list[tuple[str, str]]
+
+Collect the damaged videos.
+
+Returns:
+    ``(path, reason)`` pairs, sorted by path, each path once.
+~~~
+
+**`_from_databases`**
+
+~~~text
+_from_databases(self) -> list[tuple[str, str]]
+
+Read the ``BROKEN`` entries of all shrink databases.
+
+Returns:
+    ``(path, reason)`` pairs of existing videos.
+~~~
+
+**`_kept`**
+
+~~~text
+_kept(database: ShrinkDatabase, name: str) -> bool
+
+Tell whether a user kept a video after a review.
+
+Args:
+    database: Shrink database of the video's directory.
+    name: File name.
+
+Returns:
+    True if the failure reason is the review mark.
+~~~
+
+**`_from_report`**
+
+~~~text
+_from_report(self, report: str) -> list[tuple[str, str]]
+
+Read the videos of a report file.
+
+Args:
+    report: Tab-separated file with a ``path`` column.
+
+Returns:
+    ``(path, reason)`` pairs of existing videos below the root.
+
+Raises:
+    SystemExit: If the file has no ``path`` column.
+~~~
+
+### `Quarantine` (`mediatools.broken.quarantine`) {.unnumbered}
+
+~~~text
+Moves damaged videos aside and back, keeping their names and origin.
+
+Every shrink root gets its own ``_broken`` directory with one
+sub-directory per class (:attr:`FOLDERS`). Below it the path relative
+to the root is kept, so the first folder still names the unit a video
+came from and every folder below it is preserved. A video is moved
+with :func:`os.rename` (same file system: no copy, instant). **All
+hard link names of the video inside the root move with it** - also its
+``_flat`` names - otherwise the damaged data would stay visible under
+another name and no space would be freed later. Names outside the root
+cannot be found; their number is recorded.
+
+``_broken/manifest.jsonl`` records every video: class, measurement,
+reason and each ``[original, quarantined]`` name pair. Restoring and
+repairing rely on it; it is written with mode 600 because it contains
+paths of the collection. Every walk of the project skips ``_broken``
+(:attr:`MediaTypes.SKIP_DIRS`), so shrink, flatten and triage leave the
+videos there alone.
+
+Attributes:
+    root: Absolute shrink root.
+    log: Logger.
+    db_name: File name of the shrink databases.
+    directory: The ``_broken`` directory of the root.
+    manifest: Path of the manifest.
+    items: Loaded manifest entries.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: str, logger, db_name: str = 'shrink.db')
+
+Bind the quarantine to a shrink root and read its manifest.
+
+Args:
+    root: Shrink root.
+    logger: :class:`logging.Logger`.
+    db_name: File name of the shrink databases.
+~~~
+
+**`_load`**
+
+~~~text
+_load(self) -> list[QuarantineItem]
+
+Read the manifest.
+
+Returns:
+    Its entries; empty if it does not exist.
+~~~
+
+**`save`**
+
+~~~text
+save(self) -> None
+
+Write the manifest completely (mode 600).
+~~~
+
+**`open_items`**
+
+~~~text
+open_items(self, kind: str | None = None) -> list[QuarantineItem]
+
+Return the videos that are still set aside.
+
+Args:
+    kind: Only this class, or every class if None.
+
+Returns:
+    Items in state ``open``.
+~~~
+
+**`holds`**
+
+~~~text
+holds(self, path: str) -> bool
+
+Tell whether a video is already set aside.
+
+Args:
+    path: Original path.
+
+Returns:
+    True if an open item has this original name.
+~~~
+
+**`links`**
+
+~~~text
+links(self, path: str) -> tuple[list[str], int]
+
+Find every name of a file inside the root.
+
+Args:
+    path: One name of the file.
+
+Returns:
+    ``(names, outside)``: all names inside the root (``path``
+    first) and the number of further names elsewhere.
+~~~
+
+**`_index`**
+
+~~~text
+_index(self) -> dict[tuple[int, int], list[str]]
+
+Return (and cache) the inode index of all multiply linked files.
+
+``_flat`` is included; ``_broken``, the shrink work folders and
+hidden directories are not.
+
+Returns:
+    Mapping ``(st_dev, st_ino)`` to paths.
+~~~
+
+**`target`**
+
+~~~text
+target(self, original: str, kind: str) -> str
+
+Return a free path for a name inside ``_broken``.
+
+Args:
+    original: Original path below the root.
+    kind: ``promising`` or ``hopeless``.
+
+Returns:
+    ``<root>/_broken/<folder>/<relative path>``; with ``.1``, ``.2``
+    ... before the extension if that name is taken.
+~~~
+
+**`inside`**
+
+~~~text
+inside(self, path: str) -> bool
+
+Tell whether a path is below the root but not in ``_broken``.
+
+Args:
+    path: Path to check.
+
+Returns:
+    True for a path that may be set aside.
+~~~
+
+**`collect`**
+
+~~~text
+collect(self, path: str, assessment: Assessment, reason: str) -> QuarantineItem
+
+Move a video with all its names into ``_broken`` and record it.
+
+Args:
+    path: Video below the root.
+    assessment: Its measurement (decides the class).
+    reason: Why it is set aside.
+
+Returns:
+    The new manifest entry.
+
+Raises:
+    ValueError: If the path is not below the root or already in ``_broken``.
+~~~
+
+**`restore`**
+
+~~~text
+restore(self, item: QuarantineItem) -> bool
+
+Move every name of a video back and keep shrink away from it.
+
+The video is recorded as failed (``BROKEN``, :attr:`KEPT_REASON`) in
+the shrink database of its directory, so shrink does not try it
+again while its size is unchanged.
+
+Args:
+    item: Open manifest entry.
+
+Returns:
+    True if every name is back; False if a name is occupied (that
+    name stays in ``_broken``; logged).
+~~~
+
+**`delete`**
+
+~~~text
+delete(self, item: QuarantineItem, remover: FileRemover) -> bool
+
+Remove every name of a set-aside video and forget its failure entry.
+
+Args:
+    item: Open manifest entry.
+    remover: Remover (trash or delete).
+
+Returns:
+    True if every name was removed.
+~~~
+
+**`install`**
+
+~~~text
+install(self, item: QuarantineItem, repaired: str, remover: FileRemover) -> bool
+
+Put a repaired video in place of a damaged one, under every name.
+
+The repaired file goes to the first original name, every further
+name becomes a hard link to it again; the damaged copies are removed
+and the new file is recorded as shrunk (it is HEVC already) in the
+databases of its directories (``_flat`` has none).
+
+Args:
+    item: Open manifest entry.
+    repaired: Validated repaired video (same file system).
+    remover: Remover for the damaged copies.
+
+Returns:
+    True if the repaired video is in place.
+~~~
+
+**`flat`**
+
+~~~text
+flat(path: str) -> bool
+
+Tell whether a name lies in a ``_flat`` directory.
+
+Args:
+    path: File path.
+
+Returns:
+    True if its directory is a ``_flat`` directory.
+~~~
+
+**`database`**
+
+~~~text
+database(self, path: str) -> ShrinkDatabase
+
+Return the shrink database of a video's directory.
+
+Args:
+    path: Video path.
+
+Returns:
+    The database object.
+~~~
+
+**`_close`**
+
+~~~text
+_close(self, item: QuarantineItem, state: str) -> None
+
+Set the final state of an entry and save the manifest.
+
+Args:
+    item: Manifest entry.
+    state: ``restored``, ``repaired`` or ``deleted``.
+~~~
+
+### `QuarantineItem` (`mediatools.broken.quarantine`) {.unnumbered}
+
+~~~text
+One damaged video that was set aside, with all its names.
+
+Attributes:
+    number: Running number within the manifest.
+    kind: ``promising`` or ``hopeless``.
+    names: ``[original, quarantined]`` pairs, one per hard link name;
+        the first pair is the name the video was found under.
+    assessment: Measurement at the time it was set aside.
+    reason: Why it was collected (e.g. the database entry).
+    state: ``open``, ``restored``, ``repaired`` or ``deleted``.
+    when: Local time it was set aside.
+    outside: Further hard link names outside the shrink root.
+~~~
+
+**`original`**
+
+~~~text
+original(self) -> str
+
+Return the path the video was found under.
+
+Returns:
+    Original path of the first name.
+~~~
+
+**`held`**
+
+~~~text
+held(self) -> str
+
+Return the path of the video inside the ``_broken`` directory.
+
+Returns:
+    Quarantined path of the first name.
+~~~
+
+**`to_dict`**
+
+~~~text
+to_dict(self) -> dict
+
+Return the manifest record.
+
+Returns:
+    Plain dictionary.
+~~~
+
+**`from_dict`**
+
+~~~text
+from_dict(cls, data: dict) -> QuarantineItem
+
+Rebuild an item from a manifest record.
+
+Args:
+    data: Record written by :meth:`to_dict`.
+
+Returns:
+    The item.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    number: int,
+    kind: str,
+    names: list[list[str]],
+    assessment: Assessment,
+    reason: str,
+    state: str = 'open',
+    when: str = <factory>,
+    outside: int = 0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `RepairEncoder` (`mediatools.broken.repairer`) {.unnumbered}
+
+~~~text
+Encodes what can be decoded of a damaged video into a clean HEVC file.
+
+The input is read with error tolerance (``-err_detect ignore_err``,
+``-fflags +discardcorrupt``): damaged packets are dropped and decoding
+goes on as far as the data reaches. The result is HEVC with the same
+quality settings as ``shrink``, so a repaired video is shrunk at the
+same time.
+
+Validation differs from :class:`HevcEncoder`: the output is shorter
+than the damaged input by design, so size and duration are not
+compared. It must have a video stream and - with a decode check - decode
+completely without a single error.
+~~~
+
+**`clone`**
+
+~~~text
+clone(self) -> RepairEncoder
+
+Return an encoder with the same settings.
+
+Returns:
+    A new repair encoder.
+~~~
+
+**`command`**
+
+~~~text
+command(self, src: str, dst: str) -> list[str]
+
+Build the ffmpeg command with error-tolerant input options.
+
+Args:
+    src: Damaged video.
+    dst: Output file.
+
+Returns:
+    Argument list for :func:`subprocess.run`.
+~~~
+
+**`validate`**
+
+~~~text
+validate(self, src: str, dst: str) -> bool
+
+Check that the output has video and decodes without errors.
+
+Args:
+    src: Damaged input.
+    dst: Repaired output.
+
+Returns:
+    True if the output is usable.
+~~~
+
+**`output_for`**
+
+~~~text
+output_for(held: str) -> str
+
+Return the work file of a repair next to the damaged video.
+
+Args:
+    held: Damaged video inside ``_broken``.
+
+Returns:
+    ``<folder>/repaired-<name>``; the extension, and with it the
+    container, stays the same.
+~~~
+
+### `BrokenReview` (`mediatools.broken.review`) {.unnumbered}
+
+~~~text
+Shows the damaged videos one by one and carries out the decision.
+
+Order: first the *promising* videos, the most usable first, each on its
+own; then the *hopeless* ones as a group (look at a few samples, delete
+all, or go through them one by one).
+
+Decisions for one video:
+
+* ``p`` play the damaged video,
+* ``r`` repair: encode the decodable part into a clean HEVC file, play
+  it, then accept it (it replaces the damaged video under all its
+  names) or discard it; advised from 50 % usable content on,
+* ``k`` keep: put it back unchanged (shrink then leaves it alone),
+* ``d`` delete: remove it under all its names and, if configured, mark
+  it in the downloader's database for a new download,
+* ``s`` skip, ``q`` quit.
+
+Attributes:
+    quarantine: The ``_broken`` directory of the root.
+    player: Player session.
+    remover: Remover for deleted videos.
+    repairer: Encoder for repairs.
+    downloader: Downloader database handler.
+    prompt: Prompt for the questions.
+    log: Logger.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    quarantine: Quarantine,
+    player: PlayerSession,
+    remover: FileRemover,
+    repairer: RepairEncoder,
+    downloader: DownloaderDatabase,
+    prompt: Prompt | None = None,
+)
+
+Wire the collaborators.
+
+Args:
+    quarantine: The ``_broken`` directory of the root.
+    player: Player session (or a test double).
+    remover: Remover for deleted videos.
+    repairer: Encoder for repairs.
+    downloader: Downloader database handler.
+    prompt: Prompt; a default :class:`Prompt` if None.
+~~~
+
+**`run`**
+
+~~~text
+run(self) -> int
+
+Review all open videos.
+
+Returns:
+    0, or 130 after Ctrl+C (players are closed, nothing else changes).
+~~~
+
+**`review_item`**
+
+~~~text
+review_item(self, item: QuarantineItem, title: str) -> bool
+
+Ask for the decision on one video and carry it out.
+
+Args:
+    item: Open manifest entry.
+    title: Position shown in the heading.
+
+Returns:
+    False if the user quits, otherwise True.
+~~~
+
+**`_show`**
+
+~~~text
+_show(self, item: QuarantineItem, title: str) -> None
+
+Log the facts the decision rests on.
+
+Args:
+    item: Manifest entry.
+    title: Heading.
+~~~
+
+**`play`**
+
+~~~text
+play(self, paths: list[str]) -> None
+
+Show videos in the player until the user presses Enter.
+
+Args:
+    paths: Videos to show.
+~~~
+
+**`repair`**
+
+~~~text
+repair(self, item: QuarantineItem) -> bool
+
+Repair a video, show the result and install it if accepted.
+
+Args:
+    item: Open manifest entry.
+
+Returns:
+    True if the repaired video replaced the damaged one.
+~~~
+
+**`delete`**
+
+~~~text
+delete(self, item: QuarantineItem, confirm: bool = True) -> bool
+
+Delete a video under all its names and ask the downloader for it again.
+
+Args:
+    item: Open manifest entry.
+    confirm: Ask before deleting.
+
+Returns:
+    True if it was deleted.
+~~~
+
+**`review_hopeless`**
+
+~~~text
+review_hopeless(self, items: list[QuarantineItem]) -> bool
+
+Handle the hopeless videos as a group.
+
+Args:
+    items: Open hopeless entries.
+
+Returns:
+    False if the user quits, otherwise True.
+~~~
+
+**`_progress`**
+
+~~~text
+_progress(fraction: float) -> None
+
+Show the progress of a repair on one terminal line.
+
+Args:
+    fraction: Encoded share 0..1 of the decodable part.
+~~~
+
+**`_remove_work`**
+
+~~~text
+_remove_work(path: str) -> None
+
+Remove a repair work file and its ffmpeg message file quietly.
+
+Args:
+    path: Work file.
 ~~~
 
 ## `mediatools.flatten`

@@ -368,8 +368,8 @@ def test_app_tabs_undo_about_and_close(root: tk.Tk, tmp_path: Path,
     app = MediaToolsApp(root, CommandCatalog(Cli().parser), FormStore(str(tmp_path / "g.json")),
                         ask=lambda _t, _x: answers.pop(0), refresh_ms=0)
     tabs = [app.notebook.tab(tab, "text") for tab in app.notebook.tabs()]
-    assert tabs == ["shrink", "update", "progress", "triage", "flatten", "sync", "rename-db",
-                    "where", "snapshot", "savings", "config", "files"]
+    assert tabs == ["shrink", "update", "progress", "triage", "broken", "flatten", "sync",
+                    "rename-db", "where", "snapshot", "savings", "config", "files"]
     app.undo_plan("/data/plans/p.json")
     assert app.forms["flatten"].values()["undo"] == "/data/plans/p.json"
     assert app.notebook.tab(app.notebook.select(), "text") == "flatten"

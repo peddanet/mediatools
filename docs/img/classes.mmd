@@ -23,6 +23,13 @@ classDiagram
   class FlatLinkResolver { +flat_names(p) }
   class FileRemover { +remove(p) }
   class KeptList { +contains(p) +add(paths) }
+  class BrokenCollector { +plan() +run(dry_run,ask) }
+  class BrokenFinder { +find() }
+  class Assessor { +assess(p) Assessment }
+  class Quarantine { +collect(p,a,r) +restore(i) +delete(i,rm) +install(i,f,rm) }
+  class BrokenReview { +run() +review_item(i) +repair(i) +delete(i) }
+  class RepairEncoder { +command(src,dst) +validate(src,dst) }
+  class DownloaderDatabase { +reset(video,root) }
   class Flattener { +analyse() FlatPlan +apply(plan) +undo(plan) }
   class FlatNamer { +name(parts) +disambiguate(n,rel) }
   class FlatIndex { +load() +save() }
@@ -42,6 +49,19 @@ classDiagram
   Cli --> ProgressReport
   Cli --> Triage
   Cli --> Flattener
+  Cli --> BrokenCollector
+  Cli --> BrokenReview
+  BrokenCollector --> BrokenFinder
+  BrokenCollector --> Assessor
+  BrokenCollector --> Quarantine
+  BrokenFinder --> ShrinkDatabase
+  Quarantine --> ShrinkDatabase
+  BrokenReview --> Quarantine
+  BrokenReview --> RepairEncoder
+  BrokenReview --> PlayerSession
+  BrokenReview --> FileRemover
+  BrokenReview --> DownloaderDatabase
+  RepairEncoder --|> HevcEncoder
   Cli --> Syncer
   Shrinker --> ShrinkDatabase
   Shrinker --> HevcEncoder

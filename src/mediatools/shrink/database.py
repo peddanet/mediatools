@@ -276,6 +276,21 @@ class ShrinkDatabase:
                 self._failures = {name: (int(size or 0), status) for name, size, status in rows}
         return self._failures
 
+    def failure_reason(self, name: str) -> str | None:
+        """Return the recorded reason of a failure.
+
+        Args:
+            name: File name in this directory.
+
+        Returns:
+            The reason text, or None if no failure is recorded.
+        """
+        if name not in self.failures():
+            return None
+        with self._connect() as conn:
+            row = conn.execute("SELECT reason FROM failures WHERE name = ?", (name,)).fetchone()
+        return row[0] if row else None
+
     def clear_failure(self, file_path: str) -> None:
         """Forget a recorded failure, e.g. after a successful retry.
 
