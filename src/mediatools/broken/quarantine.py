@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Callable
 
 from mediatools.broken.assessment import Assessment
+from mediatools.broken.backup import BackupMirror, BackupResult
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.shrink.database import ShrinkDatabase
 from mediatools.triage.remover import FileRemover
@@ -23,9 +26,12 @@ class QuarantineItem:
             the first pair is the name the video was found under.
         assessment: Measurement at the time it was set aside.
         reason: Why it was collected (e.g. the database entry).
-        state: ``open``, ``restored``, ``repaired`` or ``deleted``.
+        state: ``open``, ``restored`` (kept), ``released`` (not damaged,
+            back for shrink), ``recovered`` (replaced by the backup copy),
+            ``repaired`` or ``deleted``.
         when: Local time it was set aside.
         outside: Further hard link names outside the shrink root.
+        backup: Result of the backup check, or None if not checked yet.
     """
 
     number: int
@@ -36,6 +42,7 @@ class QuarantineItem:
     state: str = "open"
     when: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     outside: int = 0
+    backup: BackupResult | None = None
 
     @property
     def original(self) -> str:
@@ -63,7 +70,8 @@ class QuarantineItem:
         """
         return {"number": self.number, "kind": self.kind, "names": self.names,
                 "assessment": self.assessment.to_dict(), "reason": self.reason,
-                "state": self.state, "when": self.when, "outside": self.outside}
+                "state": self.state, "when": self.when, "outside": self.outside,
+                "backup": self.backup.to_dict() if self.backup else None}
 
     @classmethod
     def from_dict(cls, data: dict) -> QuarantineItem:
@@ -77,7 +85,8 @@ class QuarantineItem:
         """
         return cls(int(data["number"]), data["kind"], [list(pair) for pair in data["names"]],
                    Assessment.from_dict(data.get("assessment", {})), data.get("reason", ""),
-                   data.get("state", "open"), data.get("when", ""), int(data.get("outside", 0)))
+                   data.get("state", "open"), data.get("when", ""), int(data.get("outside", 0)),
+                   BackupResult.from_dict(data.get("backup")))
 
 
 class Quarantine:
@@ -296,20 +305,168 @@ class Quarantine:
             True if every name is back; False if a name is occupied (that
             name stays in ``_broken``; logged).
         """
-        complete = True
-        for original, held in item.names:
-            if os.path.lexists(original):
-                self.log.error("cannot restore, the name is taken: %s", original)
-                complete = False
-                continue
-            os.makedirs(os.path.dirname(original), exist_ok=True)
-            os.rename(held, original)
+        complete = self._move_back(item)
         if complete:
             database = self.database(item.original)
             database.ensure()
             database.record_failure(item.original, "BROKEN", self.KEPT_REASON)
             self._close(item, "restored")
         return complete
+
+    def release(self, item: QuarantineItem) -> bool:
+        """Move a video that is not damaged back and hand it to shrink again.
+
+        Unlike :meth:`restore` no failure is recorded; the old ``BROKEN``
+        entry is removed, so the next shrink run encodes the video.
+
+        Args:
+            item: Open manifest entry.
+
+        Returns:
+            True if every name is back.
+        """
+        if not self._move_back(item):
+            return False
+        for original, _held in item.names:
+            database = self.database(original)
+            if database.exists() and not self.flat(original):
+                database.clear_failure(original)
+        self._close(item, "released")
+        return True
+
+    def _move_back(self, item: QuarantineItem) -> bool:
+        """Move every name of a video back to its original place.
+
+        Args:
+            item: Manifest entry.
+
+        Returns:
+            True if every name is back; a taken name stays in ``_broken``.
+        """
+        complete = True
+        for original, held in item.names:
+            if os.path.lexists(original):
+                self.log.error("cannot move back, the name is taken: %s", original)
+                complete = False
+                continue
+            os.makedirs(os.path.dirname(original), exist_ok=True)
+            os.rename(held, original)
+        return complete
+
+    def reassess(self, item: QuarantineItem, assessment: Assessment) -> None:
+        """Store a new measurement; move the video if its class changed.
+
+        Args:
+            item: Open manifest entry.
+            assessment: New measurement.
+        """
+        kind = assessment.kind
+        if kind != item.kind:
+            for pair in item.names:
+                held = self.target(pair[0], kind)
+                os.makedirs(os.path.dirname(held), exist_ok=True)
+                os.rename(pair[1], held)
+                pair[1] = held
+            item.kind = kind
+        item.assessment = assessment
+        self.save()
+
+    def outdated(self, assess: Callable[[str], Assessment]) \
+            -> list[tuple[QuarantineItem, Assessment]]:
+        """Measure the open videos again whose measurement used an older method.
+
+        Args:
+            assess: Measurement of a file (e.g. :meth:`Assessor.assess`).
+
+        Returns:
+            ``(item, new measurement)`` pairs; nothing is stored yet.
+        """
+        old = [item for item in self.open_items() if not item.assessment.current]
+        renewed = []
+        for number, item in enumerate(old, 1):
+            self.log.info("measuring again with the current method %i/%i: %s", number, len(old),
+                          os.path.relpath(item.original, self.root))
+            renewed.append((item, assess(item.held)))
+        return renewed
+
+    def check_backup(self, backup: BackupMirror, items: list[QuarantineItem]) -> str | None:
+        """Look for intact copies of videos in the backup and record the results.
+
+        Args:
+            backup: Backup mirror.
+            items: Manifest entries to check.
+
+        Returns:
+            None after the check, or why the backup is not available.
+        """
+        reason = backup.unavailable(self.root)
+        if reason is not None or not items:
+            return reason
+        results = backup.check({item.original: [pair[0] for pair in item.names]
+                                for item in items})
+        for item in items:
+            self.note_backup(item, results[item.original])
+        return None
+
+    def note_backup(self, item: QuarantineItem, result: BackupResult) -> None:
+        """Store the result of the backup check of a video.
+
+        Args:
+            item: Manifest entry.
+            result: Result of :meth:`BackupMirror.check`.
+        """
+        item.backup = result
+        self.save()
+
+    def recover(self, item: QuarantineItem, remover: FileRemover) -> bool:
+        """Replace a damaged video by its intact copy from the backup.
+
+        The copy is written next to the first original name (same file
+        system), flushed to disk, checked for its size and renamed into
+        place; every further name becomes a hard link to it again. Then the
+        damaged copies are removed and the failure entries cleared, so the
+        next shrink run encodes the recovered original.
+
+        Args:
+            item: Open manifest entry with an intact backup copy.
+            remover: Remover for the damaged copies.
+
+        Returns:
+            True if the copy is in place.
+        """
+        if item.backup is None or not item.backup.intact:
+            self.log.error("no intact backup copy recorded for: %s", item.original)
+            return False
+        taken = [original for original, _held in item.names if os.path.lexists(original)]
+        if taken:
+            self.log.error("cannot put the backup copy in place, name taken: %s", taken[0])
+            return False
+        source = item.backup.path
+        os.makedirs(os.path.dirname(item.original), exist_ok=True)
+        work = os.path.join(os.path.dirname(item.original),
+                            f".{os.path.basename(item.original)}.recover")
+        try:
+            shutil.copy2(source, work)
+            with open(work, "rb") as handle:
+                os.fsync(handle.fileno())
+            if os.path.getsize(work) != os.path.getsize(source):
+                raise OSError("size of the copy differs from the backup")
+        except OSError as err:
+            self.log.error("copy from the backup failed (%s): %s", err, source)
+            if os.path.lexists(work):
+                os.remove(work)
+            return False
+        os.replace(work, item.original)
+        for original, _held in item.names[1:]:
+            os.makedirs(os.path.dirname(original), exist_ok=True)
+            os.link(item.original, original)
+        for original, held in item.names:
+            remover.remove(held)
+            database = self.database(original)
+            if database.exists() and not self.flat(original):
+                database.clear_failure(original)
+        self._close(item, "recovered")
+        return True
 
     def delete(self, item: QuarantineItem, remover: FileRemover) -> bool:
         """Remove every name of a set-aside video and forget its failure entry.
@@ -395,7 +552,7 @@ class Quarantine:
 
         Args:
             item: Manifest entry.
-            state: ``restored``, ``repaired`` or ``deleted``.
+            state: Final state, e.g. ``restored`` or ``deleted``.
         """
         item.state = state
         self.save()

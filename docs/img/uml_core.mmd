@@ -63,6 +63,7 @@ classDiagram
     +seconds
     +max_errors
     +timeout
+    +relevant(lines)
     +init(ffmpeg, seconds, max_errors, timeout)
     +command(path)
     +verify(path, timeout, niceness)
@@ -157,7 +158,12 @@ classDiagram
   class Prompt {
     +assume_yes
     +input
+    +ended
     +init(assume_yes, input_func)
+    +announce(question, choices, default)
+    -_read(shown)
+    +choose(question, choices, default, end)
+    +pause(message)
     +yes_no(question, default)
     +text(question, default)
   }
@@ -166,6 +172,7 @@ classDiagram
     +pid_file
     +stop_file
     +restart_file
+    +answer_file
     +status_file
     +console_file
     +last_poll
@@ -181,6 +188,8 @@ classDiagram
     +handover()
     +restart_requested()
     +clear_restart()
+    +answer_restart(text)
+    +restart_answer()
     +stop_requested(force)
     +active_pid()
     +active_log()

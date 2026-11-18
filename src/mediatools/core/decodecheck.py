@@ -33,6 +33,26 @@ class DecodeCheck:
     SECONDS = 10.0
     MAX_ERRORS = 10
     TIMEOUT = 300.0
+    # lines of the null muxer that takes the decoded frames (e.g. "non
+    # monotonically increasing dts"): they concern time stamps, not the data
+    MUXER_TAG = "[null @"
+
+    @classmethod
+    def relevant(cls, lines: list[str]) -> list[str]:
+        """Keep the error lines that concern the data of the video.
+
+        Lines of the ``null`` muxer at the end of the trial pipeline
+        (irregular time stamps) do not show damaged data; players play such
+        a video normally. They are left out.
+
+        Args:
+            lines: Message lines of ffmpeg.
+
+        Returns:
+            Stripped, non-empty lines that do not come from the null muxer.
+        """
+        return [line.strip() for line in lines
+                if line.strip() and cls.MUXER_TAG not in line]
 
     def __init__(self, ffmpeg: str = "ffmpeg", seconds: float = SECONDS,
                  max_errors: int = MAX_ERRORS, timeout: float = TIMEOUT) -> None:
@@ -97,7 +117,7 @@ class DecodeCheck:
                                  check=False, timeout=timeout)
         except subprocess.TimeoutExpired:
             return f"full decode did not finish within {timeout:.0f} s"
-        lines = [line.strip() for line in res.stderr.splitlines() if line.strip()]
+        lines = self.relevant(res.stderr.splitlines())
         if lines:
             return f"{len(lines)} decoder error line(s), first: {lines[0][:200]}"
         if res.returncode != 0:
@@ -111,8 +131,9 @@ class DecodeCheck:
             path: Video file.
 
         Returns:
-            Number of non-empty lines ffmpeg wrote at log level ``error``,
-            or None if ffmpeg is missing or the trial timed out.
+            Number of non-empty lines ffmpeg wrote at log level ``error``
+            (without those of the null muxer, see :meth:`relevant`), or
+            None if ffmpeg is missing or the trial timed out.
         """
         if shutil.which(self.ffmpeg) is None:
             return None
@@ -121,7 +142,7 @@ class DecodeCheck:
                                  errors="replace", check=False, timeout=self.timeout)
         except subprocess.TimeoutExpired:
             return None
-        return sum(1 for line in res.stderr.splitlines() if line.strip())
+        return len(self.relevant(res.stderr.splitlines()))
 
     def unusable(self, path: str) -> int | None:
         """Tell whether a video's data cannot be decoded.

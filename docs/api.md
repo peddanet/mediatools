@@ -269,12 +269,19 @@ Returns:
 **`cmd_reload`**
 
 ~~~text
-cmd_reload(_args: argparse.Namespace) -> int
+cmd_reload(_args: argparse.Namespace, wait: float = 10.0) -> int
 
 Run ``mediatools reload``: ask the running shrink to switch releases.
 
+Waits up to ``wait`` seconds for the job's answer (accepted, or
+rejected with the reason) and prints it.
+
+Args:
+    wait: Seconds to wait for the answer.
+
 Returns:
-    0 if a running shrink was asked, 1 if none runs.
+    0 if a running shrink accepted or has not answered yet, 1 if
+    none runs or it rejected the request.
 ~~~
 
 **`cmd_status`**
@@ -371,19 +378,13 @@ Raises:
 ~~~text
 cmd_broken(self, args: argparse.Namespace) -> int
 
-Run ``mediatools broken``.
-
-Without ``--collect`` or ``--review`` the open videos of
-``_broken`` are listed.
+Run ``mediatools broken`` (see :class:`BrokenCommand`).
 
 Args:
     args: Parsed arguments.
 
 Returns:
     Exit code.
-
-Raises:
-    SystemExit: If ``--review`` is not started from a terminal.
 ~~~
 
 **`cmd_flatten`**
@@ -1120,6 +1121,24 @@ Attributes:
     timeout: Seconds after which the trial is abandoned (result unknown).
 ~~~
 
+**`relevant`**
+
+~~~text
+relevant(cls, lines: list[str]) -> list[str]
+
+Keep the error lines that concern the data of the video.
+
+Lines of the ``null`` muxer at the end of the trial pipeline
+(irregular time stamps) do not show damaged data; players play such
+a video normally. They are left out.
+
+Args:
+    lines: Message lines of ffmpeg.
+
+Returns:
+    Stripped, non-empty lines that do not come from the null muxer.
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -1193,8 +1212,9 @@ Args:
     path: Video file.
 
 Returns:
-    Number of non-empty lines ffmpeg wrote at log level ``error``,
-    or None if ffmpeg is missing or the trial timed out.
+    Number of non-empty lines ffmpeg wrote at log level ``error``
+    (without those of the null muxer, see :meth:`relevant`), or
+    None if ffmpeg is missing or the trial timed out.
 ~~~
 
 **`unusable`**
@@ -1875,6 +1895,14 @@ Attributes:
     written: Output bytes of the job's shrunk files before this process.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -1914,9 +1942,16 @@ Interactive yes/no and text questions.
 With ``assume_yes=True`` every yes/no question is answered with yes
 (used by ``--yes`` options); ``input_func`` can be replaced in tests.
 
+**GUI.** When the GUI runs the command it sets the environment variable
+:attr:`GUI_ENV`. Before every question a single line starting with
+:attr:`MARKER` and followed by JSON (question, choices, default) is then
+printed; the GUI hides that line and shows the question as a dialog
+with one button per choice, whose click sends the answer as if typed.
+
 Attributes:
     assume_yes: Answer every yes/no question with yes.
     input: Function used to read an answer.
+    ended: True once the input has ended (no further answers).
 ~~~
 
 **`__init__`**
@@ -1929,6 +1964,68 @@ Configure the prompt.
 Args:
     assume_yes: Answer every yes/no question with yes.
     input_func: Function that shows a prompt and returns the answer.
+~~~
+
+**`announce`**
+
+~~~text
+announce(cls, question: str, choices: list[tuple[str, str]], default: str) -> None
+
+Print the machine-readable form of a question for the GUI.
+
+Args:
+    question: Question text.
+    choices: ``(answer, label)`` pairs.
+    default: Answer of the default button.
+~~~
+
+**`_read`**
+
+~~~text
+_read(self, shown: str) -> str | None
+
+Read one answer.
+
+Args:
+    shown: Prompt text.
+
+Returns:
+    The answer, or None at the end of input (also sets :attr:`ended`).
+~~~
+
+**`choose`**
+
+~~~text
+choose(
+    self,
+    question: str,
+    choices: list[tuple[str, str]],
+    default: str,
+    end: str,
+) -> str
+
+Ask for one of several one-letter answers until a valid one is given.
+
+Args:
+    question: Question text (may be empty).
+    choices: ``(answer, label)`` pairs, e.g. ``("p", "play")``.
+    default: Answer for empty input.
+    end: Answer at the end of input (e.g. quit), so a closed input
+        never loops.
+
+Returns:
+    One of the answers of ``choices``.
+~~~
+
+**`pause`**
+
+~~~text
+pause(self, message: str) -> None
+
+Wait until the user confirms (Enter, or the GUI button).
+
+Args:
+    message: What the user confirms.
 ~~~
 
 **`yes_no`**
@@ -1996,6 +2093,7 @@ Attributes:
     pid_file: Path of the PID file (PID and log file path).
     stop_file: Path of the stop-request file.
     restart_file: Path of the restart-request file.
+    answer_file: The job's answer to the last restart request.
     status_file: Path of the progress status file.
     console_file: Terminal output of a job in the background.
     last_poll: Monotonic time of the last check for the stop file.
@@ -2104,6 +2202,28 @@ Returns:
 clear_restart(self) -> None
 
 Drop a restart request that cannot be served.
+~~~
+
+**`answer_restart`**
+
+~~~text
+answer_restart(self, text: str) -> None
+
+Record the job's answer to a restart request (for reload and status).
+
+Args:
+    text: Answer, e.g. ``accepted: ...`` or ``rejected: ...``.
+~~~
+
+**`restart_answer`**
+
+~~~text
+restart_answer(self) -> str | None
+
+Return the job's answer to the last restart request.
+
+Returns:
+    The answer line, or None if the job has not answered.
 ~~~
 
 **`stop_requested`**
@@ -2247,7 +2367,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.7.0') -> None
+__init__(self, control: RunControl, installed: str = '1.7.1') -> None
 
 Remember the job and the installed release.
 
@@ -2372,7 +2492,7 @@ Ask the installed release for its version.
 
 Returns:
     Version string, e.g. ``1.2.11``, or None if it does not start or
-    answers unexpectedly.
+    answers unexpectedly (the reason is in :attr:`last_error`).
 ~~~
 
 **`execute`**
@@ -2468,6 +2588,14 @@ Attributes:
     last: Monotonic time of the last update.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -2511,7 +2639,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.7.0')
+__init__(self, package_dir: str | None = None, version: str = '1.7.1')
 
 Locate the imported package.
 
@@ -3141,6 +3269,14 @@ Attributes:
     took: Wall-clock seconds spent on the file.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -3292,6 +3428,14 @@ Return the progress as text.
 
 Returns:
     E.g. ``37.2 %``, or ``not planned yet`` for a job from an old log.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -3626,6 +3770,22 @@ Returns:
     True if the file is part of the job's set.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -3671,14 +3831,6 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
 ~~~
 
 ### `ReplaceJournal` (`mediatools.shrink.journal`) {.unnumbered}
@@ -3871,6 +4023,14 @@ Args:
     row: Ledger entry.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -3975,6 +4135,14 @@ Args:
 
 Returns:
     The entry, or None for a comment or a damaged line.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -4159,6 +4327,22 @@ Raises:
         negative or ``jobs`` below 1.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -4208,14 +4392,6 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
 ~~~
 
 ### `ShrinkPlanner` (`mediatools.shrink.planner`) {.unnumbered}
@@ -4772,6 +4948,14 @@ Args:
     when: Time the file was finished.
     src: Source bytes.
     out: Output bytes.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -5506,6 +5690,10 @@ Args:
 _poll_restart(self) -> None
 
 Turn a request of ``mediatools reload`` into a switch before the next file.
+
+The answer is written for ``mediatools reload`` and ``status``
+(:meth:`RunControl.answer_restart`), so a request that cannot be
+served is never lost silently.
 ~~~
 
 **`_mark_stopping`**
@@ -5588,6 +5776,14 @@ Attributes:
         before the replacement (for the ledger).
 ~~~
 
+**`__annotate_func__`**
+
+~~~text
+__annotate_func__(format)
+
+
+~~~
+
 ### `RunningEncode` (`mediatools.shrink.slottable`) {.unnumbered}
 
 ~~~text
@@ -5604,6 +5800,14 @@ Attributes:
     started: Monotonic start time.
     cell: ``[name, encoded fraction, size]`` for the display; the
         worker thread updates the fraction.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -6234,6 +6438,10 @@ VLC is started with ``--no-one-instance --no-playlist-enqueue`` so that
 each file gets its own process even if "allow only one instance" is set
 in the VLC preferences.
 
+With sound, an optional ``volume`` (percent) starts the player quietly:
+VLC 3 has no start volume option any more and gets ``--gain`` (audio
+gain, 1.0 = unchanged), mpv gets ``--volume``.
+
 Attributes:
     argv: Player command prefix; the file path is appended.
     start_window: Seconds after start in which an exit counts as error.
@@ -6250,6 +6458,7 @@ __init__(
     audio: bool = False,
     start_window: float = 3.0,
     stagger: float = 0.3,
+    volume: int | None = None,
 )
 
 Configure the session.
@@ -6259,12 +6468,13 @@ Args:
     audio: Play with sound.
     start_window: Seconds after start in which an exit is an error.
     stagger: Pause between two player starts in seconds.
+    volume: Start volume in percent with sound; None = player default.
 ~~~
 
 **`build_argv`**
 
 ~~~text
-build_argv(player: str, audio: bool) -> list[str]
+build_argv(player: str, audio: bool, volume: int | None = None) -> list[str]
 
 Build the player command with safe defaults for VLC and mpv.
 
@@ -6272,6 +6482,7 @@ Args:
     player: Player command; may contain arguments
         (e.g. ``flatpak run org.videolan.VLC``).
     audio: Play with sound.
+    volume: Start volume in percent with sound; None = player default.
 
 Returns:
     Argument list without the file path.
@@ -6609,6 +6820,10 @@ Attributes:
     still: Seconds of the decoded part with a frozen or black picture.
     errors: Number of error lines of the decoder.
     note: First error message or the reason why the file did not open.
+    method: Version of the measurement; 1 (mediatools 1.7.0) counted
+        the time stamp lines of the null muxer as errors and decoded
+        the picture only, 2 (since 1.7.1) does not and decodes the
+        sound as well.
 ~~~
 
 **`decoded_share`**
@@ -6642,6 +6857,30 @@ Class of the video.
 
 Returns:
     ``hopeless`` or ``promising``.
+~~~
+
+**`healthy`**
+
+~~~text
+healthy(self) -> bool
+
+Tell whether the video is not damaged at all (a false alarm).
+
+Returns:
+    True if it opens, at least :attr:`HEALTHY_FROM` of its duration
+    decodes, no decoder error was reported and the picture is not
+    mostly still (class ``promising``).
+~~~
+
+**`current`**
+
+~~~text
+current(self) -> bool
+
+Tell whether the measurement used the current method.
+
+Returns:
+    True if :attr:`method` is :attr:`METHOD`.
 ~~~
 
 **`repair_advised`**
@@ -6688,7 +6927,16 @@ Args:
     data: Dictionary written by :meth:`to_dict`.
 
 Returns:
-    The assessment; unknown keys are ignored.
+    The assessment; unknown keys are ignored, a record without
+    ``method`` was written by mediatools 1.7.0 (method 1).
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -6702,6 +6950,7 @@ __init__(
     still: float = 0.0,
     errors: int = 0,
     note: str = '',
+    method: int = 2,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -6726,10 +6975,11 @@ Return self==value.
 ### `Assessor` (`mediatools.broken.assessor`) {.unnumbered}
 
 ~~~text
-Decodes the video stream of a file once and measures it.
+Decodes a file once and measures it.
 
-One ffmpeg run decodes the first video stream to nothing (``-f null``)
-and passes it through two filters of ffmpeg:
+One ffmpeg run decodes the first video stream and every audio stream to
+nothing (``-f null``) and passes the picture through two filters of
+ffmpeg:
 
 * ``freezedetect`` reports intervals in which the picture does not
   change (a grey or otherwise still image),
@@ -6742,6 +6992,8 @@ line, so errors can be counted while the filters report at level info.
 Still intervals of both filters are merged before they are added up, so
 a black frozen part counts once. A freeze that lasts until the end is
 reported by ffmpeg only with its start; it is closed at the decoded end.
+Lines of the null muxer (irregular time stamps) are not counted as
+errors (:meth:`DecodeCheck.relevant`): they do not show damaged data.
 
 The run is read-only and uses the lowest CPU priority (``nice`` 19).
 
@@ -6859,6 +7111,265 @@ Returns:
     The text, at most 200 characters.
 ~~~
 
+### `BackupMirror` (`mediatools.broken.backup`) {.unnumbered}
+
+~~~text
+The backup disk as a mirror of a source directory (normally the home).
+
+The backup holds the source directory under the same relative paths:
+``<source>/a/b.mp4`` is ``<backup>/a/b.mp4``. For every damaged video
+the check runs in two passes:
+
+1. **Mirror:** the same relative path of each of its names.
+2. **Search:** videos without a copy there are noted and looked up
+   afterwards by file name in the *whole* backup tree (one walk for all
+   of them), because files may have moved since the backup was made.
+
+A copy counts only if it decodes completely without a decoder error
+(:meth:`DecodeCheck.verify`, all streams, lowest CPU priority): a
+download that was cut off may have reached the backup in the same
+state. Of several copies the largest intact one wins.
+
+The backup is only read, never written. Before the check the disk must
+be available (:meth:`unavailable`): the backup directory exists, lies
+on another file system than the collection (an empty mount point
+belongs to the system disk) and holds the mirror of the shrink root (a
+locked encrypted directory shows only scrambled names).
+
+Attributes:
+    backup: Backup directory (mirror of :attr:`source`), or None.
+    source: Directory the backup mirrors.
+    log: Logger.
+    decode: Full decode check.
+    probe: Probe for the duration (time limit of the decode).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    backup: str | None,
+    source: str,
+    logger,
+    decode: DecodeCheck | None = None,
+    probe: MediaProbe | None = None,
+)
+
+Configure the mirror.
+
+Args:
+    backup: Backup directory, or None if none is configured.
+    source: Directory the backup mirrors.
+    logger: :class:`logging.Logger`.
+    decode: Decode check; a new one if None.
+    probe: Probe; a new one if None.
+~~~
+
+**`mirror`**
+
+~~~text
+mirror(self, path: str) -> str | None
+
+Return the mirrored path of a file.
+
+Args:
+    path: File below :attr:`source`.
+
+Returns:
+    Its path in the backup, or None if it is not below the source
+    or no backup is configured.
+~~~
+
+**`unavailable`**
+
+~~~text
+unavailable(self, root: str) -> str | None
+
+Tell why the backup cannot be checked now.
+
+Args:
+    root: Shrink root (its mirror must exist).
+
+Returns:
+    None if the check can run, otherwise the reason.
+~~~
+
+**`check`**
+
+~~~text
+check(self, names: dict[str, list[str]]) -> dict[str, BackupResult]
+
+Look for intact copies of damaged videos.
+
+Args:
+    names: For each video (key: its first original path) the
+        original paths of all its names.
+
+Returns:
+    Result per key. The caller has checked :meth:`unavailable`.
+~~~
+
+**`_index`**
+
+~~~text
+_index(self, wanted: set[str]) -> dict[str, list[str]]
+
+Walk the whole backup once and collect the files with wanted names.
+
+Args:
+    wanted: File names to look for.
+
+Returns:
+    Mapping file name to paths in the backup.
+~~~
+
+**`_judge`**
+
+~~~text
+_judge(self, copies: list[str], found_by: str) -> BackupResult
+
+Decode the copies, largest first, until one is intact.
+
+Args:
+    copies: Candidate files in the backup.
+    found_by: ``mirror`` or ``search``.
+
+Returns:
+    ``intact`` with the first clean copy, else ``damaged`` with the
+    reason of the first copy.
+~~~
+
+**`device`**
+
+~~~text
+device(path: str) -> int
+
+Return the device (file system) of a path.
+
+Args:
+    path: Existing path.
+
+Returns:
+    ``st_dev`` of the path.
+~~~
+
+**`_size`**
+
+~~~text
+_size(path: str) -> int
+
+Return the size of a file, 0 if it cannot be read.
+
+Args:
+    path: File.
+
+Returns:
+    Size in bytes.
+~~~
+
+### `BackupResult` (`mediatools.broken.backup`) {.unnumbered}
+
+~~~text
+What the backup holds of one video.
+
+Attributes:
+    state: ``intact`` (a copy decodes completely without errors),
+        ``damaged`` (copies exist, none decodes cleanly) or ``missing``
+        (no copy under the mirrored path nor anywhere else by name).
+    path: The intact copy, or the first damaged one; empty if missing.
+    found_by: ``mirror`` (same relative path) or ``search`` (same file
+        name elsewhere in the backup); empty if missing.
+    note: Why the copies were rejected, or a short remark.
+    checked: Local time of the check.
+~~~
+
+**`intact`**
+
+~~~text
+intact(self) -> bool
+
+Tell whether an intact copy exists.
+
+Returns:
+    True for state ``intact``.
+~~~
+
+**`summary`**
+
+~~~text
+summary(self) -> str
+
+Describe the result in one line.
+
+Returns:
+    Text such as ``intact copy (same path)``.
+~~~
+
+**`to_dict`**
+
+~~~text
+to_dict(self) -> dict
+
+Return the fields for the manifest.
+
+Returns:
+    Plain dictionary.
+~~~
+
+**`from_dict`**
+
+~~~text
+from_dict(cls, data: dict | None) -> BackupResult | None
+
+Rebuild a result from the manifest.
+
+Args:
+    data: Dictionary written by :meth:`to_dict`, or None.
+
+Returns:
+    The result, or None if there is none.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    state: str,
+    path: str = '',
+    found_by: str = '',
+    note: str = '',
+    checked: str = <factory>,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
 ### `BrokenCollector` (`mediatools.broken.collector`) {.unnumbered}
 
 ~~~text
@@ -6866,16 +7377,25 @@ Measures every damaged video, shows the plan and moves the videos.
 
 Steps: find (:class:`BrokenFinder`), measure each video once
 (:class:`Assessor`, a full trial decode at the lowest CPU priority),
-list the class and the measurement of each video, ask, and move the
-videos with all their names into ``_broken`` (:class:`Quarantine`).
-Videos that are already set aside are left out, and so are videos whose
+list the class and the measurement of each video, ask, move the videos
+with all their names into ``_broken`` (:class:`Quarantine`) and check
+the backup for intact copies (:class:`BackupMirror`, read only; also in
+a dry run).
+
+A video that turns out **not to be damaged** (a false alarm, e.g. only
+irregular time stamps) is not moved; its ``BROKEN`` entry is removed so
+shrink encodes it again. Videos already set aside that were measured by
+an older method are measured again; those not damaged go back.
+
+Videos already set aside are not collected twice, and videos whose
 output lies in shrink's work folder (an encode runs or waits for
-recovery).
+recovery) stay in place.
 
 Attributes:
     quarantine: The ``_broken`` directory of the root.
     finder: Source of damaged videos.
     assessor: Measurement.
+    backup: Backup mirror, or None to skip the backup check.
     prompt: Prompt for the confirmation.
     log: Logger.
 ~~~
@@ -6888,6 +7408,7 @@ __init__(
     quarantine: Quarantine,
     finder: BrokenFinder,
     assessor: Assessor,
+    backup: BackupMirror | None = None,
     prompt: Prompt | None = None,
 )
 
@@ -6897,6 +7418,7 @@ Args:
     quarantine: The ``_broken`` directory of the root.
     finder: Source of damaged videos.
     assessor: Measurement.
+    backup: Backup mirror, or None to skip the backup check.
     prompt: Prompt; a default :class:`Prompt` if None.
 ~~~
 
@@ -6936,11 +7458,140 @@ run(self, dry_run: bool = False, ask: bool = True) -> int
 Set the damaged videos aside.
 
 Args:
-    dry_run: Only measure and list.
+    dry_run: Only measure, check the backup and list.
     ask: Ask before moving.
 
 Returns:
     0.
+~~~
+
+**`remeasure`**
+
+~~~text
+remeasure(self, dry_run: bool) -> None
+
+Measure set-aside videos again whose measurement used an older method.
+
+Those that are not damaged go back (to shrink); the others keep
+their place, moved to the folder of their new class if it changed.
+
+Args:
+    dry_run: Only measure and report.
+~~~
+
+**`clear_false_alarms`**
+
+~~~text
+clear_false_alarms(
+    self,
+    healthy: list[tuple[str, str, Assessment]],
+    dry_run: bool,
+) -> None
+
+Remove the BROKEN entries of videos that are not damaged.
+
+Args:
+    healthy: ``(path, reason, assessment)`` of videos that decode
+        completely without a decoder error.
+    dry_run: Only report.
+~~~
+
+**`check_backup`**
+
+~~~text
+check_backup(self) -> None
+
+Check the backup for every set-aside video not checked yet.
+~~~
+
+**`preview_backup`**
+
+~~~text
+preview_backup(self, paths: list[str]) -> None
+
+Check the backup for videos that are not moved yet (dry run).
+
+Args:
+    paths: Damaged videos in their places.
+~~~
+
+### `BrokenCommand` (`mediatools.broken.command`) {.unnumbered}
+
+~~~text
+Carries out ``mediatools broken`` with its options.
+
+Order: ``--collect`` (measure, set aside, check the backup),
+``--backup-check`` (check every set-aside video again), ``--review``
+(decide video by video, in a terminal or in the GUI). Without any of
+them the set-aside videos are listed with a hint.
+
+Attributes:
+    config: Configuration.
+    root: Shrink root.
+    need: Checks that programs exist (raises SystemExit otherwise).
+    preset: x265 preset for repairs.
+    runlog: Log of this run.
+    quarantine: The ``_broken`` directory of the root.
+    backup: Backup mirror (``[broken] backup``, ``backup_of``).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, config: Config, root: str, need: Callable[..., None], preset: str)
+
+Prepare the run.
+
+Args:
+    config: Configuration.
+    root: Shrink root.
+    need: Checks that programs exist.
+    preset: x265 preset for repairs.
+~~~
+
+**`run`**
+
+~~~text
+run(self, args: argparse.Namespace) -> int
+
+Run the command.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    Exit code.
+
+Raises:
+    SystemExit: If ``--dry-run`` is given without ``--collect``.
+~~~
+
+**`listing`**
+
+~~~text
+listing(self) -> int
+
+List the set-aside videos with a hint how to go on.
+
+Returns:
+    0.
+~~~
+
+**`review`**
+
+~~~text
+review(self, args: argparse.Namespace) -> int
+
+Go through the set-aside videos.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    Exit code of the review.
+
+Raises:
+    SystemExit: If it runs neither in a terminal nor in the GUI.
 ~~~
 
 ### `DownloaderDatabase` (`mediatools.broken.downloaderdb`) {.unnumbered}
@@ -7318,6 +7969,114 @@ Returns:
     name stays in ``_broken``; logged).
 ~~~
 
+**`release`**
+
+~~~text
+release(self, item: QuarantineItem) -> bool
+
+Move a video that is not damaged back and hand it to shrink again.
+
+Unlike :meth:`restore` no failure is recorded; the old ``BROKEN``
+entry is removed, so the next shrink run encodes the video.
+
+Args:
+    item: Open manifest entry.
+
+Returns:
+    True if every name is back.
+~~~
+
+**`_move_back`**
+
+~~~text
+_move_back(self, item: QuarantineItem) -> bool
+
+Move every name of a video back to its original place.
+
+Args:
+    item: Manifest entry.
+
+Returns:
+    True if every name is back; a taken name stays in ``_broken``.
+~~~
+
+**`reassess`**
+
+~~~text
+reassess(self, item: QuarantineItem, assessment: Assessment) -> None
+
+Store a new measurement; move the video if its class changed.
+
+Args:
+    item: Open manifest entry.
+    assessment: New measurement.
+~~~
+
+**`outdated`**
+
+~~~text
+outdated(
+    self,
+    assess: Callable[[str], Assessment],
+) -> list[tuple[QuarantineItem, Assessment]]
+
+Measure the open videos again whose measurement used an older method.
+
+Args:
+    assess: Measurement of a file (e.g. :meth:`Assessor.assess`).
+
+Returns:
+    ``(item, new measurement)`` pairs; nothing is stored yet.
+~~~
+
+**`check_backup`**
+
+~~~text
+check_backup(self, backup: BackupMirror, items: list[QuarantineItem]) -> str | None
+
+Look for intact copies of videos in the backup and record the results.
+
+Args:
+    backup: Backup mirror.
+    items: Manifest entries to check.
+
+Returns:
+    None after the check, or why the backup is not available.
+~~~
+
+**`note_backup`**
+
+~~~text
+note_backup(self, item: QuarantineItem, result: BackupResult) -> None
+
+Store the result of the backup check of a video.
+
+Args:
+    item: Manifest entry.
+    result: Result of :meth:`BackupMirror.check`.
+~~~
+
+**`recover`**
+
+~~~text
+recover(self, item: QuarantineItem, remover: FileRemover) -> bool
+
+Replace a damaged video by its intact copy from the backup.
+
+The copy is written next to the first original name (same file
+system), flushed to disk, checked for its size and renamed into
+place; every further name becomes a hard link to it again. Then the
+damaged copies are removed and the failure entries cleared, so the
+next shrink run encodes the recovered original.
+
+Args:
+    item: Open manifest entry with an intact backup copy.
+    remover: Remover for the damaged copies.
+
+Returns:
+    True if the copy is in place.
+~~~
+
 **`delete`**
 
 ~~~text
@@ -7391,7 +8150,7 @@ Set the final state of an entry and save the manifest.
 
 Args:
     item: Manifest entry.
-    state: ``restored``, ``repaired`` or ``deleted``.
+    state: Final state, e.g. ``restored`` or ``deleted``.
 ~~~
 
 ### `QuarantineItem` (`mediatools.broken.quarantine`) {.unnumbered}
@@ -7406,9 +8165,12 @@ Attributes:
         the first pair is the name the video was found under.
     assessment: Measurement at the time it was set aside.
     reason: Why it was collected (e.g. the database entry).
-    state: ``open``, ``restored``, ``repaired`` or ``deleted``.
+    state: ``open``, ``restored`` (kept), ``released`` (not damaged,
+        back for shrink), ``recovered`` (replaced by the backup copy),
+        ``repaired`` or ``deleted``.
     when: Local time it was set aside.
     outside: Further hard link names outside the shrink root.
+    backup: Result of the backup check, or None if not checked yet.
 ~~~
 
 **`original`**
@@ -7458,6 +8220,14 @@ Returns:
     The item.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -7471,6 +8241,7 @@ __init__(
     state: str = 'open',
     when: str = <factory>,
     outside: int = 0,
+    backup: BackupResult | None = None,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -7571,18 +8342,29 @@ Returns:
 Shows the damaged videos one by one and carries out the decision.
 
 Order: first the *promising* videos, the most usable first, each on its
-own; then the *hopeless* ones as a group (look at a few samples, delete
-all, or go through them one by one).
+own; then the *hopeless* ones as a group (look at a few samples, act on
+all, or go through them one by one). A video measured by an older
+method is measured again first; one that turns out not to be damaged is
+offered to be put back for shrink.
+
+**Backup first.** Nothing is repaired or deleted before the backup was
+checked (:class:`BackupMirror`): repairing and deleting are offered
+only once the check found no intact copy. With an intact copy the
+video is recovered from the backup instead. If the backup disk is not
+mounted, the review asks for it and checks again on request.
 
 Decisions for one video:
 
 * ``p`` play the damaged video,
+* ``c`` check the backup (offered until checked),
+* ``b`` recover from the backup (only with an intact copy),
 * ``r`` repair: encode the decodable part into a clean HEVC file, play
-  it, then accept it (it replaces the damaged video under all its
-  names) or discard it; advised from 50 % usable content on,
-* ``k`` keep: put it back unchanged (shrink then leaves it alone),
-* ``d`` delete: remove it under all its names and, if configured, mark
-  it in the downloader's database for a new download,
+  it, then accept or discard it (only without an intact copy),
+* ``k`` keep: put it back unchanged; a video that is not damaged goes
+  back to shrink, a damaged one is left alone by shrink,
+* ``d`` delete under all names and, if configured, mark it in the
+  downloader's database for a new download (only without an intact
+  copy),
 * ``s`` skip, ``q`` quit.
 
 Attributes:
@@ -7591,6 +8373,8 @@ Attributes:
     remover: Remover for deleted videos.
     repairer: Encoder for repairs.
     downloader: Downloader database handler.
+    backup: Backup mirror.
+    assessor: Measurement for videos measured by an older method.
     prompt: Prompt for the questions.
     log: Logger.
 ~~~
@@ -7605,6 +8389,8 @@ __init__(
     remover: FileRemover,
     repairer: RepairEncoder,
     downloader: DownloaderDatabase,
+    backup: BackupMirror,
+    assessor: Assessor | None = None,
     prompt: Prompt | None = None,
 )
 
@@ -7616,6 +8402,8 @@ Args:
     remover: Remover for deleted videos.
     repairer: Encoder for repairs.
     downloader: Downloader database handler.
+    backup: Backup mirror.
+    assessor: Measurement; a new one if None.
     prompt: Prompt; a default :class:`Prompt` if None.
 ~~~
 
@@ -7628,6 +8416,28 @@ Review all open videos.
 
 Returns:
     0, or 130 after Ctrl+C (players are closed, nothing else changes).
+~~~
+
+**`remeasure`**
+
+~~~text
+remeasure(self) -> None
+
+Measure the videos again whose measurement used an older method.
+~~~
+
+**`choices`**
+
+~~~text
+choices(self, item: QuarantineItem) -> tuple[list[str], str]
+
+Return the decisions open for a video and the advised one.
+
+Args:
+    item: Open manifest entry.
+
+Returns:
+    ``(answers, default)``.
 ~~~
 
 **`review_item`**
@@ -7645,6 +8455,18 @@ Returns:
     False if the user quits, otherwise True.
 ~~~
 
+**`_act`**
+
+~~~text
+_act(self, item: QuarantineItem, answer: str) -> None
+
+Carry out one decision.
+
+Args:
+    item: Open manifest entry.
+    answer: One of the keys of :attr:`LABELS` except s and q.
+~~~
+
 **`_show`**
 
 ~~~text
@@ -7657,12 +8479,40 @@ Args:
     title: Heading.
 ~~~
 
+**`keep`**
+
+~~~text
+keep(self, item: QuarantineItem) -> bool
+
+Put a video back: to shrink if it is not damaged, else left alone.
+
+Args:
+    item: Open manifest entry.
+
+Returns:
+    True if every name is back.
+~~~
+
+**`check_backup`**
+
+~~~text
+check_backup(self, items: list[QuarantineItem]) -> bool
+
+Look for intact copies of videos in the backup and record the results.
+
+Args:
+    items: Open manifest entries.
+
+Returns:
+    False if the backup is not available (the reason is logged).
+~~~
+
 **`play`**
 
 ~~~text
 play(self, paths: list[str]) -> None
 
-Show videos in the player until the user presses Enter.
+Show videos in the player until the user confirms.
 
 Args:
     paths: Videos to show.
@@ -7689,6 +8539,8 @@ delete(self, item: QuarantineItem, confirm: bool = True) -> bool
 
 Delete a video under all its names and ask the downloader for it again.
 
+Refused unless the backup was checked and holds no intact copy.
+
 Args:
     item: Open manifest entry.
     confirm: Ask before deleting.
@@ -7711,15 +8563,41 @@ Returns:
     False if the user quits, otherwise True.
 ~~~
 
+**`_group_action`**
+
+~~~text
+_group_action(
+    self,
+    answer: str,
+    items: list[QuarantineItem],
+    unchecked: list[QuarantineItem],
+    intact: list[QuarantineItem],
+    lost: list[QuarantineItem],
+) -> bool
+
+Carry out one decision on the hopeless group.
+
+Args:
+    answer: v, c, b, a or o.
+    items: Open hopeless entries.
+    unchecked: Those not checked against the backup.
+    intact: Those with an intact backup copy.
+    lost: Those checked without an intact copy.
+
+Returns:
+    False if the user quit while going one by one.
+~~~
+
 **`_progress`**
 
 ~~~text
-_progress(fraction: float) -> None
+_progress(fraction: float, shown: list[int]) -> None
 
-Show the progress of a repair on one terminal line.
+Show the progress of a repair in steps of 5 %.
 
 Args:
     fraction: Encoded share 0..1 of the decodable part.
+    shown: Last shown step (updated).
 ~~~
 
 **`_remove_work`**
@@ -8187,6 +9065,14 @@ Returns:
     The reconstructed plan.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -8225,6 +9111,14 @@ Attributes:
     source: Absolute path of the source file.
     level: Naming level 0..3 of the link name.
     note: Free text, e.g. the reason for ``skip``.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -9020,6 +9914,22 @@ Returns:
     Absolute path of the mirrored source inside ``base``.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -9066,14 +9976,6 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
 ~~~
 
 ### `Snapshotter` (`mediatools.snapshot.snapshotter`) {.unnumbered}
@@ -10235,6 +11137,85 @@ Raises:
     KeyError: If there is no such subcommand.
 ~~~
 
+### `ChoiceDialog` (`mediatools.gui.choicedialog`) {.unnumbered}
+
+~~~text
+Shows a question of the running command with one button per answer.
+
+The command announces each question as a line of JSON
+(:meth:`Prompt.announce`); the console view hides that line and opens
+this dialog. A click - or the key of the answer, or Enter for the
+default - sends the answer to the command exactly as if it had been
+typed into the input line, which still works as well. Closing the
+window sends nothing; the question stays open in the console.
+
+Attributes:
+    window: The dialog window.
+    send: Called with the chosen answer.
+    buttons: Button per answer.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, master: tk.Misc, spec: dict, send: Callable[[str], None])
+
+Build and show the dialog.
+
+Args:
+    master: Parent widget.
+    spec: ``{"question": str, "choices": [[answer, label], ...],
+        "default": answer}``.
+    send: Called with the chosen answer.
+~~~
+
+**`chooser`**
+
+~~~text
+chooser(self, answer: str) -> Callable[[], None]
+
+Return the command of the button of an answer.
+
+Args:
+    answer: The answer.
+
+Returns:
+    Callable that sends it.
+~~~
+
+**`on_key`**
+
+~~~text
+on_key(self, answer: str) -> Callable[[tk.Event], None]
+
+Return the key handler of an answer.
+
+Args:
+    answer: The answer.
+
+Returns:
+    Event handler that sends it.
+~~~
+
+**`choose`**
+
+~~~text
+choose(self, answer: str) -> None
+
+Send an answer and close the dialog.
+
+Args:
+    answer: The chosen answer.
+~~~
+
+**`close`**
+
+~~~text
+close(self) -> None
+
+Close the dialog without sending anything.
+~~~
+
 ### `CommandForm` (`mediatools.gui.commandform`) {.unnumbered}
 
 ~~~text
@@ -10496,6 +11477,14 @@ Returns:
     ``--migrate``, else True.
 ~~~
 
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
 **`__init__`**
 
 ~~~text
@@ -10600,8 +11589,11 @@ Open the folder of the file.
 Shows the output of one command as it arrives and lets the user answer.
 
 Questions of the command (``[y/N]``, a choice of versions or disks)
-are answered in the input line; Enter sends the answer. *Cancel* acts
-like Ctrl+C in a terminal, a second click terminates the command.
+are answered in the input line; Enter sends the answer. A question the
+command announces for the GUI (:meth:`Prompt.announce`) also opens a
+dialog with one button per answer (:class:`ChoiceDialog`); the
+announcement line itself is not shown. *Cancel* acts like Ctrl+C in a
+terminal, a second click terminates the command.
 
 Attributes:
     frame: Container of the widgets (place it in the parent).
@@ -10611,6 +11603,9 @@ Attributes:
     state: Text of the status line.
     on_finish: Called with the exit code when a command ends, or None.
     poll_ms: Interval of output checks in milliseconds.
+    dialog: Open question dialog, or None.
+    held: Start of an announcement line whose end has not arrived yet.
+    ask: Opens the dialog for an announced question (replaceable in tests).
 ~~~
 
 **`__init__`**
@@ -10633,6 +11628,50 @@ Args:
     on_finish: Called with the exit code when a command ends.
     poll_ms: Interval of output checks in milliseconds.
     height: Height of the output area in lines.
+~~~
+
+**`take_questions`**
+
+~~~text
+take_questions(self, text: str) -> str
+
+Remove the announcement lines of questions and open their dialogs.
+
+Args:
+    text: New output (line ends already normalised).
+
+Returns:
+    The text to show.
+~~~
+
+**`open_dialog`**
+
+~~~text
+open_dialog(self, spec: dict) -> None
+
+Show the dialog of an announced question.
+
+Args:
+    spec: Announcement (question, choices, default).
+~~~
+
+**`close_dialog`**
+
+~~~text
+close_dialog(self) -> None
+
+Close an open question dialog.
+~~~
+
+**`answer_choice`**
+
+~~~text
+answer_choice(self, answer: str) -> None
+
+Send the answer chosen in a dialog.
+
+Args:
+    answer: The answer.
 ~~~
 
 **`write`**
@@ -11111,7 +12150,9 @@ same interpreter, so it uses the same release as the GUI itself and
 behaves exactly like the command line. Output (standard output and
 error together) arrives in pieces through :meth:`poll`, also text
 without a line end, so that questions such as ``Continue? [y/N]:``
-are shown at once; :meth:`send` answers them. The child runs in its
+are shown at once; :meth:`send` answers them. ``MEDIATOOLS_GUI=1`` tells
+the command to announce its questions for dialogs (see
+:class:`~mediatools.core.prompt.Prompt`). The child runs in its
 own process group: :meth:`cancel` sends SIGINT first (the command
 finishes cleanly, like Ctrl+C), a second call SIGTERM.
 
@@ -11380,6 +12421,14 @@ Return the value a new form shows.
 Returns:
     False for flags, an empty list for ``list`` options, else the
     default of the command line as text (empty if none).
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**
@@ -11666,6 +12715,14 @@ Attributes:
     log_path: Log file of the run, or None.
     overall: Space line: read, written and freed in this (or the last)
         session and in all sessions.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
 ~~~
 
 **`__init__`**

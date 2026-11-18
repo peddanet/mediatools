@@ -235,11 +235,22 @@ directory, configuration -- lives in `core`.
 | `BrokenFinder` | videos recorded as `BROKEN` (not kept after a review) and videos of a report file |
 | `Assessor` | one full decode with `freezedetect` and `blackdetect`: decoded seconds, still seconds (merged intervals), error lines |
 | `Assessment` | measurement and class (hopeless / promising), usable share, repair advice |
-| `Quarantine`, `QuarantineItem` | `_broken/<class>/<relative path>`, all hard link names, manifest (JSON Lines, mode 600), restore, delete, install of a repair |
-| `BrokenCollector` | find, measure, list, confirm, move; leaves videos with output in the work folder alone |
+| `Quarantine`, `QuarantineItem` | `_broken/<class>/<relative path>`, all hard link names, manifest (JSON Lines, mode 600), restore, release, re-measure, backup result, recover, delete, install of a repair |
+| `BackupMirror`, `BackupResult` | backup disk as mirror of the home: availability (exists, other file system, mirror of the root present), same path first, then search by name in the whole backup; a copy counts only after a full decode without errors |
+| `BrokenCollector` | find, measure, list, confirm, move, check the backup; removes the entries of false alarms; re-measures videos measured by 1.7.0; leaves videos with output in the work folder alone |
+| `BrokenCommand` | the command: collect, backup check, review (terminal or GUI), listing |
 | `RepairEncoder` | `HevcEncoder` with error-tolerant input; output must decode without errors, length and size are not compared |
 | `DownloaderDatabase` | marks a deleted video as not downloaded in a downloader's SQLite table `medias` |
-| `BrokenReview` | terminal dialogue: promising first (play, repair, keep, delete), then the hopeless group |
+| `BrokenReview` | dialogue (terminal or GUI): promising first (play, check backup, recover, repair, keep, delete - repair and delete only after a backup check without intact copy), then the hopeless group |
+
+**Questions in the GUI.** `Prompt.choose`, `yes_no` and `pause` print,
+when `MEDIATOOLS_GUI=1` (set by `JobRunner`), one line
+`@@mediatools-choice {json}` before the question: question, choices
+(`[answer, label]`), default. `ConsoleView.take_questions` hides that line
+(also when it arrives in pieces) and opens a `ChoiceDialog` with one button
+per answer; a click sends the answer like typed input. At the end of input
+`choose` returns the given end answer (e.g. quit), so a closed input never
+loops.
 
 ## Package `flatten`
 
@@ -295,7 +306,8 @@ directory, configuration -- lives in `core`.
 | `GuiLauncher` | `mediatools gui`: checks display and Tk, opens the window or writes the menu entry |
 | `CommandCatalog` | reads subcommands and options from the argument parser of `Cli` |
 | `CommandSpec`, `OptionSpec` | one subcommand / option: argv, shell line, read-only check |
-| `JobRunner` | runs `python -m mediatools ...` as a child in its own process group; output, answers, SIGINT/SIGTERM |
+| `JobRunner` | runs `python -m mediatools ...` as a child in its own process group (with `MEDIATOOLS_GUI=1`); output, answers, SIGINT/SIGTERM |
+| `ChoiceDialog` | dialog of an announced question: one button per answer, keys, Enter for the default |
 | `ShrinkMonitor`, `ShrinkReading` | reads PID file, status file, log end and throughput totals; stop and reload requests |
 | `FormStore` | last values per form in `state/gui.json` |
 | `DesktopEntry`, `Opener` | menu entry (`.desktop`) with check and repair, `xdg-open` |

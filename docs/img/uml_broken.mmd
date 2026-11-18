@@ -7,14 +7,17 @@ classDiagram
     +still
     +errors
     +note
+    +method
     +decoded_share()
     +usable_share()
     +kind()
+    +healthy()
+    +current()
     +repair_advised()
     +summary()
     +to_dict()
     +from_dict(data)
-    +init(opened, duration, decoded, still, errors, note)
+    +init(opened, duration, decoded, still, errors, note, method)
   }
   class Assessor {
     +ffmpeg
@@ -29,16 +32,61 @@ classDiagram
     +merged_length(spans, limit)
     +clean(line)
   }
+  class BackupMirror {
+    +backup
+    +source
+    +log
+    +decode
+    +probe
+    +init(backup, source, logger, decode, probe)
+    +mirror(path)
+    +unavailable(root)
+    +check(names)
+    -_index(wanted)
+    -_judge(copies, found_by)
+    +device(path)
+    -_size(path)
+  }
+  class BackupResult {
+    +state
+    +path
+    +found_by
+    +note
+    +checked
+    +intact()
+    +summary()
+    +to_dict()
+    +from_dict(data)
+    +init(state, path, found_by, note, checked)
+  }
   class BrokenCollector {
     +quarantine
     +finder
     +assessor
+    +backup
     +prompt
     +log
-    +init(quarantine, finder, assessor, prompt)
+    +init(quarantine, finder, assessor, backup, prompt)
     +plan()
     +in_work(path)
     +run(dry_run, ask)
+    +remeasure(dry_run)
+    +clear_false_alarms(healthy, dry_run)
+    +check_backup()
+    +preview_backup(paths)
+  }
+  class BrokenCommand {
+    +config
+    +root
+    +need
+    +preset
+    +runlog
+    +quarantine
+    +backup
+    +init(config, root, need, preset)
+    +run(args)
+    +listing()
+    +review(args)
   }
   class DownloaderDatabase {
     +relative
@@ -77,6 +125,13 @@ classDiagram
     +inside(path)
     +collect(path, assessment, reason)
     +restore(item)
+    +release(item)
+    -_move_back(item)
+    +reassess(item, assessment)
+    +outdated(assess)
+    +check_backup(backup, items)
+    +note_backup(item, result)
+    +recover(item, remover)
     +delete(item, remover)
     +install(item, repaired, remover)
     +flat(path)
@@ -92,11 +147,12 @@ classDiagram
     +state
     +when
     +outside
+    +backup
     +original()
     +held()
     +to_dict()
     +from_dict(data)
-    +init(number, kind, names, assessment, reason, state, when, outside)
+    +init(number, kind, names, assessment, reason, state, when, outside, backup)
   }
   class RepairEncoder {
     +clone()
@@ -110,28 +166,52 @@ classDiagram
     +remover
     +repairer
     +downloader
+    +backup
+    +assessor
     +prompt
     +log
-    +init(quarantine, player, remover, repairer, downloader, prompt)
+    +init(quarantine, player, remover, repairer, downloader, backup, assessor, prompt)
     +run()
+    +remeasure()
+    +choices(item)
     +review_item(item, title)
+    -_act(item, answer)
     -_show(item, title)
+    +keep(item)
+    +check_backup(items)
     +play(paths)
     +repair(item)
     +delete(item, confirm)
     +review_hopeless(items)
-    -_progress(fraction)
+    -_group_action(answer, items, unchecked, intact, lost)
+    -_progress(fraction, shown)
     -_remove_work(path)
   }
   Assessor ..> Assessment
+  BackupMirror ..> BackupResult
   BrokenCollector ..> Assessment
   BrokenCollector --> Assessor
+  BrokenCollector --> BackupMirror
   BrokenCollector --> BrokenFinder
   BrokenCollector --> Quarantine
+  BrokenCommand ..> Assessor
+  BrokenCommand --> BackupMirror
+  BrokenCommand ..> BrokenCollector
+  BrokenCommand ..> BrokenFinder
+  BrokenCommand ..> BrokenReview
+  BrokenCommand ..> DownloaderDatabase
+  BrokenCommand --> Quarantine
+  BrokenCommand ..> RepairEncoder
   BrokenFinder ..> Quarantine
   Quarantine ..> Assessment
+  Quarantine ..> Assessor
+  Quarantine ..> BackupMirror
+  Quarantine ..> BackupResult
   Quarantine --> QuarantineItem
   QuarantineItem ..> Assessment
+  QuarantineItem ..> BackupResult
+  BrokenReview --> Assessor
+  BrokenReview --> BackupMirror
   BrokenReview --> DownloaderDatabase
   BrokenReview --> Quarantine
   BrokenReview ..> QuarantineItem

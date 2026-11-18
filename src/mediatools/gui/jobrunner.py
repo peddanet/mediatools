@@ -18,7 +18,9 @@ class JobRunner:
     behaves exactly like the command line. Output (standard output and
     error together) arrives in pieces through :meth:`poll`, also text
     without a line end, so that questions such as ``Continue? [y/N]:``
-    are shown at once; :meth:`send` answers them. The child runs in its
+    are shown at once; :meth:`send` answers them. ``MEDIATOOLS_GUI=1`` tells
+    the command to announce its questions for dialogs (see
+    :class:`~mediatools.core.prompt.Prompt`). The child runs in its
     own process group: :meth:`cancel` sends SIGINT first (the command
     finishes cleanly, like Ctrl+C), a second call SIGTERM.
 
@@ -59,7 +61,8 @@ class JobRunner:
         """
         if self.running:
             raise RuntimeError("a command is still running")
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+                   MEDIATOOLS_GUI="1")
         self.cancels = 0
         self.process = subprocess.Popen(  # pylint: disable=consider-using-with
             self.program + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
