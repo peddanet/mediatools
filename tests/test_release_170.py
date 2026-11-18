@@ -12,9 +12,11 @@ from pathlib import Path
 import pytest
 
 from conftest import make_file, needs_ffmpeg
-from mediatools.broken import (Assessment, Assessor, BrokenCollector, BrokenFinder,
+from mediatools.broken import (Assessment, Assessor, BackupMirror, BackupResult,
+                               BrokenCollector, BrokenFinder,
                                BrokenReview, DownloaderDatabase, Quarantine, RepairEncoder)
 from mediatools.cli import Cli
+from mediatools.core.config import Config
 from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.prompt import Prompt
@@ -448,7 +450,7 @@ def test_collector_plan_and_run(root: Path, tmp_path: Path) -> None:
     make_file(root / "unit" / MediaTypes.SHRINK_TMP_DIR / "busy.mp4")
     finder = BrokenFinder(str(root), report=str(tmp_path / "report.tsv"))
     quarantine = Quarantine(str(root), log)
-    collector = BrokenCollector(quarantine, finder, Assessor(), answers("n"))
+    collector = BrokenCollector(quarantine, finder, Assessor(), prompt=answers("n"))
     planned = collector.plan()
     assert [(os.path.basename(p), a.kind) for p, _r, a in planned] == \
         [("cut.mp4", "promising"), ("grey.mp4", "hopeless")]
@@ -556,9 +558,12 @@ def build_review(root: Path, tmp_path: Path, prompt: Prompt,
     quarantine.collect(make_file(root / "u" / "good.mp4", b"g"), Assessment(True, 10, 9), "x")
     quarantine.collect(make_file(root / "u" / "half.mp4", b"h"), Assessment(True, 10, 4), "x")
     quarantine.collect(make_file(root / "u" / "lost.mp4", b"l"), Assessment(False), "x")
+    for item in quarantine.items:              # checked: no copy in the backup
+        quarantine.note_backup(item, BackupResult("missing"))
     player = StubPlayer()
     review = BrokenReview(quarantine, player, FileRemover(True, log),  # type: ignore[arg-type]
-                          StubRepairer(result), DownloaderDatabase("", log), prompt)
+                          StubRepairer(result), DownloaderDatabase("", log),
+                          BackupMirror(None, str(tmp_path), log), prompt=prompt)
     return review, quarantine, player
 
 
@@ -670,6 +675,9 @@ def test_cli_broken_collect_list_and_review(root: Path, tmp_path: Path, fake_pla
         monkeypatch: Patcher.
     """
     report = str(tmp_path / "report.tsv")
+    Config().set_value("broken", "backup", str(tmp_path / "backup"))
+    Config().set_value("broken", "backup_of", str(tmp_path))
+    monkeypatch.setattr(BackupMirror, "unavailable", lambda _self, _root: None)
     assert Cli().main(["broken", str(root), "--collect", "--dry-run", "--report", report]) == 0
     assert os.path.exists(root / "unit" / "Clips" / "cut.mp4")
     assert Cli().main(["broken", str(root), "--collect", "-y", "--report", report]) == 0
