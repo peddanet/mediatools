@@ -6,9 +6,9 @@ import os
 import shlex
 import shutil
 import sys
+import time
 
-from mediatools.broken import (Assessor, BrokenCollector, BrokenFinder, BrokenReview,
-                               DownloaderDatabase, Quarantine, RepairEncoder)
+from mediatools.broken.command import BrokenCommand
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
 from mediatools.core.datamigration import DataMigration
@@ -203,15 +203,20 @@ class Cli:
                          help="measure the videos recorded as BROKEN (and those of --report) "
                               "and move them into _broken")
         cmd.add_argument("--review", action="store_true",
-                         help="go through the videos in _broken: promising ones first")
+                         help="go through the videos in _broken: promising ones first "
+                              "(in the GUI with a dialog)")
+        cmd.add_argument("--backup-check", action="store_true",
+                         help="look for intact copies of the videos in _broken on the backup "
+                              "disk ([broken] backup); repair and delete need this check")
         cmd.add_argument("--report", metavar="TSV",
                          help="also collect the videos of a report (column 'path'; with a "
                               "'check' column only rows naming an error or broken)")
         cmd.add_argument("--player", default="vlc")
-        cmd.add_argument("--audio", action="store_true", help="play with sound")
+        cmd.add_argument("--mute", action="store_true",
+                         help="play without sound (default: with sound at [broken] volume)")
         cmd.add_argument("--delete", action="store_true", help="delete instead of trash")
         cmd.add_argument("--dry-run", action="store_true",
-                         help="with --collect: only measure and list")
+                         help="with --collect: only measure, check the backup and list")
         cmd.add_argument("-y", "--yes", action="store_true",
                          help="with --collect: move without asking")
 
@@ -540,18 +545,35 @@ class Cli:
         return 1
 
     @staticmethod
-    def cmd_reload(_args: argparse.Namespace) -> int:
+    def cmd_reload(_args: argparse.Namespace, wait: float = 10.0) -> int:
         """Run ``mediatools reload``: ask the running shrink to switch releases.
 
+        Waits up to ``wait`` seconds for the job's answer (accepted, or
+        rejected with the reason) and prints it.
+
+        Args:
+            wait: Seconds to wait for the answer.
+
         Returns:
-            0 if a running shrink was asked, 1 if none runs.
+            0 if a running shrink accepted or has not answered yet, 1 if
+            none runs or it rejected the request.
         """
-        pid = RunControl("shrink").request_restart()
+        control = RunControl("shrink")
+        pid = control.request_restart()
         if pid is None:
             print("no shrink run is active - nothing to reload")
             return 1
         print(f"reload requested: shrink (pid {pid}) switches to the installed release "
               f"after its current file")
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            answer = control.restart_answer()
+            if answer is not None:
+                print(f"answer of the job: {answer}")
+                return 1 if "rejected:" in answer else 0
+            time.sleep(0.5)
+        print(f"no answer within {wait:.0f} s: a job checks between two files (with --jobs "
+              f"above 1 also while it encodes); 'mediatools status' shows the answer later")
         return 0
 
     @staticmethod
@@ -667,50 +689,17 @@ class Cli:
         return triage.run()
 
     def cmd_broken(self, args: argparse.Namespace) -> int:
-        """Run ``mediatools broken``.
-
-        Without ``--collect`` or ``--review`` the open videos of
-        ``_broken`` are listed.
+        """Run ``mediatools broken`` (see :class:`BrokenCommand`).
 
         Args:
             args: Parsed arguments.
 
         Returns:
             Exit code.
-
-        Raises:
-            SystemExit: If ``--review`` is not started from a terminal.
         """
         config = Config()
         root = self._dir(config.require_path("collection", "root", args.path))
-        run = RunLog("broken")
-        quarantine = Quarantine(root, run.logger, config.db_name())
-        if args.collect:
-            self._need("ffmpeg", "ffprobe")
-            finder = BrokenFinder(root, config.db_name(), args.report)
-            collector = BrokenCollector(quarantine, finder, Assessor())
-            code = collector.run(dry_run=args.dry_run, ask=not args.yes)
-            if code or not args.review:
-                return code
-        if args.review:
-            if not sys.stdin.isatty():
-                raise SystemExit("Error: broken --review asks for every video and needs a "
-                                 "terminal; start it there (not from the GUI)")
-            self._need("ffmpeg", "ffprobe", shlex.split(args.player)[0],
-                       *([] if args.delete else ["gio"]))
-            repairer = RepairEncoder(logger=run.logger, decode=DecodeCheck(),
-                                     preset=self._preset(None, config))
-            review = BrokenReview(quarantine, PlayerSession(args.player, args.audio),
-                                  FileRemover(args.delete, run.logger), repairer,
-                                  DownloaderDatabase(config.get("broken", "downloader_db"),
-                                                     run.logger))
-            return review.run()
-        items = quarantine.open_items()
-        for item in items:
-            run.logger.info("  %-9s %s  %s", item.kind, item.assessment.summary(),
-                            os.path.relpath(item.original, root))
-        run.logger.info("%i video(s) set aside in %s", len(items), quarantine.directory)
-        return 0
+        return BrokenCommand(config, root, self._need, self._preset(None, config)).run(args)
 
     def cmd_flatten(self, args: argparse.Namespace) -> int:
         """Run ``mediatools flatten`` (analysis, plan, confirmation, apply).

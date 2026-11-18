@@ -42,6 +42,7 @@ class RunControl:
         pid_file: Path of the PID file (PID and log file path).
         stop_file: Path of the stop-request file.
         restart_file: Path of the restart-request file.
+        answer_file: The job's answer to the last restart request.
         status_file: Path of the progress status file.
         console_file: Terminal output of a job in the background.
         last_poll: Monotonic time of the last check for the stop file.
@@ -68,6 +69,7 @@ class RunControl:
         self.pid_file = os.path.join(state, f"{name}.pid")
         self.stop_file = os.path.join(state, f"{name}.stop")
         self.restart_file = os.path.join(state, f"{name}.restart")
+        self.answer_file = os.path.join(state, f"{name}.restart.answer")
         self.status_file = os.path.join(state, f"{name}.status")
         self.console_file = os.path.join(state, f"{name}.console")
         self.last_poll = 0.0
@@ -89,6 +91,7 @@ class RunControl:
                                f"'mediatools stop'")
         self._remove(self.stop_file)
         self._remove(self.restart_file)
+        self._remove(self.answer_file)
         self._register()
 
     def _register(self) -> None:
@@ -165,6 +168,27 @@ class RunControl:
         """Drop a restart request that cannot be served."""
         self._remove(self.restart_file)
 
+    def answer_restart(self, text: str) -> None:
+        """Record the job's answer to a restart request (for reload and status).
+
+        Args:
+            text: Answer, e.g. ``accepted: ...`` or ``rejected: ...``.
+        """
+        with open(self.answer_file, "w", encoding="utf-8") as handle:
+            handle.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+
+    def restart_answer(self) -> str | None:
+        """Return the job's answer to the last restart request.
+
+        Returns:
+            The answer line, or None if the job has not answered.
+        """
+        try:
+            with open(self.answer_file, encoding="utf-8") as handle:
+                return handle.read().strip() or None
+        except FileNotFoundError:
+            return None
+
     def stop_requested(self, force: bool = False) -> bool:
         """Tell whether a stop was requested, checking at most every POLL_SECONDS.
 
@@ -239,6 +263,7 @@ class RunControl:
         pid = self.active_pid()
         if pid is None:
             return None
+        self._remove(self.answer_file)
         with open(self.restart_file, "w", encoding="utf-8") as handle:
             handle.write(f"restart requested at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         return pid

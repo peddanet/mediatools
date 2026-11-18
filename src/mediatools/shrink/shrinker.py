@@ -765,20 +765,31 @@ class Shrinker:
                                 "stopping after the current file")
 
     def _poll_restart(self) -> None:
-        """Turn a request of ``mediatools reload`` into a switch before the next file."""
+        """Turn a request of ``mediatools reload`` into a switch before the next file.
+
+        The answer is written for ``mediatools reload`` and ``status``
+        (:meth:`RunControl.answer_restart`), so a request that cannot be
+        served is never lost silently.
+        """
         restart = self.state["restart"]
-        if self.control is None or restart is None or not self.control.restart_requested():
+        if self.control is None or restart is None or self.flags["restart"] \
+                or not self.control.restart_requested():
             return
         new = restart.installed_version()
         if new is None:
-            self.log.error("reload requested, but the installed release does not start - "
-                           "continuing with mediatools %s", __version__)
+            self.log.error("reload requested, but the installed release does not start (%s) - "
+                           "continuing with mediatools %s", restart.last_error, __version__)
+            self.control.answer_restart(f"rejected: the installed release does not start "
+                                        f"({restart.last_error}) - {__version__} continues")
         elif new == __version__:
             self.log.info("reload requested, but mediatools %s is already running - "
                           "continuing", new)
+            self.control.answer_restart(f"rejected: mediatools {new} is already running")
         else:
             self.log.warning("switching from mediatools %s to %s now - the run continues "
                              "with the files left, in this log", __version__, new)
+            self.control.answer_restart(f"accepted: switching from {__version__} to {new} "
+                                        "as soon as the running file(s) are done")
             self.flags["restart"] = True
             return
         self.control.clear_restart()

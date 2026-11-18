@@ -71,6 +71,16 @@ classDiagram
     +commands()
     +command(name)
   }
+  class ChoiceDialog {
+    +window
+    +send
+    +buttons
+    +init(master, spec, send)
+    +chooser(answer)
+    +on_key(answer)
+    +choose(answer)
+    +close()
+  }
   class CommandForm {
     +frame
     +spec
@@ -128,7 +138,14 @@ classDiagram
     +state
     +on_finish
     +poll_ms
+    +dialog
+    +held
+    +ask
     +init(master, runner, on_finish, poll_ms, height)
+    +take_questions(text)
+    +open_dialog(spec)
+    +close_dialog()
+    +answer_choice(answer)
     +write(text)
     +clear()
     +run(args, shown)
@@ -324,6 +341,7 @@ classDiagram
   CommandForm ..> OptionSpec
   CommandSpec ..> OptionSpec
   ConfigPanel --> Opener
+  ConsoleView --> ChoiceDialog
   ConsoleView --> JobRunner
   FilesPanel --> Opener
   JobList --> ShrinkMonitor
