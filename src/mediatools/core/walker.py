@@ -10,7 +10,7 @@ from mediatools.core.mediatypes import MediaTypes
 class TreeWalker:
     """Deterministic :func:`os.walk` that never enters reserved directories.
 
-    Skipped are ``_flat``, ``newShrinkedFiles``, hidden directories (``.*``)
+    Skipped are ``_flat``, ``newShrinkedFiles``, ``_broken``, hidden directories (``.*``)
     and any additional names given. Directory and file lists are sorted so
     that runs are reproducible.
 

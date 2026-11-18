@@ -11,6 +11,8 @@ abstract: |
   SQLite database; `progress` reports the shrink status read-only; `triage`
   presents short clips in batches, one player window each, and removes the
   clips whose windows the user closed together with their hard links;
+  `broken` sets damaged videos aside, measures how much of each still
+  decodes and lets the user repair, keep or delete them;
   `flatten` creates, per unit, a flat directory of hard links whose names
   encode the original location within the file-system name limit; `sync`
   copies a tree to a backup disk with rsync while preserving hard links,
@@ -75,6 +77,7 @@ a test folder, back up, then work (section "First steps").
 | `shrink` | HEVC re-encode in place, name kept | original files (same inode), `shrink.db` |
 | `progress` | which videos are recorded as done | data directory only |
 | `triage` | review short clips, discard by closing the window | trash (or delete), kept list |
+| `broken` | set damaged videos aside, review, repair or delete them | `<root>/_broken/`, `shrink.db`, optionally a downloader database |
 | `flatten` | flat hard-link view per unit | `<unit>/_flat/` only |
 | `sync` | backup preserving hard links, no deletions | target directory, reports |
 | `snapshot` | versioned backups with rsnapshot | snapshot root on the backup disk |
@@ -85,8 +88,8 @@ a test folder, back up, then work (section "First steps").
 
 Shared rules, implemented once in `mediatools.core`:
 
-* `_flat`, `newShrinkedFiles` and hidden directories are never entered by a
-  scan (`TreeWalker`, `MediaTypes.SKIP_DIRS`).
+* `_flat`, `newShrinkedFiles`, `_broken` and hidden directories are never
+  entered by a scan (`TreeWalker`, `MediaTypes.SKIP_DIRS`).
 * Symbolic links are never followed or processed.
 * Every run writes `logs/<command>_<timestamp>.log` into the state folder
   (default `~/.local/state/mediatools`; see [Data directory](#data-directory)).
@@ -368,6 +371,15 @@ src/mediatools/
     remover.py        FileRemover      gio trash or permanent delete
     keptlist.py       KeptList         decisions across sessions
     triage.py         Triage           batch workflow
+  broken/
+    finder.py         BrokenFinder     BROKEN rows and report rows
+    assessor.py       Assessor         full decode: decodes, still, errors
+    assessment.py     Assessment       measurement and class
+    quarantine.py     Quarantine       _broken folder, manifest, restore, delete
+    collector.py      BrokenCollector  find, measure, confirm, move
+    repairer.py       RepairEncoder    error-tolerant HEVC repair
+    downloaderdb.py   DownloaderDatabase  mark a deleted video for a new download
+    review.py         BrokenReview     terminal dialogue per video
   update/
     updater.py        ReleaseUpdater   mediatools update (runs apply-release.sh)
     apply-release.sh  -                applies delivered patch archives
@@ -1038,6 +1050,144 @@ Trashed files occupy space until the trash is emptied (`gio trash --empty`).
 | `--include-kept` | off | show kept clips again |
 | `--dry-run` | off | list candidates only |
 
+# broken
+
+## Purpose
+
+A video whose data cannot be decoded - cut off by an interrupted download,
+or scrambled - fails every encode, wastes space and spoils a playlist.
+`shrink` notices such files before encoding (trial decode of the first
+seconds) and records them as `BROKEN`, but leaves them in place.
+`broken` sets them aside per shrink root, measures how much of each is
+still usable and lets the user decide about every one: play, repair, keep
+or delete.
+
+~~~bash
+mediatools broken ~/Pictures/collection --collect --dry-run   # measure and list only
+mediatools broken ~/Pictures/collection --collect             # measure, ask, move
+mediatools broken ~/Pictures/collection --review              # decide video by video
+mediatools broken ~/Pictures/collection                       # list what is set aside
+~~~
+
+## Collecting
+
+Sources (`BrokenFinder`):
+
+* every video recorded as `BROKEN` in a shrink database whose size is
+  unchanged, except videos a user kept after a review;
+* with `--report FILE`: the videos of a tab-separated report with a column
+  `path`; if it has a column `check`, only rows whose check names an error
+  or a broken file (e.g. `E decode-ERROR`, `D broken`).
+
+Videos recorded as `FAILED` are not collected: there only the encode
+failed, the source may be intact. Videos whose output lies in shrink's work
+folder (`newShrinkedFiles/<name>`) stay in place, because an encode is
+running or an interrupted replacement waits for its recovery.
+
+Each video is decoded once completely (`Assessor`, lowest CPU priority).
+One ffmpeg run decodes the first video stream to nothing and passes it
+through the filters `freezedetect` (picture does not change, e.g. grey
+frames) and `blackdetect`; the progress output tells how far decoding got,
+and the log flag `level` marks every error line. Measured are:
+
+| Value | Meaning |
+|---|---|
+| duration | container duration |
+| decodes | share of the duration that decoded |
+| usable | share of the duration that decoded and shows a moving picture |
+| decoder errors | number of error lines |
+
+Classification (`Assessment`):
+
+| Class | Rule | Folder |
+|---|---|---|
+| hopeless | does not open, or < 10 % decodes, or > 90 % of the decoded part is still or black | `_broken/hoffnungslos/` |
+| promising | every other video | `_broken/aussichtsreich/` |
+
+Flicker and block artefacts cannot be recognised reliably by a filter;
+such videos are classified promising and shown to the user. The plan is
+listed (class, measurement, reason, path) and confirmed (`-y` skips the
+question, `--dry-run` stops after the list).
+
+## Setting aside
+
+`Quarantine` moves each video with `rename` (same file system: no copy,
+instant) to `_broken/<folder>/<path relative to the root>`. The first
+folder below the class folder is therefore still the unit, and every
+folder of the origin is kept. **All hard link names of the video inside the
+root move with it**, including its `_flat` names; otherwise the damaged
+data would stay visible under another name. Names outside the root cannot
+be found; their number is recorded and reported. A taken target name gets
+`.1`, `.2`, ... before the extension.
+
+`_broken/manifest.jsonl` (mode 600, one JSON object per line) records per
+video: number, class, every `[original, quarantined]` name pair, the
+measurement, the reason, the state (`open`, `restored`, `repaired`,
+`deleted`), the time and the number of names outside the root. Restore and
+repair rely on it.
+
+## Review
+
+`--review` needs a terminal. The promising videos come first, the most
+usable first, each on its own:
+
+| Key | Action |
+|---|---|
+| `p` | play the damaged video (player as in triage), Enter closes it |
+| `r` | repair (see below); the default when at least 50 % is usable |
+| `k` | keep: every name goes back unchanged; recorded as `BROKEN` with the reason `kept after review`, so neither shrink nor `--collect` takes it again while its size is unchanged |
+| `d` | delete every name (trash; `--delete`: permanently), forget the failure entry, mark it for a new download (below) |
+| `s` / `q` | skip / end the review |
+
+Then the hopeless videos as a group: `v` shows up to three of them at once,
+`a` deletes all after one confirmation, `o` goes through them one by one
+with the keys above.
+
+## Repair
+
+`RepairEncoder` reads the damaged video with error tolerance
+(`-err_detect ignore_err -fflags +discardcorrupt`: damaged packets are
+dropped, decoding goes on as far as the data reaches) and encodes it with
+the settings of shrink (libx265, CRF 28, `[shrink] preset`, lowest CPU
+priority) into `repaired-<name>` next to the damaged copy; the extension
+and with it the container stay the same. The result is accepted only if
+it has a video stream and decodes completely without a single error line.
+Its length is shown in relation to the original. After playing it
+(`p`), `a` accepts it: it takes the first original name, every further name
+becomes a hard link to it again, the damaged copies are removed, and it is
+recorded as shrunk in the databases of its directories. `x` discards it.
+
+## New download
+
+A downloader that keeps a database of fetched media skips a medium marked
+as downloaded there - also when its file was cut off. If
+`[broken] downloader_db` names such a database relative to a unit folder,
+a deleted video is marked there as not downloaded:
+
+~~~bash
+mediatools config --set broken.downloader_db=Metadata/media.db
+~~~
+
+`DownloaderDatabase` looks for the file in the video's folder and every
+folder above it up to the root. Expected is an SQLite table `medias` with
+the columns `directory`, `filename` and `downloaded`. The row is chosen by
+file name; if the name occurs more than once, the row whose directory ends
+with the video's folder relative to the unit is taken. Without a unique row
+nothing changes and the log says why.
+
+## Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `PATH` | `[collection] root` | shrink root; `_broken` is created there |
+| `--collect` | off | find, measure, list, ask, move |
+| `--report TSV` | none | further videos from a report |
+| `--dry-run` | off | with `--collect`: measure and list only |
+| `-y` | off | with `--collect`: move without asking |
+| `--review` | off | decide video by video |
+| `--player` / `--audio` | `vlc` / off | as in triage |
+| `--delete` | off | permanent deletion instead of trash |
+
 # flatten
 
 ## Concept
@@ -1489,6 +1639,17 @@ limit is 143 bytes.
 **ffprobe** -- FFmpeg tool that reports stream data.
 [ffprobe documentation](https://www.ffmpeg.org/ffprobe.html)
 
+**blackdetect** -- ffmpeg filter that reports intervals with an (almost)
+black picture. [blackdetect source](https://ffmpeg.org/doxygen/trunk/vf__blackdetect_8c_source.html)
+
+**discardcorrupt / err_detect** -- ffmpeg input options: drop corrupted
+packets, set how strictly errors are detected.
+[ffmpeg-formats(1)](https://mankier.com/1/ffmpeg-formats)
+
+**freezedetect** -- ffmpeg filter that reports intervals in which the
+picture does not change (e.g. grey frames).
+[ffmpeg-filters: freezedetect](https://ayosec.github.io/ffmpeg-filters-docs/4.3/Filters/Video/freezedetect.html)
+
 **Hard link** -- additional directory entry for the same inode; data exist
 once. [link(1)](https://www.man7.org/linux/man-pages/man1/link.1.html)
 
@@ -1524,6 +1685,10 @@ managed", so `pip install --user` is refused there.
 
 **pipx** -- installs Python command-line applications, each into a virtual
 environment of its own, as a normal user. [pipx](https://pipx.pypa.io/stable/)
+
+**Manifest** -- `_broken/manifest.jsonl`, the record of every video set
+aside by `broken` with all its names; JSON Lines format.
+[JSON Lines](https://jsonlines.org/)
 
 **Placeholder** -- empty file (0 bytes) left by `triage` under the name of
 a discarded clip, so a download tool that skips existing names does not
@@ -1577,3 +1742,8 @@ Link check of 2026-11-03. "verified" = page content retrieved on that date.
 | [PEP 668](https://peps.python.org/pep-0668/) | found via search |
 | [git-tag(1)](https://git-scm.com/docs/git-tag), [venv documentation](https://docs.python.org/3/library/venv.html) | standard references, not retrieved in this session; `install.sh` behaviour checked by automated tests and an end-to-end installation from a local repository |
 | rsnapshot 1.4.5 behaviour (adopt, rotation, link sharing) | checked end to end on ext4 and by automated tests |
+| [ffmpeg-filters: freezedetect (mirror of the 4.3 documentation)](https://ayosec.github.io/ffmpeg-filters-docs/4.3/Filters/Video/freezedetect.html) | found via search 2026-11-17; a freeze lasting to the end is reported with its start only (checked locally with ffmpeg 6.1.1) |
+| [blackdetect source, `black_start/black_end/black_duration`](https://ffmpeg.org/doxygen/trunk/vf__blackdetect_8c_source.html) | found via search 2026-11-17 |
+| [ffplay-all(1), Ubuntu 24.04: log flag `level`](https://manpages.ubuntu.com/manpages/noble/man1/ffplay-all.1.html) | found via search 2026-11-17 |
+| [ffmpeg-formats(1): `fflags discardcorrupt`, `err_detect`](https://mankier.com/1/ffmpeg-formats) | found via search 2026-11-17; repair of a cut-off file checked locally with ffmpeg 6.1.1 |
+| [JSON Lines](https://jsonlines.org/) | standard reference, not retrieved in this session |

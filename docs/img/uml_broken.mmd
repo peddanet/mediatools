@@ -1,0 +1,138 @@
+classDiagram
+  direction LR
+  class Assessment {
+    +opened
+    +duration
+    +decoded
+    +still
+    +errors
+    +note
+    +decoded_share()
+    +usable_share()
+    +kind()
+    +repair_advised()
+    +summary()
+    +to_dict()
+    +from_dict(data)
+    +init(opened, duration, decoded, still, errors, note)
+  }
+  class Assessor {
+    +ffmpeg
+    +probe
+    +timeout_factor
+    +timeout_min
+    +init(ffmpeg, probe, timeout_min, timeout_factor)
+    +command(path)
+    +assess(path)
+    +decoded_seconds(progress)
+    +still_seconds(messages, decoded)
+    +merged_length(spans, limit)
+    +clean(line)
+  }
+  class BrokenCollector {
+    +quarantine
+    +finder
+    +assessor
+    +prompt
+    +log
+    +init(quarantine, finder, assessor, prompt)
+    +plan()
+    +in_work(path)
+    +run(dry_run, ask)
+  }
+  class DownloaderDatabase {
+    +relative
+    +log
+    +init(relative, logger)
+    +enabled()
+    +locate(video, root)
+    +reset(video, root)
+    -_update(database, name, sub)
+  }
+  class BrokenFinder {
+    +root
+    +db_name
+    +report
+    +init(root, db_name, report)
+    +find()
+    -_from_databases()
+    -_kept(database, name)
+    -_from_report(report)
+  }
+  class Quarantine {
+    +root
+    +log
+    +db_name
+    +directory
+    +manifest
+    +items
+    +init(root, logger, db_name)
+    -_load()
+    +save()
+    +open_items(kind)
+    +holds(path)
+    +links(path)
+    -_index()
+    +target(original, kind)
+    +inside(path)
+    +collect(path, assessment, reason)
+    +restore(item)
+    +delete(item, remover)
+    +install(item, repaired, remover)
+    +flat(path)
+    +database(path)
+    -_close(item, state)
+  }
+  class QuarantineItem {
+    +number
+    +kind
+    +names
+    +assessment
+    +reason
+    +state
+    +when
+    +outside
+    +original()
+    +held()
+    +to_dict()
+    +from_dict(data)
+    +init(number, kind, names, assessment, reason, state, when, outside)
+  }
+  class RepairEncoder {
+    +clone()
+    +command(src, dst)
+    +validate(src, dst)
+    +output_for(held)
+  }
+  class BrokenReview {
+    +quarantine
+    +player
+    +remover
+    +repairer
+    +downloader
+    +prompt
+    +log
+    +init(quarantine, player, remover, repairer, downloader, prompt)
+    +run()
+    +review_item(item, title)
+    -_show(item, title)
+    +play(paths)
+    +repair(item)
+    +delete(item, confirm)
+    +review_hopeless(items)
+    -_progress(fraction)
+    -_remove_work(path)
+  }
+  Assessor ..> Assessment
+  BrokenCollector ..> Assessment
+  BrokenCollector --> Assessor
+  BrokenCollector --> BrokenFinder
+  BrokenCollector --> Quarantine
+  BrokenFinder ..> Quarantine
+  Quarantine ..> Assessment
+  Quarantine --> QuarantineItem
+  QuarantineItem ..> Assessment
+  BrokenReview --> DownloaderDatabase
+  BrokenReview --> Quarantine
+  BrokenReview ..> QuarantineItem
+  BrokenReview --> RepairEncoder

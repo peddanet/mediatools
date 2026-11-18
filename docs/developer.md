@@ -11,7 +11,7 @@ abstract: |
   maximum line length 100, pylint score 10.00/10 for source, tests and
   tools), the layered architecture with one class per module, UML class
   diagrams of every package generated from the code, sequence diagrams of
-  shrink, triage, flatten and sync, the activity diagram of a snapshot run,
+  shrink, triage, broken, flatten and sync, the activity diagram of a snapshot run,
   the local configuration file, state diagrams of a player process and
   of a flat link, activity diagrams of the decision logic, all persistent
   data formats, error handling and exit codes, the testing strategy with
@@ -147,11 +147,15 @@ suppression is `consider-using-with` for the long-lived player processes in
 |---|---|---|
 | interface | `mediatools.cli` (`Cli`) | all packages |
 | window | `gui` | `core`, `shrink` (space totals), the parser of `cli` |
-| features | `shrink`, `triage`, `flatten`, `sync`, `snapshot` | `core`; `snapshot` also `sync.fscheck` |
+| features | `shrink`, `triage`, `broken`, `flatten`, `sync`, `snapshot` | `core`; `snapshot` also `sync.fscheck`; `broken` also `shrink` (database, encoder) and `triage` (player, remover) |
 | foundation | `core` | standard library only |
 
-The feature packages do not import each other, with one exception:
-`snapshot` reuses `sync.FsCheck` (file-system type, free space, nesting).
+The feature packages do not import each other, with two exceptions:
+`snapshot` reuses `sync.FsCheck` (file-system type, free space, nesting),
+and `broken` builds on the shrink database and encoder (`ShrinkDatabase`,
+`HevcEncoder`) and on the player and remover of triage (`PlayerSession`,
+`FileRemover`) instead of duplicating them; nothing imports `broken`
+except `cli`.
 Shared knowledge -- reserved directory names, media extensions, data
 directory, configuration -- lives in `core`.
 `triage` cooperates with `flatten` only through the file system (inodes in
@@ -221,6 +225,21 @@ directory, configuration -- lives in `core`.
 | `FileRemover` | `gio trash` or permanent deletion; `discard()` leaves a 0-byte placeholder |
 | `KeptList` | decisions across sessions |
 | `Triage` | batch workflow |
+
+## Package `broken`
+
+![broken](img/uml_broken.png){width=95% height=19cm}
+
+| Class | Responsibility |
+|---|---|
+| `BrokenFinder` | videos recorded as `BROKEN` (not kept after a review) and videos of a report file |
+| `Assessor` | one full decode with `freezedetect` and `blackdetect`: decoded seconds, still seconds (merged intervals), error lines |
+| `Assessment` | measurement and class (hopeless / promising), usable share, repair advice |
+| `Quarantine`, `QuarantineItem` | `_broken/<class>/<relative path>`, all hard link names, manifest (JSON Lines, mode 600), restore, delete, install of a repair |
+| `BrokenCollector` | find, measure, list, confirm, move; leaves videos with output in the work folder alone |
+| `RepairEncoder` | `HevcEncoder` with error-tolerant input; output must decode without errors, length and size are not compared |
+| `DownloaderDatabase` | marks a deleted video as not downloaded in a downloader's SQLite table `medias` |
+| `BrokenReview` | terminal dialogue: promising first (play, repair, keep, delete), then the hopeless group |
 
 ## Package `flatten`
 
@@ -329,6 +348,10 @@ Invariants:
 
 ![States of a player process](img/state_player.png){width=80%}
 
+## broken
+
+![Collect and review](img/seq_broken.png){width=92%}
+
 ## flatten
 
 ![Sequence of a flatten run](img/seq_flatten.png){width=92%}
@@ -369,6 +392,9 @@ Invariants:
 <data>/state/triage_discarded.tsv     Triage           time TAB size TAB path
 <data>/state/triage_durations.tsv     DurationCache    path TAB size TAB mtime_ns TAB seconds
 <data>/state/sync_targets.json        TargetPicker     {source: target}
+<root>/_broken/manifest.jsonl         Quarantine       one JSON object per video: number, kind, names
+                                                       [[original, quarantined], ...], assessment,
+                                                       reason, state, when, outside (mode 600)
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
 <data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
 <data>/ledger.tsv                     Ledger           when session status source result seconds
