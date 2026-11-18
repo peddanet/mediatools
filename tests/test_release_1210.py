@@ -30,6 +30,7 @@ class FakeRestart:
             version: Version the installed release reports, None if it fails.
         """
         self.version = version
+        self.last_error = "" if version else "exit code 1: no module named mediatools"
 
     def installed_version(self) -> str | None:
         """Report the stored version.

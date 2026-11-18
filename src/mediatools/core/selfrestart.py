@@ -47,6 +47,7 @@ class SelfRestart:
         self.argv = list(argv)
         self.log_path = log_path
         self.python = python or sys.executable
+        self.last_error = ""
 
     def command(self) -> list[str]:
         """Build the command line of the new process.
@@ -71,16 +72,20 @@ class SelfRestart:
 
         Returns:
             Version string, e.g. ``1.2.11``, or None if it does not start or
-            answers unexpectedly.
+            answers unexpectedly (the reason is in :attr:`last_error`).
         """
+        self.last_error = ""
         try:
             res = subprocess.run([self.python, "-m", "mediatools", "--version"],
                                  capture_output=True, text=True, check=False,
                                  timeout=self.TIMEOUT)
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired) as err:
+            self.last_error = f"{self.python}: {err}"
             return None
         words = res.stdout.split()
         if res.returncode != 0 or len(words) < 2 or words[0] != "mediatools":
+            tail = (res.stderr.strip().splitlines() or [res.stdout.strip()])[-1:]
+            self.last_error = f"exit code {res.returncode}: {' '.join(tail)[:300]}"
             return None
         return words[1]
 

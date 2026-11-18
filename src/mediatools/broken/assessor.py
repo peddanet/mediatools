@@ -6,14 +6,16 @@ import shutil
 import subprocess
 
 from mediatools.broken.assessment import Assessment
+from mediatools.core.decodecheck import DecodeCheck
 from mediatools.core.probe import MediaProbe
 
 
 class Assessor:
-    """Decodes the video stream of a file once and measures it.
+    """Decodes a file once and measures it.
 
-    One ffmpeg run decodes the first video stream to nothing (``-f null``)
-    and passes it through two filters of ffmpeg:
+    One ffmpeg run decodes the first video stream and every audio stream to
+    nothing (``-f null``) and passes the picture through two filters of
+    ffmpeg:
 
     * ``freezedetect`` reports intervals in which the picture does not
       change (a grey or otherwise still image),
@@ -26,6 +28,8 @@ class Assessor:
     Still intervals of both filters are merged before they are added up, so
     a black frozen part counts once. A freeze that lasts until the end is
     reported by ffmpeg only with its start; it is closed at the decoded end.
+    Lines of the null muxer (irregular time stamps) are not counted as
+    errors (:meth:`DecodeCheck.relevant`): they do not show damaged data.
 
     The run is read-only and uses the lowest CPU priority (``nice`` 19).
 
@@ -71,7 +75,8 @@ class Assessor:
         prefix = ["nice", "-n", "19"] if shutil.which("nice") else []
         return prefix + [self.ffmpeg, "-hide_banner", "-nostdin", "-nostats",
                          "-loglevel", "level+info", "-progress", "pipe:1", "-i", path,
-                         "-map", "0:v:0", "-vf", self.FILTERS, "-f", "null", "-"]
+                         "-map", "0:v:0", "-map", "0:a?", "-vf", self.FILTERS,
+                         "-f", "null", "-"]
 
     def assess(self, path: str) -> Assessment:
         """Measure a video.
@@ -93,8 +98,8 @@ class Assessor:
         except subprocess.TimeoutExpired:
             return Assessment(True, duration, note=f"decode did not finish within {limit:.0f} s")
         decoded = self.decoded_seconds(res.stdout)
-        errors = [line for line in res.stderr.splitlines() if "[error]" in line
-                  or "[fatal]" in line]
+        errors = [line for line in DecodeCheck.relevant(res.stderr.splitlines())
+                  if "[error]" in line or "[fatal]" in line]
         if decoded == 0 and res.returncode != 0:
             return Assessment(False, duration, errors=len(errors),
                               note=self.clean(errors[-1]) if errors else "ffmpeg failed")

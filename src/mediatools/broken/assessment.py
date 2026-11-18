@@ -23,11 +23,17 @@ class Assessment:
         still: Seconds of the decoded part with a frozen or black picture.
         errors: Number of error lines of the decoder.
         note: First error message or the reason why the file did not open.
+        method: Version of the measurement; 1 (mediatools 1.7.0) counted
+            the time stamp lines of the null muxer as errors and decoded
+            the picture only, 2 (since 1.7.1) does not and decodes the
+            sound as well.
     """
 
     MIN_DECODED = 0.10
     MAX_STILL = 0.90
     REPAIR_FROM = 0.50
+    HEALTHY_FROM = 0.99
+    METHOD = 2
 
     opened: bool
     duration: float = 0.0
@@ -35,6 +41,7 @@ class Assessment:
     still: float = 0.0
     errors: int = 0
     note: str = ""
+    method: int = METHOD
 
     @property
     def decoded_share(self) -> float:
@@ -70,6 +77,27 @@ class Assessment:
         if self.decoded > 0 and self.still / self.decoded > self.MAX_STILL:
             return "hopeless"
         return "promising"
+
+    @property
+    def healthy(self) -> bool:
+        """Tell whether the video is not damaged at all (a false alarm).
+
+        Returns:
+            True if it opens, at least :attr:`HEALTHY_FROM` of its duration
+            decodes, no decoder error was reported and the picture is not
+            mostly still (class ``promising``).
+        """
+        return self.opened and self.errors == 0 and self.decoded_share >= self.HEALTHY_FROM \
+            and self.kind == "promising"
+
+    @property
+    def current(self) -> bool:
+        """Tell whether the measurement used the current method.
+
+        Returns:
+            True if :attr:`method` is :attr:`METHOD`.
+        """
+        return self.method == self.METHOD
 
     @property
     def repair_advised(self) -> bool:
@@ -108,7 +136,9 @@ class Assessment:
             data: Dictionary written by :meth:`to_dict`.
 
         Returns:
-            The assessment; unknown keys are ignored.
+            The assessment; unknown keys are ignored, a record without
+            ``method`` was written by mediatools 1.7.0 (method 1).
         """
         names = ("opened", "duration", "decoded", "still", "errors", "note")
-        return cls(**{key: data[key] for key in names if key in data})
+        return cls(**{key: data[key] for key in names if key in data},
+                   method=int(data.get("method", 1)))

@@ -114,6 +114,9 @@ class RunStatus:
                f"log:       {log or '-'}"]
         if os.path.exists(self.control.restart_file):
             out.append("pending:   reload requested, takes effect after the current file")
+        answer = self.control.restart_answer()
+        if answer is not None:
+            out.append(f"reload:    {answer}")
         if os.path.exists(self.control.stop_file):
             out.append("pending:   stop requested, the run ends after the current file")
         return out
