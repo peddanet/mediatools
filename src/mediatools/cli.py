@@ -7,6 +7,8 @@ import shlex
 import shutil
 import sys
 
+from mediatools.broken import (Assessor, BrokenCollector, BrokenFinder, BrokenReview,
+                               DownloaderDatabase, Quarantine, RepairEncoder)
 from mediatools.core.config import Config
 from mediatools.core.datadir import DataDir
 from mediatools.core.datamigration import DataMigration
@@ -161,6 +163,8 @@ class Cli:
         cmd.add_argument("-y", "--yes", action="store_true",
                          help="skip the start question (each batch is still confirmed)")
 
+        Cli._add_broken_parser(sub)
+
         cmd = sub.add_parser("flatten", help="hard links of all media of each unit in <unit>/_flat")
         cmd.add_argument("path", nargs="?",
                          help="master directory (default: [collection] root); "
@@ -184,6 +188,32 @@ class Cli:
         cmd.add_argument("-y", "--yes", action="store_true")
         Cli._add_admin_parsers(sub)
         return parser
+
+    @staticmethod
+    def _add_broken_parser(sub) -> None:
+        """Define the subcommand broken.
+
+        Args:
+            sub: Sub-parser collection of the main parser.
+        """
+        cmd = sub.add_parser("broken", help="set damaged videos aside in <root>/_broken, then "
+                                            "review: play, repair, keep or delete")
+        cmd.add_argument("path", nargs="?", help="shrink root (default: [collection] root)")
+        cmd.add_argument("--collect", action="store_true",
+                         help="measure the videos recorded as BROKEN (and those of --report) "
+                              "and move them into _broken")
+        cmd.add_argument("--review", action="store_true",
+                         help="go through the videos in _broken: promising ones first")
+        cmd.add_argument("--report", metavar="TSV",
+                         help="also collect the videos of a report (column 'path'; with a "
+                              "'check' column only rows naming an error or broken)")
+        cmd.add_argument("--player", default="vlc")
+        cmd.add_argument("--audio", action="store_true", help="play with sound")
+        cmd.add_argument("--delete", action="store_true", help="delete instead of trash")
+        cmd.add_argument("--dry-run", action="store_true",
+                         help="with --collect: only measure and list")
+        cmd.add_argument("-y", "--yes", action="store_true",
+                         help="with --collect: move without asking")
 
     @staticmethod
     def _add_admin_parsers(sub) -> None:
@@ -348,7 +378,7 @@ class Cli:
             raise argparse.ArgumentTypeError(str(err)) from None
 
     @staticmethod
-    def ledger() -> Ledger:
+    def _ledger() -> Ledger:
         """Return the ledger of finished videos (filled in from the logs once).
 
         Returns:
@@ -385,7 +415,7 @@ class Cli:
         """
         if self.argv != ["shrink"] or not sys.stdin.isatty():
             return args
-        chosen = JobChooser(self.registry(self.ledger())).choose()
+        chosen = JobChooser(self.registry(self._ledger())).choose()
         if chosen is None:
             return None
         if not chosen:
@@ -469,7 +499,7 @@ class Cli:
         shrinker.state["results"] = ResultTable(
             root, DataDir().file("reports", "shrink_results", ".txt"), run.logger,
             shutil.get_terminal_size().columns - 1)
-        ledger = self.ledger()
+        ledger = self._ledger()
         job = JobSpec(root, opts.extensions, opts.min_seconds, opts.min_size, opts.newer_than)
         session = os.path.basename(run.path)[:-4]
         done = ledger.sums(job)
@@ -635,6 +665,52 @@ class Cli:
             return 0
         triage.install_signal_handlers()
         return triage.run()
+
+    def cmd_broken(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools broken``.
+
+        Without ``--collect`` or ``--review`` the open videos of
+        ``_broken`` are listed.
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code.
+
+        Raises:
+            SystemExit: If ``--review`` is not started from a terminal.
+        """
+        config = Config()
+        root = self._dir(config.require_path("collection", "root", args.path))
+        run = RunLog("broken")
+        quarantine = Quarantine(root, run.logger, config.db_name())
+        if args.collect:
+            self._need("ffmpeg", "ffprobe")
+            finder = BrokenFinder(root, config.db_name(), args.report)
+            collector = BrokenCollector(quarantine, finder, Assessor())
+            code = collector.run(dry_run=args.dry_run, ask=not args.yes)
+            if code or not args.review:
+                return code
+        if args.review:
+            if not sys.stdin.isatty():
+                raise SystemExit("Error: broken --review asks for every video and needs a "
+                                 "terminal; start it there (not from the GUI)")
+            self._need("ffmpeg", "ffprobe", shlex.split(args.player)[0],
+                       *([] if args.delete else ["gio"]))
+            repairer = RepairEncoder(logger=run.logger, decode=DecodeCheck(),
+                                     preset=self._preset(None, config))
+            review = BrokenReview(quarantine, PlayerSession(args.player, args.audio),
+                                  FileRemover(args.delete, run.logger), repairer,
+                                  DownloaderDatabase(config.get("broken", "downloader_db"),
+                                                     run.logger))
+            return review.run()
+        items = quarantine.open_items()
+        for item in items:
+            run.logger.info("  %-9s %s  %s", item.kind, item.assessment.summary(),
+                            os.path.relpath(item.original, root))
+        run.logger.info("%i video(s) set aside in %s", len(items), quarantine.directory)
+        return 0
 
     def cmd_flatten(self, args: argparse.Namespace) -> int:
         """Run ``mediatools flatten`` (analysis, plan, confirmation, apply).

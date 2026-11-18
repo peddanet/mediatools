@@ -51,6 +51,14 @@ jobs = 1
 # slower compresses more. Default medium.
 preset = medium
 
+[broken]
+# Database of a downloader, relative to a unit folder (e.g.
+# Metadata/media.db). When set, "mediatools broken --review" marks a
+# deleted video there as not downloaded, so the downloader fetches it
+# again. Expected: SQLite table medias with the columns directory,
+# filename and downloaded. Empty = off.
+downloader_db =
+
 [flatten]
 # Folder abbreviations used when a flat name is too long (naming level 1).
 # Format: Name=Abbreviation, comma separated.

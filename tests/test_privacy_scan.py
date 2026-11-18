@@ -79,10 +79,12 @@ def test_local_terms_from_denylist_and_collection(datadir: Path, tmp_path: Path)
     (datadir / "privacy_denylist.txt").write_text("alpha # comment\n\nbeta\n",
                                                   encoding="utf-8")
     os.makedirs(tmp_path / "coll/UnitOne")
+    os.makedirs(tmp_path / "coll/_broken")
     (datadir / "mediatools.ini").write_text(f"[collection]\nroot = {tmp_path / 'coll'}\n",
                                             encoding="utf-8")
     terms = privacy_scan.PrivacyScan.local_terms()
     assert {"alpha", "beta", "UnitOne"} <= set(terms)
+    assert "_broken" not in terms                  # created by mediatools, names no content
 
 
 @needs_git

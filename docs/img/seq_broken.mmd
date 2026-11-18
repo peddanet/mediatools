@@ -1,0 +1,38 @@
+sequenceDiagram
+  actor U as User
+  participant C as BrokenCollector
+  participant F as BrokenFinder
+  participant A as Assessor
+  participant Q as Quarantine
+  participant B as BrokenReview
+  participant E as RepairEncoder
+  participant D as DownloaderDatabase
+  U->>C: broken --collect
+  C->>F: find()
+  F-->>C: (path, reason) from shrink.db / report
+  loop each video
+    C->>A: assess(path)
+    A-->>C: Assessment (decodes, still, errors, class)
+  end
+  C->>U: plan, confirm?
+  U-->>C: y
+  loop each video
+    C->>Q: collect(path, assessment, reason)
+    Q->>Q: rename every hard link name into _broken/<class>/...
+    Q->>Q: write manifest.jsonl
+  end
+  U->>B: broken --review
+  loop promising (most usable first), then hopeless
+    B->>U: measurement, choice?
+    alt repair
+      B->>E: encode(held, repaired-<name>)
+      E-->>B: validated (full decode without errors)
+      U-->>B: accept
+      B->>Q: install(item, repaired)
+    else keep
+      B->>Q: restore(item) (BROKEN, kept after review)
+    else delete
+      B->>Q: delete(item)
+      B->>D: reset(original)
+    end
+  end

@@ -13,6 +13,8 @@ class MediaTypes:
     Attributes:
         FLAT_DIR: Name of the per-unit directory created by ``flatten``.
         SHRINK_TMP_DIR: Temporary output directory of ``shrink``.
+        BROKEN_DIR: Directory of a shrink root that holds damaged videos
+            set aside by ``mediatools broken``.
         SKIP_DIRS: Directory names no subcommand descends into.
         VIDEO: Lower-case video extensions including the dot.
         IMAGE: Lower-case image extensions including the dot.
@@ -22,7 +24,8 @@ class MediaTypes:
 
     FLAT_DIR = "_flat"
     SHRINK_TMP_DIR = "newShrinkedFiles"
-    SKIP_DIRS = frozenset({FLAT_DIR, SHRINK_TMP_DIR})
+    BROKEN_DIR = "_broken"
+    SKIP_DIRS = frozenset({FLAT_DIR, SHRINK_TMP_DIR, BROKEN_DIR})
 
     VIDEO = frozenset({".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv",
                        ".flv", ".ts", ".qt", ".mpg", ".mpeg"})
