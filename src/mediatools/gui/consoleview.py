@@ -1,10 +1,13 @@
 """Output pane of a command: live output, answers to questions, cancel."""
 from __future__ import annotations
 
+import json
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 from typing import Callable
 
+from mediatools.core.prompt import Prompt
+from mediatools.gui.choicedialog import ChoiceDialog
 from mediatools.gui.jobrunner import JobRunner
 
 
@@ -12,8 +15,11 @@ class ConsoleView:
     """Shows the output of one command as it arrives and lets the user answer.
 
     Questions of the command (``[y/N]``, a choice of versions or disks)
-    are answered in the input line; Enter sends the answer. *Cancel* acts
-    like Ctrl+C in a terminal, a second click terminates the command.
+    are answered in the input line; Enter sends the answer. A question the
+    command announces for the GUI (:meth:`Prompt.announce`) also opens a
+    dialog with one button per answer (:class:`ChoiceDialog`); the
+    announcement line itself is not shown. *Cancel* acts like Ctrl+C in a
+    terminal, a second click terminates the command.
 
     Attributes:
         frame: Container of the widgets (place it in the parent).
@@ -23,6 +29,9 @@ class ConsoleView:
         state: Text of the status line.
         on_finish: Called with the exit code when a command ends, or None.
         poll_ms: Interval of output checks in milliseconds.
+        dialog: Open question dialog, or None.
+        held: Start of an announcement line whose end has not arrived yet.
+        ask: Opens the dialog for an announced question (replaceable in tests).
     """
 
     def __init__(self, master: tk.Misc, runner: JobRunner | None = None,
@@ -55,6 +64,65 @@ class ConsoleView:
         ttk.Button(toolbar, text="Clear", command=self.clear).pack(side="left")
         self.state = tk.StringVar(value="ready")
         ttk.Label(self.frame, textvariable=self.state).pack(fill="x")
+        self.dialog: ChoiceDialog | None = None
+        self.held = ""
+        self.ask: Callable[[dict], None] = self.open_dialog
+
+    def take_questions(self, text: str) -> str:
+        """Remove the announcement lines of questions and open their dialogs.
+
+        Args:
+            text: New output (line ends already normalised).
+
+        Returns:
+            The text to show.
+        """
+        text, self.held = self.held + text, ""
+        shown = []
+        for piece in text.splitlines(keepends=True):
+            if piece.startswith(Prompt.MARKER) or (Prompt.MARKER.startswith(piece)
+                                                   and not piece.endswith("\n")):
+                if not piece.endswith("\n"):
+                    self.held = piece        # rest of the line follows later
+                    continue
+                try:
+                    spec = json.loads(piece[len(Prompt.MARKER):])
+                except ValueError:
+                    shown.append(piece)
+                    continue
+                self.ask(spec)
+            else:
+                shown.append(piece)
+        return "".join(shown)
+
+    def open_dialog(self, spec: dict) -> None:
+        """Show the dialog of an announced question.
+
+        Args:
+            spec: Announcement (question, choices, default).
+        """
+        self.close_dialog()
+        self.dialog = ChoiceDialog(self.frame, spec, self.answer_choice)
+
+    def close_dialog(self) -> None:
+        """Close an open question dialog."""
+        if self.dialog is not None:
+            self.dialog.close()
+            self.dialog = None
+
+    def answer_choice(self, answer: str) -> None:
+        """Send the answer chosen in a dialog.
+
+        Args:
+            answer: The answer.
+        """
+        self.dialog = None
+        try:
+            self.runner.send(answer)
+        except RuntimeError as exc:
+            self.state.set(str(exc))
+            return
+        self.write(answer + "\n")
 
     def write(self, text: str) -> None:
         """Append text to the output area.
@@ -67,7 +135,9 @@ class ConsoleView:
         """
         if not text:
             return
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = self.take_questions(text.replace("\r\n", "\n").replace("\r", "\n"))
+        if not text:
+            return
         at_end = self.text.yview()[1] >= 0.999
         self.text.configure(state="normal")
         self.text.insert("end", text)
@@ -108,6 +178,8 @@ class ConsoleView:
         if code is None:
             self.frame.after(self.poll_ms, self.poll)
             return
+        self.close_dialog()
+        self.held = ""
         self.write(f"[exit code {code}]\n")
         self.state.set("finished, exit code " + str(code))
         if self.on_finish is not None:
@@ -116,6 +188,7 @@ class ConsoleView:
     def send(self) -> None:
         """Send the input line to the running command."""
         answer = self.answer.get()
+        self.close_dialog()
         try:
             self.runner.send(answer)
         except RuntimeError as exc:

@@ -22,6 +22,10 @@ class PlayerSession:
     each file gets its own process even if "allow only one instance" is set
     in the VLC preferences.
 
+    With sound, an optional ``volume`` (percent) starts the player quietly:
+    VLC 3 has no start volume option any more and gets ``--gain`` (audio
+    gain, 1.0 = unchanged), mpv gets ``--volume``.
+
     Attributes:
         argv: Player command prefix; the file path is appended.
         start_window: Seconds after start in which an exit counts as error.
@@ -29,8 +33,8 @@ class PlayerSession:
         items: One dict per started file: ``path``, ``proc``, ``early``.
     """
 
-    def __init__(self, player: str = "vlc", audio: bool = False,
-                 start_window: float = 3.0, stagger: float = 0.3):
+    def __init__(self, player: str = "vlc", audio: bool = False,  # pylint: disable=R0913,R0917
+                 start_window: float = 3.0, stagger: float = 0.3, volume: int | None = None):
         """Configure the session.
 
         Args:
@@ -38,20 +42,22 @@ class PlayerSession:
             audio: Play with sound.
             start_window: Seconds after start in which an exit is an error.
             stagger: Pause between two player starts in seconds.
+            volume: Start volume in percent with sound; None = player default.
         """
-        self.argv = self.build_argv(player, audio)
+        self.argv = self.build_argv(player, audio, volume)
         self.start_window = start_window
         self.stagger = stagger
         self.items: list[dict] = []
 
     @staticmethod
-    def build_argv(player: str, audio: bool) -> list[str]:
+    def build_argv(player: str, audio: bool, volume: int | None = None) -> list[str]:
         """Build the player command with safe defaults for VLC and mpv.
 
         Args:
             player: Player command; may contain arguments
                 (e.g. ``flatpak run org.videolan.VLC``).
             audio: Play with sound.
+            volume: Start volume in percent with sound; None = player default.
 
         Returns:
             Argument list without the file path.
@@ -62,10 +68,14 @@ class PlayerSession:
             argv += ["--no-one-instance", "--no-playlist-enqueue", "--loop"]
             if not audio:
                 argv.append("--no-audio")
+            elif volume is not None:
+                argv.append(f"--gain={max(0, volume) / 100:.2f}")
         elif os.path.basename(argv[0]) == "mpv":
             argv += ["--loop-file=inf", "--force-window=yes"]
             if not audio:
                 argv.append("--mute=yes")
+            elif volume is not None:
+                argv.append(f"--volume={max(0, volume)}")
         return argv
 
     def open(self, paths: list[str]) -> None:

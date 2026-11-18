@@ -352,7 +352,7 @@ src/mediatools/
     decodecheck.py    DecodeCheck      trial decode: finds videos that cannot be decoded
     selfrestart.py    SelfRestart      switch a running job to the installed release
     walker.py         TreeWalker       sorted os.walk with skip rules
-    prompt.py         Prompt           yes/no and text questions, --yes support
+    prompt.py         Prompt           yes/no, choice and text questions, --yes, GUI announcement
   shrink/
     database.py       ShrinkDatabase   per-directory database, schema migration
     dbrenamer.py      DatabaseRenamer  one-time renaming of databases
@@ -375,11 +375,13 @@ src/mediatools/
     finder.py         BrokenFinder     BROKEN rows and report rows
     assessor.py       Assessor         full decode: decodes, still, errors
     assessment.py     Assessment       measurement and class
-    quarantine.py     Quarantine       _broken folder, manifest, restore, delete
-    collector.py      BrokenCollector  find, measure, confirm, move
+    quarantine.py     Quarantine       _broken folder, manifest, restore, recover, delete
+    backup.py         BackupMirror     intact copies on the backup disk (same path, then by name)
+    collector.py      BrokenCollector  find, measure, confirm, move, check the backup
+    command.py        BrokenCommand    the command and its options
     repairer.py       RepairEncoder    error-tolerant HEVC repair
     downloaderdb.py   DownloaderDatabase  mark a deleted video for a new download
-    review.py         BrokenReview     terminal dialogue per video
+    review.py         BrokenReview     dialogue per video (terminal or GUI)
   update/
     updater.py        ReleaseUpdater   mediatools update (runs apply-release.sh)
     apply-release.sh  -                applies delivered patch archives
@@ -877,6 +879,16 @@ release does not know the request and simply finishes with its own code
 -- nothing is mixed, because mediatools loads all its modules at start.
 ![Release switch of a running shrink](img/seq_reload.png){width=100%}
 
+**The answer of the job (since 1.7.1).** The job answers every request in
+`state/shrink.restart.answer`: `accepted: switching from A to B as soon as
+the running file(s) are done`, or `rejected:` with the reason (the
+installed release does not start - with the exit code and the last line of
+its error output -, or it is the release already running). `mediatools
+reload` waits up to 10 seconds for this answer and prints it (exit code 1
+for a rejection); `mediatools status` shows it in the line `reload:`. With
+`--jobs` above 1 the job checks for a request about every half second, so
+the answer comes at once; with one job it comes after the current file.
+
 `mediatools reload` without a running shrink prints `no shrink run is
 active - nothing to reload` and returns 1.
 
@@ -1065,6 +1077,7 @@ or delete.
 ~~~bash
 mediatools broken ~/Pictures/collection --collect --dry-run   # measure and list only
 mediatools broken ~/Pictures/collection --collect             # measure, ask, move
+mediatools broken ~/Pictures/collection --backup-check        # look for intact copies
 mediatools broken ~/Pictures/collection --review              # decide video by video
 mediatools broken ~/Pictures/collection                       # list what is set aside
 ~~~
@@ -1126,22 +1139,91 @@ measurement, the reason, the state (`open`, `restored`, `repaired`,
 `deleted`), the time and the number of names outside the root. Restore and
 repair rely on it.
 
+## False alarms and re-measuring
+
+The trial decode of shrink counts error lines of ffmpeg. Before 1.7.1 it
+also counted the lines of the `null` muxer at the end of its pipeline
+(`non monotonically increasing dts`): irregular time stamps that players
+ignore. Such videos were recorded as `BROKEN` although they play normally.
+Since 1.7.1 these lines are not counted (`DecodeCheck.relevant`), and the
+measurement decodes the sound as well.
+
+A video that opens, decodes to at least 99 % without a single decoder error
+and shows a moving picture counts as **not damaged**:
+
+* `--collect` does not move it; its `BROKEN` entry is removed, so the next
+  shrink run encodes it (log: `false alarm, not damaged`).
+* Videos already in `_broken` measured by 1.7.0 (manifest without
+  `method`) are measured again by `--collect` and at the start of the
+  review. Those not damaged go back for shrink (state `released`).
+
+## Backup check
+
+**Nothing is repaired or deleted before the backup was checked.** The
+backup disk holds a copy of the home directory under the same relative
+paths:
+
+~~~bash
+mediatools config --set broken.backup=/mnt/backup/USER   # backup copy of the home
+mediatools config --set broken.backup_of=                # directory it mirrors (empty: home)
+~~~
+
+`BackupMirror` checks in two passes:
+
+1. **Same path:** `<home>/a/b.mp4` is looked for as `<backup>/a/b.mp4`, for
+   every hard link name of the video.
+2. **Search:** videos without an intact copy there are noted and searched
+   for afterwards by file name in the *whole* backup (one walk for all).
+
+A copy counts as **intact** only if it decodes completely without a
+decoder error (all streams, lowest CPU priority): a cut-off download may
+have reached the backup in the same state. Of several copies the largest
+intact one wins. Result per video in the manifest: `intact`, `damaged`
+(copies exist, none clean) or `missing`. The backup is only read.
+
+Before the check `broken` makes sure the disk is really there: the backup
+directory exists, it lies on another file system than the collection (an
+empty mount point belongs to the system disk) and it holds the mirror of the
+shrink root (a locked encrypted folder shows only scrambled names). If not,
+it says why - e.g. `backup disk not mounted` - and nothing is decided.
+
+The check runs automatically after `--collect` (also with `--dry-run`, for
+the videos not moved yet), with `--backup-check` for every video in
+`_broken`, and with `c` in the review.
+
+~~~bash
+mediatools broken --backup-check            # check all set-aside videos now
+~~~
+
 ## Review
 
-`--review` needs a terminal. The promising videos come first, the most
-usable first, each on its own:
+`--review` runs in a terminal or in the GUI (tab *broken*, option
+*--review*): there every question appears as a dialog with one button per
+answer. The player starts with sound at `[broken] volume` percent (default
+30; VLC `--gain`, mpv `--volume`); `--mute` plays without sound.
 
-| Key | Action |
-|---|---|
-| `p` | play the damaged video (player as in triage), Enter closes it |
-| `r` | repair (see below); the default when at least 50 % is usable |
-| `k` | keep: every name goes back unchanged; recorded as `BROKEN` with the reason `kept after review`, so neither shrink nor `--collect` takes it again while its size is unchanged |
-| `d` | delete every name (trash; `--delete`: permanently), forget the failure entry, mark it for a new download (below) |
-| `s` / `q` | skip / end the review |
+Videos measured by an older method are measured again first. Then the
+promising videos come, the most usable first, each on its own. The answers
+offered depend on the measurement and the backup check:
 
-Then the hopeless videos as a group: `v` shows up to three of them at once,
-`a` deletes all after one confirmation, `o` goes through them one by one
-with the keys above.
+| Key | Action | Offered |
+|---|---|---|
+| `p` | play the damaged video; close the question when done | always |
+| `c` | check the backup for this video | until checked |
+| `b` | recover: copy the intact backup version into place under all names, remove the damaged copies, clear the failure entry (shrink encodes it again) | intact copy found |
+| `r` | repair (see below) | checked, no intact copy |
+| `k` | keep: every name goes back; a video that is not damaged goes back to shrink, a damaged one is recorded as `BROKEN` with the reason `kept after review` | always |
+| `d` | delete every name (trash; `--delete`: permanently), forget the failure entry, mark it for a new download (below) | checked, no intact copy |
+| `s` / `q` | skip / end the review | always |
+
+The default answer follows the state: keep for a video that is not damaged,
+recover with an intact copy, check while unchecked, otherwise repair from
+50 % usable content on, else play.
+
+Then the hopeless videos as a group: `v` shows up to three of them, `c`
+checks the backup for all unchecked ones, `b` recovers all with an intact
+copy, `a` deletes all checked ones *without* an intact copy after one
+confirmation, `o` goes through them one by one.
 
 ## Repair
 
@@ -1184,9 +1266,15 @@ nothing changes and the log says why.
 | `--report TSV` | none | further videos from a report |
 | `--dry-run` | off | with `--collect`: measure and list only |
 | `-y` | off | with `--collect`: move without asking |
-| `--review` | off | decide video by video |
-| `--player` / `--audio` | `vlc` / off | as in triage |
+| `--backup-check` | off | check every set-aside video against the backup |
+| `--review` | off | decide video by video (terminal or GUI) |
+| `--player` | `vlc` | as in triage |
+| `--mute` | off | play without sound (default: `[broken] volume` %) |
 | `--delete` | off | permanent deletion instead of trash |
+
+`--dry-run` without `--collect` is an error. Without `--collect`,
+`--backup-check` and `--review` the set-aside videos are listed with their
+backup state and a hint how to go on.
 
 # flatten
 

@@ -5,6 +5,57 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-18
+
+### Added
+- `mediatools broken` checks the backup disk before anything is repaired
+  or deleted. `[broken] backup` names the backup copy of the home
+  directory (same relative paths; `[broken] backup_of` if it mirrors
+  another directory). Every damaged video is looked for at the same path,
+  then by file name in the whole backup; a copy counts only if it decodes
+  completely without a decoder error. Results (`intact`, `damaged`,
+  `missing`) are kept in the manifest. The disk must be mounted (exists,
+  other file system than the collection, mirror of the shrink root
+  present), otherwise `broken` says so and decides nothing. The check runs
+  after `--collect` (also in a dry run), with the new option
+  `--backup-check`, and with `c` in the review.
+- Review: **recover** (`b`) copies the intact backup version into place
+  under all names (written next to the original, flushed, size compared,
+  renamed) and clears the failure entry, so shrink encodes it again.
+  Repair and delete are offered only after a backup check without an
+  intact copy; the hopeless group can check, recover all, and delete all
+  only those without a copy.
+- Review in the GUI: every question appears as a dialog with one button
+  per answer (`ChoiceDialog`); commands started by the GUI announce their
+  questions on a hidden line (`MEDIATOOLS_GUI=1`). Also the yes/no
+  questions of the other commands get a dialog.
+- The player of the review starts with sound at `[broken] volume` percent
+  (default 30: VLC `--gain`, mpv `--volume`); `--mute` replaces `--audio`.
+- `mediatools reload` waits up to 10 s for the answer of the running job
+  and prints it; the job writes `accepted: ...` or `rejected: ...` with the
+  reason (exit code and last error line of the installed release) to
+  `state/shrink.restart.answer`; `status` shows it in the line `reload:`.
+
+### Fixed
+- False alarms of the trial decode: lines of the `null` muxer (irregular
+  time stamps, "non monotonically increasing dts") were counted as decoder
+  errors, so videos that play normally were recorded as `BROKEN`. They are
+  no longer counted (`DecodeCheck.relevant`), in shrink as in `broken`.
+  `--collect` removes the `BROKEN` entry of a video that decodes
+  completely without errors instead of moving it; videos set aside by
+  1.7.0 are measured again (also at the start of the review) and those not
+  damaged go back for shrink. The measurement of `broken` now decodes the
+  sound as well.
+- A parallel shrink asked the installed release for its version every
+  half second after it had accepted a reload; it asks once now.
+
+### Changed
+- `broken` without options says how to go on; `--dry-run` without
+  `--collect` is an error. Repair progress is shown in steps of 5 %.
+- `--review` runs in a terminal or in the GUI; at the end of input every
+  question ends with its quit answer instead of repeating.
+- The command `broken` lives in `mediatools.broken.command`.
+
 ## [1.7.0] - 2026-11-17
 
 ### Added

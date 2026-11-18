@@ -465,38 +465,48 @@ files can be restored with `gio trash --list` / `gio trash --restore URI`.
 
 ```bash
 mediatools broken [PATH] [--collect] [--report TSV] [--dry-run] [-y]
-                         [--review] [--player vlc] [--audio] [--delete]
+                         [--backup-check] [--review] [--player vlc] [--mute] [--delete]
 ```
 
 Damaged videos - cut off by an interrupted download, or with data no decoder
 can use - waste space and fail every encode. `broken` sets them aside per
-shrink root and lets you decide about each one.
+shrink root and lets you decide about each one. **Nothing is repaired or
+deleted before the backup disk was checked for an intact copy.**
 
 1. `--collect` takes every video that `shrink` recorded as `BROKEN` (its
    trial decode failed) and, with `--report`, the videos of a report file
    (tab-separated, column `path`). Each one is decoded once at the lowest
    CPU priority and measured: how much decodes, how much of that is a frozen
    or black picture, how many decoder errors.
-2. Class **hopeless**: does not open, less than 10 % decodes, or more than
+2. A video that decodes completely without a decoder error is a **false
+   alarm** (e.g. only irregular time stamps): it is not moved, its
+   `BROKEN` entry is removed and shrink encodes it again.
+3. Class **hopeless**: does not open, less than 10 % decodes, or more than
    90 % of the decoded part is still or black. Every other video is
    **promising**.
-3. The videos move into `<PATH>/_broken/aussichtsreich/` or
+4. The videos move into `<PATH>/_broken/aussichtsreich/` or
    `<PATH>/_broken/hoffnungslos/`, keeping their path relative to `PATH`, so
    unit and origin stay visible. All hard link names move along;
    `_broken/manifest.jsonl` records them for an exact way back.
-4. `--review` shows the promising videos first, the most usable first:
-   **p** play, **r** repair, **k** keep (put back unchanged), **d** delete,
-   **s** skip, **q** quit. Then the hopeless ones as a group: view a few,
-   delete all, or one by one.
-5. **Repair** encodes what decodes into a clean HEVC file; after you have
-   played it you accept it (it takes the place of the damaged video under
-   all its names) or discard it. Advised from 50 % usable content on.
-6. **Delete** removes all names (trash; `--delete`: permanently). If
-   `[broken] downloader_db` names a downloader's database relative to a unit
-   folder, the video is marked there as not downloaded, so the next download
-   run fetches it again.
+5. **Backup check** (after `--collect`, with `--backup-check`, or `c` in the
+   review): `[broken] backup` is the backup copy of your home on the backup
+   disk (same relative paths). Each video is looked for at the same path,
+   then by name in the whole backup. A copy counts only if it decodes
+   completely without errors. If the disk is not mounted, `broken` says so
+   and waits for it.
+6. `--review` (terminal or GUI dialog) shows the promising videos first:
+   **p** play (with sound at `[broken] volume`, default 30 %; `--mute`
+   silences it), **c** check the backup, **b** recover from the backup,
+   **r** repair, **k** keep (put back), **d** delete, **s** skip, **q**
+   quit. Repair and delete are offered only after the backup check found
+   no intact copy. Then the hopeless ones as a group.
+7. **Recover** copies the intact backup version into place under all
+   names; shrink encodes it again. **Repair** encodes what decodes into a
+   clean HEVC file; you accept or discard it. **Delete** removes all names
+   (trash; `--delete`: permanently) and can mark the video for a new
+   download (`[broken] downloader_db`).
 
-`broken` without options lists what is set aside. `--review` needs a terminal.
+`broken` without options lists what is set aside and how to go on.
 
 ### flatten
 
@@ -614,6 +624,9 @@ db_name = shrink.db
 
 [broken]
 downloader_db =
+backup = /mnt/backup/USER
+backup_of =
+volume = 30
 
 [flatten]
 abbreviations = Videos=V, Images=I, Audios=U
@@ -642,6 +655,7 @@ change a default permanently:
 mediatools config --set collection.root=~/Pictures/other   # shrink, triage, flatten, ...
 mediatools config --set sync.source=~                      # default source of sync
 mediatools config --set broken.downloader_db=Metadata/media.db   # see broken
+mediatools config --set broken.backup=/mnt/backup/USER              # see broken
 ```
 
 ## How the pieces fit together

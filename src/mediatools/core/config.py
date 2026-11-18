@@ -58,6 +58,16 @@ preset = medium
 # again. Expected: SQLite table medias with the columns directory,
 # filename and downloaded. Empty = off.
 downloader_db =
+# Backup copy of your home directory on the backup disk (same relative
+# paths: ~/a/b.mp4 is <backup>/a/b.mp4). Before a damaged video may be
+# repaired or deleted, "mediatools broken" looks there for an intact copy
+# (same path first, then by name in the whole backup). Empty = no repair
+# and no deletion in the review.
+backup =
+# Directory the backup mirrors; empty = your home directory.
+backup_of =
+# Start volume of the player in the review, in percent (--mute: no sound).
+volume = 30
 
 [flatten]
 # Folder abbreviations used when a flat name is too long (naming level 1).
