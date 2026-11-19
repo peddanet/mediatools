@@ -279,6 +279,8 @@ class Shrinker:
             self.display = ProgressBar(total, len(todo), rate)
         base = self.state["base"]
         base.after = lambda: base.written + self.state["space"].run_out
+        base.ratio = self.state["throughput"].ratio()
+        base.freed = self._freed_overall
         self.display.base = self.state["base"]
         if self.control is not None:
             self.display.status_path = self.control.status_file
@@ -448,6 +450,15 @@ class Shrinker:
         if self.display is not None:
             self.display.file_done(item.size)
         self._job_progress(item.size)
+
+    def _freed_overall(self) -> int:
+        """Return the bytes freed by shrinking in all sessions, this process included.
+
+        Returns:
+            Source minus output bytes of all shrunk files.
+        """
+        src, out = self.state["space"].overall()
+        return src - out
 
     def _report_plan(self, todo: list[tuple[str, int]], total: int,
                      rate: float | None) -> None:
