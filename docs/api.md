@@ -1258,6 +1258,12 @@ while size and modification time of the file are unchanged.
 
 Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>duration``.
 
+Several processes may use the same file at the same time (a shrink job
+and ``estimate``, for example). :meth:`save` therefore writes through a
+temporary file of its own process and first merges the entries that
+another process saved in the meantime, so neither a half-written file
+nor lost entries can result. An unreadable line is skipped.
+
 Attributes:
     path: Location of the TSV file.
     entries: Mapping path to ``(size, mtime_ns, duration)``.
@@ -1274,6 +1280,21 @@ Load the cache file if it exists.
 
 Args:
     path: Location of the TSV file (created by :meth:`save`).
+~~~
+
+**`read`**
+
+~~~text
+read(cls, path: str) -> dict[str, tuple[int, int, Any]]
+
+Read a cache file.
+
+Args:
+    path: Location of the TSV file.
+
+Returns:
+    Entries by path; empty if the file does not exist. Lines that
+    cannot be read are skipped.
 ~~~
 
 **`get`**
@@ -1309,7 +1330,12 @@ Args:
 ~~~text
 save(self) -> None
 
-Write the cache atomically (temporary file, then rename).
+Write the cache atomically, keeping what other processes saved meanwhile.
+
+The file is read again first; its entries are kept unless this
+process holds a value for the same path. The temporary file carries
+the process number, so two processes saving at the same moment never
+write into the same temporary file.
 ~~~
 
 **`parse`**
@@ -2405,7 +2431,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.9.0') -> None
+__init__(self, control: RunControl, installed: str = '1.9.1') -> None
 
 Remember the job and the installed release.
 
@@ -2677,7 +2703,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.9.0')
+__init__(self, package_dir: str | None = None, version: str = '1.9.1')
 
 Locate the imported package.
 
@@ -7388,6 +7414,10 @@ Returns:
 _save(self) -> None
 
 Write the file atomically with mode 600.
+
+Entries another process saved meanwhile are kept (this process's
+own entries win), and the temporary file carries the process number,
+so two ``broken`` runs at the same time cannot spoil the file.
 ~~~
 
 **`identity`**
