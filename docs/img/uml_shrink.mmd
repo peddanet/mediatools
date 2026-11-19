@@ -56,6 +56,14 @@ classDiagram
     -_info(args)
     -_error(args)
   }
+  class EstimateCommand {
+    +root
+    +runlog
+    +init(root, db_name)
+    +add_parser(sub)
+    +run(args)
+    +report(potential, shrinker, count)
+  }
   class FileResult {
     +path
     +status
@@ -183,7 +191,8 @@ classDiagram
     +min_size
     +newer_than
     +jobs
-    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed, min_size, newer_than, jobs)
+    +probe_jobs
+    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed, min_size, newer_than, jobs, probe_jobs)
   }
   class ShrinkPlanner {
     +root
@@ -203,9 +212,38 @@ classDiagram
     -_drop_short(todo)
     -_set_aside_hevc(todo)
     -_checkpoint(what, cache, number, total)
+    +prefetch(what, paths)
+    +duration(path)
     -_codec(path)
     -_duration(path)
     -_note_leftover(dirpath)
+  }
+  class PotentialGroup {
+    +band
+    +quality
+    +files
+    +size
+    +ratio
+    +rate
+    +saved()
+    +seconds()
+    +per_hour()
+    +init(band, quality, files, size, ratio, rate)
+  }
+  class ShrinkPotential {
+    +ratios
+    +rates
+    +overall_ratio
+    +samples
+    +groups
+    +init(rows, wall_rate)
+    +band_of(seconds)
+    +quality_of(size, seconds)
+    +add(size, seconds)
+    +ranked()
+    +thresholds()
+    -_low(band)
+    +table()
   }
   class ProgressReport {
     +root
@@ -299,6 +337,7 @@ classDiagram
     -_start_free_slots(pool, table, pending)
     -_progress_into(cell)
     -_collect(table, future, busy)
+    -_freed_overall()
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
     -_process(path, size)
@@ -395,6 +434,11 @@ classDiagram
     +add(size, seconds, out_size)
     +duration_text(seconds)
   }
+  EstimateCommand ..> Ledger
+  EstimateCommand ..> ShrinkOptions
+  EstimateCommand ..> ShrinkPotential
+  EstimateCommand ..> Shrinker
+  EstimateCommand ..> ThroughputLog
   JobChooser --> JobRegistry
   JobEntry ..> JobSpec
   JobRegistry ..> JobEntry
@@ -421,6 +465,10 @@ classDiagram
   ShrinkPlanner --> ShrinkOptions
   ShrinkPlanner --> ShrinkState
   ShrinkPlanner ..> Shrinker
+  ShrinkPotential --> Ledger
+  ShrinkPotential --> LedgerRow
+  ShrinkPotential --> PotentialGroup
+  ShrinkPotential ..> ThroughputLog
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   ResultTable ..> FileResult

@@ -18,7 +18,7 @@ class CommandSpec:
         program: Words that start the command line, e.g. ``["mediatools"]``.
     """
 
-    READ_ONLY = ("progress", "status", "savings")
+    READ_ONLY = ("progress", "status", "savings", "estimate")
     """Commands that never change anything (run without confirmation)."""
 
     CHANGE_FLAGS = {"where": "--migrate"}
