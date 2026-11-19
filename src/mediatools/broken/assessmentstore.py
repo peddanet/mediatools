@@ -65,11 +65,19 @@ class AssessmentStore:
         return data if isinstance(data, dict) else {}
 
     def _save(self) -> None:
-        """Write the file atomically with mode 600."""
+        """Write the file atomically with mode 600.
+
+        Entries another process saved meanwhile are kept (this process's
+        own entries win), and the temporary file carries the process number,
+        so two ``broken`` runs at the same time cannot spoil the file.
+        """
         if not self.path:
             return
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        tmp = self.path + ".tmp"
+        merged = self._load()
+        merged.update(self._data)
+        self._data = merged
+        tmp = f"{self.path}.{os.getpid()}.tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as handle:
             json.dump(self._data, handle, ensure_ascii=False, indent=0, sort_keys=True)
