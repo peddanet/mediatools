@@ -15,7 +15,7 @@
 #         BIN_DIR=~/.local/bin ./install.sh
 #
 # Runs as a normal user and writes only below MEDIATOOLS_HOME and BIN_DIR.
-# Needs git, python3 >= 3.10 with the venv module (Debian/Ubuntu package
+# Needs git, python3 >= 3.12 with the venv module (Debian/Ubuntu package
 # python3-venv) and network access to GitHub and PyPI (build backend).
 set -euo pipefail
 
@@ -61,8 +61,8 @@ if [ -e "$LINK" ] || [ -L "$LINK" ]; then
   fi
 fi
 
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
-  || die "Python >= 3.10 required"
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))' \
+  || die "Python >= 3.12 required"
 
 # a venv whose interpreter vanished (system Python upgraded) is rebuilt
 if [ -d "$VENV" ] && ! "$VENV/bin/python" -c '' 2>/dev/null; then
