@@ -160,6 +160,31 @@ class ProgressBar:
                 f"{self.base.files + self.done_files} files done, "
                 f"{max(0, self.total_files - self.done_files)} to go")
 
+    def forecast_line(self, current: float = 0.0) -> str:
+        """Build the forecast of what the rest of the job will free.
+
+        Uses the output share measured so far (:attr:`ProgressBase.ratio`):
+        what is still to go, times one minus that share, is the space still
+        to be freed; added to what was freed in all sessions it gives the
+        expected total at the end of the job.
+
+        Args:
+            current: Bytes of the running files already encoded.
+
+        Returns:
+            Text without line break, or empty without a measured share.
+        """
+        ratio = self.base.ratio
+        if ratio is None:
+            return ""
+        gib = 1024 ** 3
+        to_go = max(0.0, self.total_bytes - self.done_bytes - current)
+        more = to_go * max(0.0, 1.0 - ratio)
+        total = (f", about {(self.base.freed() + more) / gib:.1f} GiB freed in total"
+                 if self.base.freed is not None else "")
+        return (f"expect {to_go / gib:.1f} GiB to go at {ratio * 100:.0f} % output (measured) "
+                f"-> about {more / gib:.1f} GiB more freed{total}")
+
     def file_line(self, name: str = "", file_fraction: float = 0.0, file_bytes: int = 0,
                   width: int | None = None, share: int = 1,
                   speed: float | None = None) -> str:
@@ -232,10 +257,12 @@ class ProgressBar:
         current = sum(fraction * size for _name, fraction, size in files)
         share = max(1, len(files))
         speed = self.rate(current)                # all running files count
+        forecast = self.forecast_line(current)
+        tail = [text for text in (forecast, extra) if text]
         plain = ([self.line("", 1.0, int(current))]
                  + [self.file_line(name, fraction, size, share=share, speed=speed)
                     for name, fraction, size in files]
-                 + ([extra] if extra else []))
+                 + tail)
         self._write_status(plain)
         if not self.enabled:
             return
@@ -243,7 +270,7 @@ class ProgressBar:
         lines = ([self.line("", 1.0, int(current))[:width]]
                  + [self.file_line(name, fraction, size, width, share, speed)[:width]
                     for name, fraction, size in files]
-                 + ([extra[:width]] if extra else []))
+                 + [text[:width] for text in tail])
         up = "\033[1A" * (self.drawn - 1) if self.drawn > 1 else ""   # back to line 1
         if len(lines) < self.drawn:              # fewer lines than before: clear first
             self.clear()
