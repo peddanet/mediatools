@@ -70,8 +70,8 @@ Two numbers recur everywhere and are worth fixing first:
 | Repository | `github.com/peddanet/mediatools`, **public** |
 | Workflow file | `.github/workflows/tests.yml`, workflow name `quality-gates` |
 | Gate script | `tools/check.sh` (privacy, format, lint, types, security, tests) |
-| Test matrix | CPython 3.10 and 3.14 on `ubuntu-24.04` (since 1.5.1; 3.10, 3.12, 3.13, 3.14 before) |
-| Required checks | `gates (3.10)`, `gates (3.14)` |
+| Test matrix | CPython 3.12 and 3.14 on `ubuntu-24.04` (since 1.10.0; 3.10 and 3.14 from 1.5.1; 3.10, 3.12, 3.13, 3.14 before) |
+| Required checks | `gates (3.12)`, `gates (3.14)` |
 
 # The big picture: executed twice, not mirrored
 
@@ -99,7 +99,7 @@ The identity of the script is what makes the local run a good
 | Aspect | Local (pre-push) | GitHub (CI) |
 |---|---|---|
 | Machine | own PC, state accumulates | fresh VM per job, deleted afterwards |
-| Python | the one in the local venv | 3.10 and 3.14, one VM each |
+| Python | the one in the local venv | 3.12 and 3.14, one VM each |
 | Tools | as installed (`pip install -e ".[dev]"`) | installed anew on every run |
 | Files | working tree incl. untracked files | only what is committed |
 | Privileges | normal user | user `runner` with passwordless `sudo` |
@@ -145,7 +145,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.14"]
+        python: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -163,14 +163,14 @@ jobs:
 
 | Key | Meaning |
 |---|---|
-| `jobs.gates` | job id; the check names become `gates (3.10)` and `gates (3.14)` (job id plus matrix value) |
+| `jobs.gates` | job id; the check names become `gates (3.12)` and `gates (3.14)` (job id plus matrix value) |
 | `if: github.ref_type != 'tag'` | the gates do not run for a tag push: the tagged merge commit has the tree its pull request already tested |
 | `runs-on` | runner **label**: selects the machine type (chapter 5) |
 | `strategy.matrix.python` | one job per list element, all started in parallel; the oldest supported and the newest version, the pre-push hook covers the PC's version in between |
 | `fail-fast: false` | a failing version does not cancel the other one; default would be `true` |
 | `uses:` | runs a published **action** (a versioned program from another repository); `checkout@v5` runs on Node.js 24 |
 | `cache: pip` | `setup-python` keeps pip's download cache between runs, keyed on the hash of `pyproject.toml` |
-| `${{ matrix.python }}` | expression; replaced by `3.10` or `3.14` in the respective job |
+| `${{ matrix.python }}` | expression; replaced by `3.12` or `3.14` in the respective job |
 | `run:` | shell command on the VM (bash on Linux runners); a non-zero exit code fails the step and the job |
 
 The second job only runs for release tags, and it is the only job of a
@@ -230,7 +230,7 @@ the gate run of the step:
 | Badge | Where | What |
 |---|---|---|
 | **LOCAL** | this PC, pre-push hook | `tools/check.sh` with the Python of the venv, on the working tree; can be bypassed with `--no-verify` |
-| **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.10 and 3.14 on the committed tree (pull requests); for a tag only `release-check`; binding for branch protection |
+| **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.12 and 3.14 on the committed tree (pull requests); for a tag only `release-check`; binding for branch protection |
 | **none** | - | no test: the pull request tested the same tree before |
 
 ![Feature and release, done by hand](img/lanes_release.png){width=100%}
@@ -366,17 +366,17 @@ container image that contains it (chapter 7).
 
 **Python 3.10 reached its end of life in October 2026** (final release
 3.10.22 on 2026-10-01). GitHub removes end-of-life versions from the
-images with advance notice (Python 3.9 was removed on 2026-01-12) and
-announces a removal from the manifest about six months ahead. 3.10 will
-therefore work for some time, but not indefinitely.
+images with advance notice (Python 3.9 was removed on 2026-01-12).
 
-Since 1.5.1 the matrix is 3.10 and 3.14 (from 1.2.13 to 1.5.0 it was
-3.10, 3.12, 3.13, 3.14); the action is `actions/setup-python@v6`. The
-oldest and the newest supported version catch most version-dependent
-errors; the pre-push hook adds the version of the developer PC. 3.10
-stays as long as `requires-python = ">=3.10"` must hold for a target
-system (Ubuntu 22.04 ships 3.10 as system Python). The required checks of
-the branch protection are `gates (3.10)` and `gates (3.14)` (chapter 9).
+Since 1.10.0 the minimum is Python 3.12 (`requires-python = ">=3.12"`,
+the system Python of Ubuntu 24.04 / Pop!_OS 24.04) and the matrix is 3.12
+and 3.14 (1.5.1 to 1.9.x: 3.10 and 3.14; 1.2.13 to 1.5.0: 3.10, 3.12,
+3.13, 3.14); the action is `actions/setup-python@v6`. The oldest and the
+newest supported version catch most version-dependent errors; the
+pre-push hook adds the version of the developer PC. The required checks
+of the branch protection are `gates (3.12)` and `gates (3.14)` (chapter
+9); they were changed together with the matrix, otherwise every merge
+waits for a check that is no longer produced.
 
 # Docker containers
 
@@ -549,7 +549,7 @@ call (normal user, repository owner):
 ~~~bash
 gh api -X PUT "repos/peddanet/mediatools/branches/main/protection" --input - <<'EOF'
 { "required_status_checks": { "strict": true,
-    "contexts": ["gates (3.10)", "gates (3.14)"] },
+    "contexts": ["gates (3.12)", "gates (3.14)"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 0 },
   "restrictions": null, "allow_force_pushes": false, "allow_deletions": false }
