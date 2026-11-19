@@ -5,6 +5,19 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-19
+
+### Fixed
+- Duration and codec caches, and the stored measurements of `broken`, can
+  be saved by two processes at the same time (e.g. a shrink job and
+  `estimate`): each process writes through its own temporary file and
+  keeps the entries the other one saved meanwhile. Unreadable cache lines
+  are skipped instead of stopping the run.
+
+### Documentation
+- Handbook: which commands may run at the same time, and how to get more
+  parallel encodes (`--jobs`, `--threads`).
+
 ## [1.9.0] - 2026-11-19
 
 ### Added

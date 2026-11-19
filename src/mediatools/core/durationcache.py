@@ -14,6 +14,12 @@ class DurationCache:
 
     Stored as TSV ``path<TAB>size<TAB>mtime_ns<TAB>duration``.
 
+    Several processes may use the same file at the same time (a shrink job
+    and ``estimate``, for example). :meth:`save` therefore writes through a
+    temporary file of its own process and first merges the entries that
+    another process saved in the meantime, so neither a half-written file
+    nor lost entries can result. An unreadable line is skipped.
+
     Attributes:
         path: Location of the TSV file.
         entries: Mapping path to ``(size, mtime_ns, duration)``.
@@ -28,18 +34,35 @@ class DurationCache:
             path: Location of the TSV file (created by :meth:`save`).
         """
         self.path = path
-        self.entries: dict[str, tuple[int, int, Any]] = {}
+        self.entries: dict[str, tuple[int, int, Any]] = self.read(path)
         self.hits = 0
         self.added = 0
+
+    @classmethod
+    def read(cls, path: str) -> dict[str, tuple[int, int, Any]]:
+        """Read a cache file.
+
+        Args:
+            path: Location of the TSV file.
+
+        Returns:
+            Entries by path; empty if the file does not exist. Lines that
+            cannot be read are skipped.
+        """
+        entries: dict[str, tuple[int, int, Any]] = {}
         try:
             with open(path, encoding="utf-8", errors="surrogateescape") as handle:
                 for line in handle:
                     parts = line.rstrip("\n").split("\t")
-                    if len(parts) == 4:
-                        self.entries[parts[0]] = (int(parts[1]), int(parts[2]),
-                                                  self.parse(parts[3]))
+                    if len(parts) != 4:
+                        continue
+                    try:
+                        entries[parts[0]] = (int(parts[1]), int(parts[2]), cls.parse(parts[3]))
+                    except ValueError:
+                        continue
         except FileNotFoundError:
             pass
+        return entries
 
     def get(self, file_path: str, st: os.stat_result) -> Any:
         """Return the cached duration if the file is unchanged.
@@ -69,8 +92,17 @@ class DurationCache:
         self.added += 1
 
     def save(self) -> None:
-        """Write the cache atomically (temporary file, then rename)."""
-        tmp = self.path + ".tmp"
+        """Write the cache atomically, keeping what other processes saved meanwhile.
+
+        The file is read again first; its entries are kept unless this
+        process holds a value for the same path. The temporary file carries
+        the process number, so two processes saving at the same moment never
+        write into the same temporary file.
+        """
+        merged = self.read(self.path)
+        merged.update(self.entries)
+        self.entries = merged
+        tmp = f"{self.path}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as handle:
             for file_path, (size, mtime, duration) in sorted(self.entries.items()):
                 handle.write(f"{file_path}\t{size}\t{mtime}\t{self.format(duration)}\n")
