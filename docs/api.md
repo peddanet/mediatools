@@ -373,6 +373,20 @@ Raises:
     SystemExit: If the duration range is invalid.
 ~~~
 
+**`_cmd_estimate`**
+
+~~~text
+_cmd_estimate(self, args: argparse.Namespace) -> int
+
+Run ``mediatools estimate`` (see :class:`EstimateCommand`).
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0.
+~~~
+
 **`cmd_broken`**
 
 ~~~text
@@ -1752,6 +1766,25 @@ Returns:
     Text without line break.
 ~~~
 
+**`forecast_line`**
+
+~~~text
+forecast_line(self, current: float = 0.0) -> str
+
+Build the forecast of what the rest of the job will free.
+
+Uses the output share measured so far (:attr:`ProgressBase.ratio`):
+what is still to go, times one minus that share, is the space still
+to be freed; added to what was freed in all sessions it gives the
+expected total at the end of the job.
+
+Args:
+    current: Bytes of the running files already encoded.
+
+Returns:
+    Text without line break, or empty without a measured share.
+~~~
+
 **`file_line`**
 
 ~~~text
@@ -1893,6 +1926,9 @@ Attributes:
     after: Returns the size after shrinking of the job's shrunk files,
         or None to leave that figure out.
     written: Output bytes of the job's shrunk files before this process.
+    ratio: Measured output share (output per source byte) for the
+        forecast line, or None to leave the forecast out.
+    freed: Returns the bytes freed so far in all sessions, or None.
 ~~~
 
 **`__replace__`**
@@ -1913,6 +1949,8 @@ __init__(
     since: str = '',
     after: Callable[[], int] | None = None,
     written: int = 0,
+    ratio: float | None = None,
+    freed: Callable[[], int] | None = None,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -2367,7 +2405,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.8.0') -> None
+__init__(self, control: RunControl, installed: str = '1.9.0') -> None
 
 Remember the job and the installed release.
 
@@ -2639,7 +2677,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.8.0')
+__init__(self, package_dir: str | None = None, version: str = '1.9.0')
 
 Locate the imported package.
 
@@ -3251,6 +3289,75 @@ Log at ERROR level if a logger is set.
 
 Args:
     *args: Format string and arguments for :meth:`logging.Logger.error`.
+~~~
+
+### `EstimateCommand` (`mediatools.shrink.estimatecommand`) {.unnumbered}
+
+~~~text
+Plans like ``shrink`` without encoding and estimates the potential.
+
+Read only: no database, cache of a run or video is changed, interrupted
+replacements are not completed (that is left to ``shrink``), and it can
+run while a shrink job is active. Videos recorded in a shrink database,
+recorded as failed, or already HEVC are left out exactly as ``shrink``
+does; the rest is grouped by playing time and bit rate
+(:class:`ShrinkPotential`) with the measured output share and speed.
+Durations and codecs come from the caches of shrink; missing ones are
+probed with several ffprobe processes at once and added to the caches.
+
+Attributes:
+    root: Directory to estimate.
+    runlog: Log of this command.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: str, db_name: str | None) -> None
+
+Bind the command to a directory.
+
+Args:
+    root: Directory.
+    db_name: File name of the shrink databases.
+~~~
+
+**`add_parser`**
+
+~~~text
+add_parser(sub: argparse._SubParsersAction) -> None
+
+Define the subcommand.
+
+Args:
+    sub: Sub-parser collection of the main parser.
+~~~
+
+**`run`**
+
+~~~text
+run(self, args: argparse.Namespace) -> int
+
+Plan, group and report.
+
+Args:
+    args: Parsed arguments (``ext``, ``probe_jobs``).
+
+Returns:
+    0.
+~~~
+
+**`report`**
+
+~~~text
+report(self, potential: ShrinkPotential, shrinker: Shrinker, count: int) -> None
+
+Log the basis, the ranked groups and the thresholds, and write a TSV report.
+
+Args:
+    potential: Grouped videos.
+    shrinker: The planning run (for its counters).
+    count: Videos still to shrink.
 ~~~
 
 ### `FileResult` (`mediatools.shrink.fileresult`) {.unnumbered}
@@ -4313,6 +4420,8 @@ Attributes:
     newer_than: Leave out videos modified before this time (epoch
         seconds); None processes all.
     jobs: Number of videos encoded at the same time (1: one after the other).
+    probe_jobs: Number of ffprobe processes run at the same time while
+        planning (durations and codecs not in the cache yet).
 ~~~
 
 **`__post_init__`**
@@ -4357,6 +4466,7 @@ __init__(
     min_size: int = 0,
     newer_than: float | None = None,
     jobs: int = 1,
+    probe_jobs: int = 8,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -4571,6 +4681,38 @@ Args:
     total: Files to check.
 ~~~
 
+**`prefetch`**
+
+~~~text
+prefetch(self, what: str, paths: list[str]) -> None
+
+Probe the values missing in a cache with several ffprobe processes at once.
+
+A first plan of a large tree spends most of its time waiting for
+ffprobe, one file after the other. Running ``probe_jobs`` probes at
+the same time shortens that by about that factor; the results go into
+the cache (saved every :attr:`CHECKPOINT` files), so the following
+check reads them from there.
+
+Args:
+    what: ``durations`` or ``codecs``.
+    paths: Videos about to be checked.
+~~~
+
+**`duration`**
+
+~~~text
+duration(self, path: str) -> float | None
+
+Return a video's duration, from the cache if possible (public for estimates).
+
+Args:
+    path: Video file.
+
+Returns:
+    Seconds, or None if unknown.
+~~~
+
 **`_codec`**
 
 ~~~text
@@ -4608,6 +4750,214 @@ Remember a leftover work folder for the plan summary.
 
 Args:
     dirpath: Directory whose ``newShrinkedFiles`` is checked.
+~~~
+
+### `PotentialGroup` (`mediatools.shrink.potential`) {.unnumbered}
+
+~~~text
+Videos of one length band and one bit-rate class.
+
+Attributes:
+    band: Length band, e.g. ``5-10 min``.
+    quality: Bit-rate class, e.g. ``2-4 Mbit/s``.
+    files: Number of videos.
+    size: Their size in bytes.
+    ratio: Expected output share (output bytes per source byte).
+    rate: Expected speed in source bytes per wall-clock second.
+~~~
+
+**`saved`**
+
+~~~text
+saved(self) -> float
+
+Bytes expected to be freed.
+~~~
+
+**`seconds`**
+
+~~~text
+seconds(self) -> float
+
+Expected encoding time in wall-clock seconds.
+~~~
+
+**`per_hour`**
+
+~~~text
+per_hour(self) -> float
+
+Bytes freed per hour of encoding.
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    band: str,
+    quality: str,
+    files: int = 0,
+    size: int = 0,
+    ratio: float = 0.2,
+    rate: float = 1.0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
+~~~
+
+### `ShrinkPotential` (`mediatools.shrink.potential`) {.unnumbered}
+
+~~~text
+Groups the videos still to shrink and estimates savings and time.
+
+The estimate uses what was measured so far, not a model of the encoder:
+
+* **output share** per bit-rate class: sum of output bytes over sum of
+  source bytes of the shrunk videos in the ledger whose source had that
+  bit rate (size x 8 / playing time). A class with fewer than
+  :attr:`MIN_SAMPLES` measured videos uses the overall share.
+* **speed** per bit-rate class: source bytes per second spent on the
+  file (ledger), scaled to the measured wall-clock speed of the whole
+  run (``ThroughputLog``), which includes parallel encodes.
+
+Videos are grouped by playing time (the bands of ``--min-seconds``) and
+by bit rate (a rough measure of quality: a high bit rate has the most to
+lose). The groups are ranked by space freed per hour of encoding, so
+the first rows are the best next step.
+
+Attributes:
+    ratios: Output share per bit-rate class.
+    rates: Speed per bit-rate class (source bytes per wall second).
+    overall_ratio: Output share over all measured videos.
+    samples: Measured videos per bit-rate class.
+    groups: Groups by ``(band, quality)``.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, rows: list[LedgerRow], wall_rate: float | None) -> None
+
+Derive output share and speed per bit-rate class from the ledger.
+
+Args:
+    rows: Ledger entries.
+    wall_rate: Measured wall-clock speed of shrinking (source bytes
+        per second), or None.
+~~~
+
+**`band_of`**
+
+~~~text
+band_of(cls, seconds: float | None) -> str
+
+Return the length band of a playing time.
+
+Args:
+    seconds: Playing time, or None.
+
+Returns:
+    Band label, or ``unknown``.
+~~~
+
+**`quality_of`**
+
+~~~text
+quality_of(cls, size: int, seconds: float | None) -> str
+
+Return the bit-rate class of a video.
+
+Args:
+    size: Size in bytes.
+    seconds: Playing time, or None.
+
+Returns:
+    Class label, or ``unknown`` without a playing time.
+~~~
+
+**`add`**
+
+~~~text
+add(self, size: int, seconds: float | None) -> None
+
+Count one video still to shrink.
+
+Args:
+    size: Its size in bytes.
+    seconds: Its playing time, or None if unknown.
+~~~
+
+**`ranked`**
+
+~~~text
+ranked(self) -> list[PotentialGroup]
+
+Return the groups, the most space per hour first.
+
+Returns:
+    Groups sorted by :attr:`PotentialGroup.per_hour`, descending.
+~~~
+
+**`thresholds`**
+
+~~~text
+thresholds(self) -> list[tuple[str, int, int, float, float]]
+
+Sum up what each ``--min-seconds`` value would take in.
+
+Returns:
+    ``(min-seconds label, files, bytes, bytes freed, seconds)`` per
+    threshold, from the longest videos only down to all videos.
+~~~
+
+**`_low`**
+
+~~~text
+_low(self, band: str) -> float
+
+Return the lower bound of a band label.
+
+Args:
+    band: Band label.
+
+Returns:
+    Seconds.
+~~~
+
+**`table`**
+
+~~~text
+table(self) -> list[str]
+
+Format the ranked groups with running totals.
+
+Returns:
+    Text lines, header first.
 ~~~
 
 ### `ProgressReport` (`mediatools.shrink.progress`) {.unnumbered}
@@ -5467,6 +5817,17 @@ Args:
     table: Slot bookkeeping.
     future: The finished encode.
     busy: Encodes that were running (share of the speed measurement).
+~~~
+
+**`_freed_overall`**
+
+~~~text
+_freed_overall(self) -> int
+
+Return the bytes freed by shrinking in all sessions, this process included.
+
+Returns:
+    Source minus output bytes of all shrunk files.
 ~~~
 
 **`_report_plan`**

@@ -75,6 +75,7 @@ a test folder, back up, then work (section "First steps").
 | Subcommand | Purpose | Writes to |
 |---|---|---|
 | `shrink` | HEVC re-encode in place, name kept | original files (same inode), `shrink.db` |
+| `estimate` | what shrinking could still free, by length and bit rate, and how long | data directory only (report, probe caches) |
 | `progress` | which videos are recorded as done | data directory only |
 | `triage` | review short clips, discard by closing the window | trash (or delete), kept list |
 | `broken` | set damaged videos aside, review, repair or delete them | `<root>/_broken/`, `shrink.db`, optionally a downloader database |
@@ -630,8 +631,16 @@ them.
 ~~~text
 job   [#############...........]  37.5 % | ETA 2d21h | since 2026-11-09: 210.0 GiB read (-> 33.6 GiB after shrinking), 350.0 GiB to go | 2500 files done, 4000 to go
 file   63 % of 1.20 GiB (0.76 GiB encoded) | 8m left | clip.mp4
+expect 350.0 GiB to go at 17 % output (measured) -> about 290.5 GiB more freed, about 1061.1 GiB freed in total
 space  session since 2026-11-12 04:56: 210.0 GiB read -> 33.6 GiB written = 176.4 GiB freed | total since 2026-10-20: 912.0 GiB read -> 141.4 GiB written = 770.6 GiB freed
 ~~~
+
+**Forecast** (line `expect`, since 1.9.0): the GiB still to go times one
+minus the output share measured so far (all shrunk files) is the space
+still to be freed by this job; added to the space freed in all sessions it
+gives the expected total at its end. The share is an average - single
+videos shrink to 13 % or to over 30 % - so the figure is a guide, not a
+promise.
 
 The first line covers the job (since 1.6.0; see *Jobs and the ledger*):
 the source GiB of the job read by all runs so far, with their size after
@@ -942,6 +951,54 @@ the original was never touched.
 
 Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed,
 3 another shrink run is active.
+
+## Faster planning
+
+Durations and codecs that are not in the caches yet are probed with
+`probe_jobs` ffprobe processes at the same time (default 8) and saved
+every 500 files; the check that follows reads them from the cache. A
+first plan of a large tree is about that many times faster.
+
+# estimate
+
+What shrinking could still free, and how long it would take - without
+changing anything (no database, no video; it may run while a shrink job is
+active):
+
+~~~bash
+mediatools estimate ~/Pictures                 # a whole tree, e.g. above the collection
+mediatools estimate                            # [collection] root
+~~~
+
+It plans exactly like `shrink` without `--min-seconds`: videos recorded in a
+shrink database, recorded as failed or already HEVC are left out. The rest
+is grouped by **playing time** (the bands of `--min-seconds`) and **bit
+rate** (size x 8 / playing time, a rough measure of quality: a high bit rate
+has the most to lose). For each group it estimates from what was measured
+so far:
+
+| Value | Source |
+|---|---|
+| output share | ledger: output / source bytes of the shrunk videos of the same bit-rate class (at least 20 measured, else the overall share) |
+| speed | ledger: source bytes per second spent per class, scaled to the measured wall-clock speed of shrinking (parallel encodes included) |
+
+Output (numbers illustrative):
+
+~~~text
+basis: output 17 % of the source and 2.4 MB/s (measured on 2752 video(s)); per bit rate ...
+1013 video(s) not shrunk yet - best groups first (most GiB freed per hour):
+  length     bit rate      files      GiB  freed GiB   hours  GiB/h  sum freed sum hours
+  10-30 min  >= 8 Mbit/s     120    150.0      127.5    17.4    7.3      127.5      17.4
+  5-10 min   4-8 Mbit/s      300     90.0       73.8    10.4    7.1      201.3      27.8
+  ...
+what each --min-seconds would take in:
+  --min-seconds 300       420 files    240.0 GiB -> about   201.3 GiB freed in 1d 3h
+  --min-seconds 120      2100 files    290.0 GiB -> about   235.0 GiB freed in 1d 10h
+~~~
+
+The first rows are the best next step; *sum freed* and *sum hours* tell
+what taking the groups down to that row yields and costs. The table is
+also written to `<state>/reports/shrink_estimate_<time>.tsv`.
 
 # progress
 

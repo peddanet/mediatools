@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
@@ -180,6 +181,7 @@ class ShrinkPlanner:
             Candidates with a known duration of at least ``min_seconds``
             (unknown durations are kept).
         """
+        self.prefetch("durations", [path for path, _size in todo])
         kept = []
         for number, (path, size) in enumerate(todo, 1):
             if number % self.CHECKPOINT == 0 and number < len(todo):
@@ -202,6 +204,7 @@ class ShrinkPlanner:
             Candidates that need encoding; the others go to
             ``found["hevc"]``.
         """
+        self.prefetch("codecs", [path for path, _size in todo])
         rest = []
         for number, (path, size) in enumerate(todo, 1):
             if number % self.CHECKPOINT == 0 and number < len(todo):
@@ -234,6 +237,57 @@ class ShrinkPlanner:
         self.log.info("checking %s: %i of %i (%i from cache)", what, number, total, cache.hits)
         if cache.added:
             cache.save()
+
+    def prefetch(self, what: str, paths: list[str]) -> None:
+        """Probe the values missing in a cache with several ffprobe processes at once.
+
+        A first plan of a large tree spends most of its time waiting for
+        ffprobe, one file after the other. Running ``probe_jobs`` probes at
+        the same time shortens that by about that factor; the results go into
+        the cache (saved every :attr:`CHECKPOINT` files), so the following
+        check reads them from there.
+
+        Args:
+            what: ``durations`` or ``codecs``.
+            paths: Videos about to be checked.
+        """
+        cache = self.state["durations"] if what == "durations" else self.state["codecs"]
+        if cache is None or self.opts.probe_jobs < 2:
+            return
+        probe = self.probe.duration if what == "durations" else self.probe.video_codec
+        missing = []
+        hits = cache.hits
+        for path in paths:
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            if cache.get(path, st) is None:
+                missing.append((path, st))
+        cache.hits = hits                    # the check that follows counts its own hits
+        if not missing:
+            return
+        self.log.info("probing %s of %i video(s), %i at a time", what, len(missing),
+                      self.opts.probe_jobs)
+        with ThreadPoolExecutor(max_workers=self.opts.probe_jobs) as pool:
+            for start in range(0, len(missing), self.CHECKPOINT):
+                chunk = missing[start:start + self.CHECKPOINT]
+                for (path, st), value in zip(chunk, pool.map(probe, [p for p, _s in chunk])):
+                    if value is not None:
+                        cache.put(path, st, value)
+                cache.save()
+                self.log.info("probed %s: %i of %i", what, start + len(chunk), len(missing))
+
+    def duration(self, path: str) -> float | None:
+        """Return a video's duration, from the cache if possible (public for estimates).
+
+        Args:
+            path: Video file.
+
+        Returns:
+            Seconds, or None if unknown.
+        """
+        return self._duration(path)
 
     def _codec(self, path: str) -> str | None:
         """Return a video's codec, from the cache if possible.

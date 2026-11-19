@@ -13,6 +13,7 @@ links**, and keep versioned snapshots of it with rsnapshot.
 
 ```text
 mediatools shrink    re-encode videos to HEVC in place, tracked per directory
+mediatools estimate  what shrinking could still free, by length and bit rate, and how long
 mediatools progress  read-only report: which videos are already shrunk
 mediatools triage    open short clips in batches, close a window to discard it
 mediatools broken    set damaged videos aside, then play, repair, keep or delete them
@@ -74,6 +75,7 @@ again, not the clips you discarded.
 
 ```text
 mediatools shrink    re-encode videos to HEVC in place, tracked per directory
+mediatools estimate  what shrinking could still free, by length and bit rate, and how long
 mediatools progress  read-only report: which videos are already shrunk
 mediatools triage    open short clips in batches, close a window to discard it
 mediatools broken    set damaged videos aside, then play, repair, keep or delete them
