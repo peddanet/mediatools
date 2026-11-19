@@ -87,7 +87,8 @@ class ShrinkPanel:
     def refresh(self) -> None:
         """Read the state and show it; schedule the next refresh."""
         state = self.monitor.read()
-        self.report.set("\n".join(state.report))
+        self.report.set("\n".join(state.report + [
+            state.job or "job:     no shrink is running - the form below starts one"]))
         self.progress.set("\n".join(state.progress) if state.progress
                           else "(no progress lines - no shrink is encoding right now)")
         self.overall.set(state.overall)

@@ -217,6 +217,8 @@ class Cli:
         cmd.add_argument("--delete", action="store_true", help="delete instead of trash")
         cmd.add_argument("--dry-run", action="store_true",
                          help="with --collect: only measure, check the backup and list")
+        cmd.add_argument("--recheck", action="store_true",
+                         help="measure and check the backup again although a result exists")
         cmd.add_argument("-y", "--yes", action="store_true",
                          help="with --collect: move without asking")
 
