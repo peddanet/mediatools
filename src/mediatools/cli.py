@@ -39,6 +39,7 @@ from mediatools.shrink.jobspec import JobSpec
 from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.savingslog import SavingsLog
+from mediatools.shrink.estimatecommand import EstimateCommand
 from mediatools.shrink.spacetally import SpaceTally
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
@@ -105,6 +106,7 @@ class Cli:
         cmd.add_argument("-v", "--verbose", action="store_true", help="debug logging")
         cmd.add_argument("--continue-log", help=argparse.SUPPRESS)   # set by a release switch
 
+        EstimateCommand.add_parser(sub)
         sub.add_parser("reload", help="ask a running shrink to switch to the newly installed "
                                       "release after its current file; returns at once")
         sub.add_parser("status", help="show whether a shrink runs, with which release, "
@@ -329,7 +331,8 @@ class Cli:
         if not args.command:
             self.parser.print_help()
             return 1
-        return getattr(self, "cmd_" + args.command.replace("-", "_"))(args)
+        name = args.command.replace("-", "_")
+        return (getattr(self, "cmd_" + name, None) or getattr(self, "_cmd_" + name))(args)
 
     @staticmethod
     def _dir(path: str) -> str:
@@ -689,6 +692,19 @@ class Cli:
             return 0
         triage.install_signal_handlers()
         return triage.run()
+
+    def _cmd_estimate(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools estimate`` (see :class:`EstimateCommand`).
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            0.
+        """
+        config, _need = Config(), self._need("ffprobe")
+        root = self._dir(config.require_path("collection", "root", args.path))
+        return EstimateCommand(root, config.db_name()).run(args)
 
     def cmd_broken(self, args: argparse.Namespace) -> int:
         """Run ``mediatools broken`` (see :class:`BrokenCommand`).

@@ -24,6 +24,9 @@ class ProgressBase:
         after: Returns the size after shrinking of the job's shrunk files,
             or None to leave that figure out.
         written: Output bytes of the job's shrunk files before this process.
+        ratio: Measured output share (output per source byte) for the
+            forecast line, or None to leave the forecast out.
+        freed: Returns the bytes freed so far in all sessions, or None.
     """
 
     read: int = 0
@@ -31,3 +34,5 @@ class ProgressBase:
     since: str = ""
     after: Callable[[], int] | None = None
     written: int = 0
+    ratio: float | None = None
+    freed: Callable[[], int] | None = None
