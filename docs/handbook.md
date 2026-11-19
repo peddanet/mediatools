@@ -952,6 +952,22 @@ the original was never touched.
 Exit codes: 0 done, 1 stopped by the user, 2 at least one file failed,
 3 another shrink run is active.
 
+## Running commands at the same time
+
+| Combination | Possible | Why |
+|---|---|---|
+| two `shrink` processes | **no** (exit code 3) | one job per machine: both would plan the same files, write the same databases and replace the same originals. More throughput comes from `--jobs N` inside one job: each slot encodes its own file, hard links of one inode never together. |
+| `shrink` and `estimate` | yes | `estimate` changes no video and no database; both save the duration and codec caches without losing each other's entries (since 1.9.1) |
+| `shrink` and `broken` | yes, with care | `broken --collect` leaves videos alone whose output is in the work folder; stop shrink before a real `--collect` with new candidates (an encode may start on a video while it is measured) |
+| `shrink` and `update` | yes | the job switches to the new release after its running files (`reload`) |
+| `broken` inside | one video after the other | every measurement and backup check is one ffmpeg decode, which itself uses several threads; `broken` starts no parallel decodes |
+
+**More parallel encodes.** `--jobs` and `--threads` are fixed for a job;
+to change them, stop it (`mediatools stop`, it ends after its running
+files) and start it again, e.g. `--jobs 3 --threads 8`. Whether that is
+faster depends on whether the CPU is already busy: compare the MB/s of the
+plan line (`at the measured ... MB/s`) after an hour.
+
 ## Faster planning
 
 Durations and codecs that are not in the caches yet are probed with
