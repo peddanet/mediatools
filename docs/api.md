@@ -2367,7 +2367,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.7.1') -> None
+__init__(self, control: RunControl, installed: str = '1.8.0') -> None
 
 Remember the job and the installed release.
 
@@ -2639,7 +2639,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.7.1')
+__init__(self, package_dir: str | None = None, version: str = '1.8.0')
 
 Locate the imported package.
 
@@ -3368,7 +3368,7 @@ A remembered job.
 Attributes:
     spec: Root and filters.
     settings: Settings of the last run: ``crf``, ``preset``, ``order``,
-        ``jobs``, ``threads``.
+        ``jobs``, ``threads``, ``retry_failed``, ``keep_copies``.
     last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
     todo_bytes: Source bytes still to encode (as of the last plan, minus
         the files finished since); -1 if not planned since 1.6.0 (job
@@ -4426,7 +4426,8 @@ Attributes:
     database_of: Returns the database of a directory.
     journal: Completes interrupted replacements.
     stats: Shared counters ``skipped``, ``short``, ``recovered``,
-        ``failed_before``, ``regrown``, ``small``, ``older``.
+        ``failed_before``, ``regrown``, ``small``, ``older``,
+        ``retry_broken``.
     found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
 ~~~
 
@@ -5370,8 +5371,8 @@ settings(self) -> dict[str, object]
 Return the settings of this run that do not define the job.
 
 Returns:
-    ``crf``, ``preset``, ``order``, ``jobs`` and ``threads`` (None:
-    default).
+    ``crf``, ``preset``, ``order``, ``jobs``, ``threads`` (None:
+    default), ``retry_failed`` and ``keep_copies``.
 ~~~
 
 **`_encode_serial`**
@@ -6972,6 +6973,118 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
+### `AssessmentStore` (`mediatools.broken.assessmentstore`) {.unnumbered}
+
+~~~text
+Remembers the measurement of each video with its size and change time.
+
+A full measurement decodes the whole video (minutes for a long one).
+It is used again as long as the file is the same - same size, same
+modification time - and the measuring method has not changed. A new
+measurement is made when one of them differs, when the stored entry
+cannot be read (justified doubt), or when the caller asks for it
+(``--recheck``).
+
+The file ``assessments.json`` lies in the state folder (mode 600, it
+holds paths of the collection) and is written atomically after every
+new measurement, so an interrupted run keeps what it measured.
+
+Attributes:
+    path: Location of the JSON file, or None to keep nothing.
+    log: Logger.
+    recheck: Measure again even if a stored measurement is valid.
+    reused: Number of measurements taken from the store in this run.
+    measured: Number of new measurements in this run.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str | None, logger, recheck: bool = False)
+
+Bind the store to its file.
+
+Args:
+    path: Location of ``assessments.json``; None stores nothing.
+    logger: :class:`logging.Logger`.
+    recheck: Ignore stored measurements.
+~~~
+
+**`_load`**
+
+~~~text
+_load(self) -> dict[str, dict]
+
+Read the file.
+
+Returns:
+    Entries by absolute path; empty if missing or unreadable.
+~~~
+
+**`_save`**
+
+~~~text
+_save(self) -> None
+
+Write the file atomically with mode 600.
+~~~
+
+**`identity`**
+
+~~~text
+identity(path: str) -> tuple[int, int] | None
+
+Return size and modification time (whole seconds) of a file.
+
+Args:
+    path: File.
+
+Returns:
+    ``(size, mtime)``, or None if the file cannot be read.
+~~~
+
+**`stored`**
+
+~~~text
+stored(self, path: str) -> tuple[Assessment, str] | None
+
+Return the valid stored measurement of a file.
+
+Args:
+    path: Video file.
+
+Returns:
+    ``(assessment, measured)``, or None if there is none, the file
+    changed, the method is older or ``recheck`` is set.
+~~~
+
+**`put`**
+
+~~~text
+put(self, path: str, assessment: Assessment) -> None
+
+Store a new measurement of a file.
+
+Args:
+    path: Video file.
+    assessment: Its measurement.
+~~~
+
+**`assess`**
+
+~~~text
+assess(self, path: str, measure: Callable[[str], Assessment]) -> Assessment
+
+Return the measurement of a file, measuring only if needed.
+
+Args:
+    path: Video file.
+    measure: The measurement (e.g. :meth:`Assessor.assess`).
+
+Returns:
+    The stored or the new measurement.
+~~~
+
 ### `Assessor` (`mediatools.broken.assessor`) {.unnumbered}
 
 ~~~text
@@ -7387,16 +7500,22 @@ irregular time stamps) is not moved; its ``BROKEN`` entry is removed so
 shrink encodes it again. Videos already set aside that were measured by
 an older method are measured again; those not damaged go back.
 
-Videos already set aside are not collected twice, and videos whose
-output lies in shrink's work folder (an encode runs or waits for
-recovery) stay in place.
+Videos already set aside - in the ``_broken`` of the root or of any
+folder below it (:class:`QuarantineSet`) - are not collected twice, and
+videos whose output lies in shrink's work folder (an encode runs or
+waits for recovery) stay in place. Measurements are taken from the
+:class:`AssessmentStore` while the file is unchanged; every result of
+a measurement is reported, damaged or not.
 
 Attributes:
-    quarantine: The ``_broken`` directory of the root.
+    quarantine: The ``_broken`` directory of the root (new finds).
+    members: All quarantines read (the root's first).
     finder: Source of damaged videos.
     assessor: Measurement.
     backup: Backup mirror, or None to skip the backup check.
     prompt: Prompt for the confirmation.
+    store: Stored measurements, or None to measure every time.
+    recheck: Check the backup again also where a result exists.
     log: Logger.
 ~~~
 
@@ -7410,6 +7529,7 @@ __init__(
     assessor: Assessor,
     backup: BackupMirror | None = None,
     prompt: Prompt | None = None,
+    **extra,
 )
 
 Wire the collaborators.
@@ -7420,6 +7540,23 @@ Args:
     assessor: Measurement.
     backup: Backup mirror, or None to skip the backup check.
     prompt: Prompt; a default :class:`Prompt` if None.
+    **extra: ``quarantines`` (:class:`QuarantineSet`, default: only
+        ``quarantine``), ``store`` (:class:`AssessmentStore`,
+        default: none) and ``recheck`` (bool, default False).
+~~~
+
+**`measure`**
+
+~~~text
+measure(self, path: str) -> Assessment
+
+Measure a video, or take its stored measurement.
+
+Args:
+    path: Video file.
+
+Returns:
+    The measurement.
 ~~~
 
 **`plan`**
@@ -7472,8 +7609,10 @@ remeasure(self, dry_run: bool) -> None
 
 Measure set-aside videos again whose measurement used an older method.
 
-Those that are not damaged go back (to shrink); the others keep
-their place, moved to the folder of their new class if it changed.
+Every result is reported, damaged or not. Those that are not
+damaged go back (to shrink); the others keep their place, moved to
+the folder of their new class if it changed. All quarantines are
+covered.
 
 Args:
     dry_run: Only measure and report.
@@ -7496,12 +7635,43 @@ Args:
     dry_run: Only report.
 ~~~
 
+**`needs_backup_check`**
+
+~~~text
+needs_backup_check(self, item: QuarantineItem) -> bool
+
+Tell whether the backup must be checked for a set-aside video.
+
+Args:
+    item: Manifest entry.
+
+Returns:
+    True if the video is damaged and has no backup result, if
+    ``recheck`` is set, or if the backup copy used for the result
+    changed after the check.
+~~~
+
+**`copy_changed`**
+
+~~~text
+copy_changed(path: str, checked: str) -> bool
+
+Tell whether a backup copy was modified after it was checked.
+
+Args:
+    path: The copy (empty if none was found).
+    checked: Local time of the check (ISO format).
+
+Returns:
+    True if the copy is newer than the check.
+~~~
+
 **`check_backup`**
 
 ~~~text
 check_backup(self) -> None
 
-Check the backup for every set-aside video not checked yet.
+Check the backup for every set-aside video that needs it (all quarantines).
 ~~~
 
 **`preview_backup`**
@@ -7509,7 +7679,10 @@ Check the backup for every set-aside video not checked yet.
 ~~~text
 preview_backup(self, paths: list[str]) -> None
 
-Check the backup for videos that are not moved yet (dry run).
+Check the backup without storing anything (dry run).
+
+Covers the damaged videos still in their places and the set-aside
+videos of all quarantines that need a check.
 
 Args:
     paths: Damaged videos in their places.
@@ -7521,9 +7694,11 @@ Args:
 Carries out ``mediatools broken`` with its options.
 
 Order: ``--collect`` (measure, set aside, check the backup),
-``--backup-check`` (check every set-aside video again), ``--review``
-(decide video by video, in a terminal or in the GUI). Without any of
-them the set-aside videos are listed with a hint.
+``--backup-check`` (check the set-aside videos that need it),
+``--review`` (decide video by video, in a terminal or in the GUI).
+Without any of them the set-aside videos are listed with a hint. Every
+action covers the ``_broken`` directory of the root and those found
+below it (:class:`QuarantineSet`).
 
 Attributes:
     config: Configuration.
@@ -7532,6 +7707,7 @@ Attributes:
     preset: x265 preset for repairs.
     runlog: Log of this run.
     quarantine: The ``_broken`` directory of the root.
+    quarantines: It and every ``_broken`` directory below the root.
     backup: Backup mirror (``[broken] backup``, ``backup_of``).
 ~~~
 
@@ -7566,12 +7742,34 @@ Raises:
     SystemExit: If ``--dry-run`` is given without ``--collect``.
 ~~~
 
+**`describe`**
+
+~~~text
+describe(self) -> None
+
+Log the quarantines found and the state of the backup.
+~~~
+
+**`backup_check`**
+
+~~~text
+backup_check(self, recheck: bool) -> int
+
+Check the backup for the set-aside videos of all quarantines that need it.
+
+Args:
+    recheck: Check also videos that have a result.
+
+Returns:
+    0, or 1 if the backup is not available.
+~~~
+
 **`listing`**
 
 ~~~text
 listing(self) -> int
 
-List the set-aside videos with a hint how to go on.
+List the set-aside videos of all quarantines with a hint how to go on.
 
 Returns:
     0.
@@ -8261,6 +8459,88 @@ Return repr(self).
 __eq__(self, other)
 
 Return self==value.
+~~~
+
+### `QuarantineSet` (`mediatools.broken.quarantineset`) {.unnumbered}
+
+~~~text
+The ``_broken`` directory of a path plus every one found below it.
+
+Every path on which ``broken`` runs keeps its own ``_broken``
+directory, just as every directory keeps its own shrink database. A run
+on a parent folder therefore reads the ``_broken`` directories of the
+sub-folders used before, so that nothing is collected or measured
+twice and listing, backup check and review cover all of them. New finds
+always go into the ``_broken`` of the given path (:attr:`primary`).
+
+Attributes:
+    primary: The quarantine of the given path (new finds go there).
+    members: :attr:`primary` first, then every quarantine found below
+        that has a manifest, in path order.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: str, logger, db_name: str = 'shrink.db')
+
+Find the quarantines.
+
+Args:
+    root: The given path.
+    logger: :class:`logging.Logger`.
+    db_name: File name of the shrink databases.
+~~~
+
+**`find`**
+
+~~~text
+find(root: str) -> list[str]
+
+Return the folders below a path that hold a ``_broken`` manifest.
+
+Args:
+    root: Path to search (its own ``_broken`` is not included).
+
+Returns:
+    Folders whose ``_broken/manifest.jsonl`` exists, sorted.
+~~~
+
+**`open_items`**
+
+~~~text
+open_items(self) -> list[tuple[Quarantine, QuarantineItem]]
+
+Return the videos still set aside in all quarantines.
+
+Returns:
+    ``(quarantine, item)`` pairs, quarantine by quarantine.
+~~~
+
+**`holds`**
+
+~~~text
+holds(self, path: str) -> bool
+
+Tell whether any quarantine holds a video under this original name.
+
+Args:
+    path: Original path.
+
+Returns:
+    True if one of the quarantines has an open item with this name.
+~~~
+
+**`describe`**
+
+~~~text
+describe(self) -> list[str]
+
+Describe the quarantines for the start of a run.
+
+Returns:
+    One line per quarantine with its location relative to the
+    given path and its number of open videos.
 ~~~
 
 ### `RepairEncoder` (`mediatools.broken.repairer`) {.unnumbered}
@@ -10670,7 +10950,7 @@ Args:
 **`job_values`**
 
 ~~~text
-job_values(entry: JobEntry) -> dict[str, str]
+job_values(entry: JobEntry) -> dict[str, object]
 
 Return the shrink form values of a remembered job.
 
@@ -11605,6 +11885,7 @@ Attributes:
     poll_ms: Interval of output checks in milliseconds.
     dialog: Open question dialog, or None.
     held: Start of an announcement line whose end has not arrived yet.
+    tail: End of the output of the current command (for :meth:`finished`).
     ask: Opens the dialog for an announced question (replaceable in tests).
 ~~~
 
@@ -11717,6 +11998,23 @@ Returns:
 poll(self) -> None
 
 Show new output; report the exit code at the end.
+~~~
+
+**`finished`**
+
+~~~text
+finished(self, code: int) -> str
+
+Describe the end of a command for the status line.
+
+A command that handed its work to the background (``shrink`` and
+the like) has ended, but its job runs on; that is said explicitly.
+
+Args:
+    code: Exit code.
+
+Returns:
+    Text for the status line.
 ~~~
 
 **`send`**
@@ -12091,10 +12389,15 @@ selected job, *Run as in the form* the form; either way ``on_choice``
 is called once and the dialog closes. *Cancel* or closing the window
 starts nothing.
 
+Because the two buttons start different things, the dialog says it in
+words and shows the command line *Continue* would run for the selected
+line next to the one of the form.
+
 Attributes:
     window: The dialog window.
     jobs: The job list inside it.
     on_choice: Receives the chosen job, or None for the form values.
+    selected: Command line of the selected job (what *Continue* runs).
 ~~~
 
 **`__init__`**
@@ -12564,6 +12867,21 @@ Returns:
     The registry.
 ~~~
 
+**`job_line`**
+
+~~~text
+job_line(log_path: str | None) -> str
+
+Describe the job of a running shrink from its log.
+
+Args:
+    log_path: Log of the run.
+
+Returns:
+    ``job:     <root> <options>`` as the run was started (not the
+    values of a form), or empty if the log names no job.
+~~~
+
 **`tail`**
 
 ~~~text
@@ -12713,6 +13031,7 @@ Attributes:
     progress: Progress lines of the status file (two or three).
     percent: Overall percentage from the first progress line, or None.
     log_path: Log file of the run, or None.
+    job: Root and options of the running job (from its log), or empty.
     overall: Space line: read, written and freed in this (or the last)
         session and in all sessions.
 ~~~
@@ -12735,6 +13054,7 @@ __init__(
     progress: list[str] = <factory>,
     percent: float | None = None,
     log_path: str | None = None,
+    job: str = '',
     overall: str = '',
 ) -> None
 

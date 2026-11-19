@@ -8,7 +8,7 @@ from mediatools.core.datadir import DataDir
 from mediatools.core.runcontrol import RunControl
 from mediatools.core.runstatus import RunStatus
 from mediatools.gui.shrinkreading import ShrinkReading
-from mediatools.shrink.jobregistry import JobRegistry
+from mediatools.shrink.jobregistry import JobEntry, JobRegistry
 from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.savingslog import SavingsLog
 from mediatools.shrink.spacetally import SpaceTally
@@ -52,6 +52,7 @@ class ShrinkMonitor:
         state = ShrinkReading(pid=pid, report=RunStatus(self.control).lines())
         if pid is not None:
             state.log_path = self.control.active_log()
+            state.job = self.job_line(state.log_path)
         logs = self.logs.logs()
         session = state.log_path or (logs[-1] if logs else None)
         ledger = self.registry().ledger
@@ -98,6 +99,22 @@ class ShrinkMonitor:
         if self.ledger is None or self.ledger.path != ledger:
             self.ledger = Ledger(ledger, DataDir().sub("logs"))
         return JobRegistry(state, self.ledger, DataDir().sub("logs"))
+
+    @staticmethod
+    def job_line(log_path: str | None) -> str:
+        """Describe the job of a running shrink from its log.
+
+        Args:
+            log_path: Log of the run.
+
+        Returns:
+            ``job:     <root> <options>`` as the run was started (not the
+            values of a form), or empty if the log names no job.
+        """
+        found = JobRegistry.from_log(log_path) if log_path else None
+        if found is None:
+            return ""
+        return "job:     " + " ".join(JobEntry(found[0], found[1]).argv()[1:])
 
     @staticmethod
     def tail(path: str | None, lines: int = 400, chunk: int = 65536) -> list[str]:
