@@ -85,6 +85,7 @@ class BrokenReview:  # pylint: disable=too-many-instance-attributes
         self.assessor = assessor or Assessor()
         self.prompt = prompt or Prompt()
         self.log = quarantine.log
+        self.stopped = False
 
     def run(self) -> int:
         """Review all open videos.
@@ -101,6 +102,7 @@ class BrokenReview:  # pylint: disable=too-many-instance-attributes
                           len(hopeless))
             for number, item in enumerate(promising, 1):
                 if not self.review_item(item, f"promising {number}/{len(promising)}"):
+                    self.stopped = True
                     return 0
             if hopeless:
                 self.review_hopeless(hopeless)

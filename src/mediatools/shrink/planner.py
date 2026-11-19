@@ -44,7 +44,8 @@ class ShrinkPlanner:
         database_of: Returns the database of a directory.
         journal: Completes interrupted replacements.
         stats: Shared counters ``skipped``, ``short``, ``recovered``,
-            ``failed_before``, ``regrown``, ``small``, ``older``.
+            ``failed_before``, ``regrown``, ``small``, ``older``,
+            ``retry_broken``.
         found: Shared lists ``leftovers``, ``hevc`` and ``failed_before``.
     """
 
@@ -125,10 +126,13 @@ class ShrinkPlanner:
         if state != "todo":
             self.stats["skipped"] += 1
             return None
-        if not self.opts.retry_failed and database.failure(path) is not None:
+        failure = database.failure(path)
+        if not self.opts.retry_failed and failure is not None:
             self.stats["failed_before"] += 1
             self.found["failed_before"].append(path)
             return None
+        if failure == "BROKEN":
+            self.stats["retry_broken"] += 1
         return path, size
 
     def _wanted(self, path: str, size: int) -> bool:

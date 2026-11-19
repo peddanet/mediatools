@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 from typing import Callable
@@ -31,8 +32,11 @@ class ConsoleView:
         poll_ms: Interval of output checks in milliseconds.
         dialog: Open question dialog, or None.
         held: Start of an announcement line whose end has not arrived yet.
+        tail: End of the output of the current command (for :meth:`finished`).
         ask: Opens the dialog for an announced question (replaceable in tests).
     """
+
+    BACKGROUND = re.compile(r"(\w+) continues in the background \(pid (\d+)\)")
 
     def __init__(self, master: tk.Misc, runner: JobRunner | None = None,
                  on_finish: Callable[[int], None] | None = None, poll_ms: int = 100,
@@ -66,6 +70,7 @@ class ConsoleView:
         ttk.Label(self.frame, textvariable=self.state).pack(fill="x")
         self.dialog: ChoiceDialog | None = None
         self.held = ""
+        self.tail = ""
         self.ask: Callable[[dict], None] = self.open_dialog
 
     def take_questions(self, text: str) -> str:
@@ -165,6 +170,7 @@ class ConsoleView:
             self.state.set("a command is still running - cancel it or wait")
             return False
         self.write(f"\n$ {shown}\n")
+        self.tail = ""
         self.runner.start(args)
         self.state.set("running: " + shown)
         self.answer.focus_set()
@@ -175,15 +181,34 @@ class ConsoleView:
         """Show new output; report the exit code at the end."""
         text, code = self.runner.poll()
         self.write(text)
+        self.tail = (self.tail + text)[-4000:]
         if code is None:
             self.frame.after(self.poll_ms, self.poll)
             return
         self.close_dialog()
         self.held = ""
         self.write(f"[exit code {code}]\n")
-        self.state.set("finished, exit code " + str(code))
+        self.state.set(self.finished(code))
         if self.on_finish is not None:
             self.on_finish(code)
+
+    def finished(self, code: int) -> str:
+        """Describe the end of a command for the status line.
+
+        A command that handed its work to the background (``shrink`` and
+        the like) has ended, but its job runs on; that is said explicitly.
+
+        Args:
+            code: Exit code.
+
+        Returns:
+            Text for the status line.
+        """
+        match = self.BACKGROUND.search(self.tail)
+        if code == 0 and match:
+            return (f"{match.group(1)} runs in the background (pid {match.group(2)}) - "
+                    "this window may be closed; the shrink tab shows its progress")
+        return "finished, exit code " + str(code)
 
     def send(self) -> None:
         """Send the input line to the running command."""

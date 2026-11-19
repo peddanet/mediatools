@@ -140,6 +140,7 @@ classDiagram
     +poll_ms
     +dialog
     +held
+    +tail
     +ask
     +init(master, runner, on_finish, poll_ms, height)
     +take_questions(text)
@@ -150,6 +151,7 @@ classDiagram
     +clear()
     +run(args, shown)
     +poll()
+    +finished(code)
     +send()
     +cancel()
   }
@@ -204,6 +206,7 @@ classDiagram
     +window
     +jobs
     +on_choice
+    +selected
     +init(master, monitor, form_line, on_choice)
     -_picked(entry, start)
     +choose(entry)
@@ -268,6 +271,7 @@ classDiagram
     +read()
     +job_files()
     +registry()
+    +job_line(log_path)
     +tail(path, lines, chunk)
     +stop()
     +reload()
@@ -298,8 +302,9 @@ classDiagram
     +progress
     +percent
     +log_path
+    +job
     +overall
-    +init(pid, report, progress, percent, log_path, overall)
+    +init(pid, report, progress, percent, log_path, job, overall)
   }
   class SystemLook {
     +run

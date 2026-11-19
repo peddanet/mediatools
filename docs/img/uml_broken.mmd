@@ -19,6 +19,20 @@ classDiagram
     +from_dict(data)
     +init(opened, duration, decoded, still, errors, note, method)
   }
+  class AssessmentStore {
+    +path
+    +log
+    +recheck
+    +reused
+    +measured
+    +init(path, logger, recheck)
+    -_load()
+    -_save()
+    +identity(path)
+    +stored(path)
+    +put(path, assessment)
+    +assess(path, measure)
+  }
   class Assessor {
     +ffmpeg
     +probe
@@ -61,17 +75,23 @@ classDiagram
   }
   class BrokenCollector {
     +quarantine
+    +members
     +finder
     +assessor
     +backup
     +prompt
+    +store
+    +recheck
     +log
-    +init(quarantine, finder, assessor, backup, prompt)
+    +init(quarantine, finder, assessor, backup, prompt, extra)
+    +measure(path)
     +plan()
     +in_work(path)
     +run(dry_run, ask)
     +remeasure(dry_run)
     +clear_false_alarms(healthy, dry_run)
+    +needs_backup_check(item)
+    +copy_changed(path, checked)
     +check_backup()
     +preview_backup(paths)
   }
@@ -82,9 +102,12 @@ classDiagram
     +preset
     +runlog
     +quarantine
+    +quarantines
     +backup
     +init(config, root, need, preset)
     +run(args)
+    +describe()
+    +backup_check(recheck)
     +listing()
     +review(args)
   }
@@ -154,6 +177,15 @@ classDiagram
     +from_dict(data)
     +init(number, kind, names, assessment, reason, state, when, outside, backup)
   }
+  class QuarantineSet {
+    +primary
+    +members
+    +init(root, logger, db_name)
+    +find(root)
+    +open_items()
+    +holds(path)
+    +describe()
+  }
   class RepairEncoder {
     +clone()
     +command(src, dst)
@@ -187,13 +219,19 @@ classDiagram
     -_progress(fraction, shown)
     -_remove_work(path)
   }
+  AssessmentStore ..> Assessment
+  AssessmentStore ..> Assessor
   Assessor ..> Assessment
   BackupMirror ..> BackupResult
   BrokenCollector ..> Assessment
+  BrokenCollector --> AssessmentStore
   BrokenCollector --> Assessor
   BrokenCollector --> BackupMirror
   BrokenCollector --> BrokenFinder
   BrokenCollector --> Quarantine
+  BrokenCollector ..> QuarantineItem
+  BrokenCollector --> QuarantineSet
+  BrokenCommand ..> AssessmentStore
   BrokenCommand ..> Assessor
   BrokenCommand --> BackupMirror
   BrokenCommand ..> BrokenCollector
@@ -201,6 +239,7 @@ classDiagram
   BrokenCommand ..> BrokenReview
   BrokenCommand ..> DownloaderDatabase
   BrokenCommand --> Quarantine
+  BrokenCommand --> QuarantineSet
   BrokenCommand ..> RepairEncoder
   BrokenFinder ..> Quarantine
   Quarantine ..> Assessment
@@ -210,6 +249,8 @@ classDiagram
   Quarantine --> QuarantineItem
   QuarantineItem ..> Assessment
   QuarantineItem ..> BackupResult
+  QuarantineSet --> Quarantine
+  QuarantineSet ..> QuarantineItem
   BrokenReview --> Assessor
   BrokenReview --> BackupMirror
   BrokenReview --> DownloaderDatabase

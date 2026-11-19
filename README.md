@@ -464,7 +464,7 @@ files can be restored with `gio trash --list` / `gio trash --restore URI`.
 ### broken
 
 ```bash
-mediatools broken [PATH] [--collect] [--report TSV] [--dry-run] [-y]
+mediatools broken [PATH] [--collect] [--report TSV] [--dry-run] [-y] [--recheck]
                          [--backup-check] [--review] [--player vlc] [--mute] [--delete]
 ```
 
@@ -507,6 +507,11 @@ deleted before the backup disk was checked for an intact copy.**
    download (`[broken] downloader_db`).
 
 `broken` without options lists what is set aside and how to go on.
+
+`PATH` may be a parent folder: every `_broken` folder below it is read and
+covered as well, nothing is collected twice. Measurements and backup
+results are kept and reused while a file is unchanged; `--recheck`
+measures and checks again.
 
 ### flatten
 
