@@ -159,7 +159,7 @@ class Shrinker:
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "broken": 0, "failed_before": 0, "regrown": 0, "copies": 0,
-                      "recovered": 0, "small": 0, "older": 0}
+                      "recovered": 0, "small": 0, "older": 0, "retry_broken": 0}
         self.state["encoders"] = [self.encoder]
         self.found: dict[str, list] = {"failed": [], "broken": [], "failed_before": [],
                                        "leftovers": [], "hevc": []}
@@ -301,13 +301,14 @@ class Shrinker:
         """Return the settings of this run that do not define the job.
 
         Returns:
-            ``crf``, ``preset``, ``order``, ``jobs`` and ``threads`` (None:
-            default).
+            ``crf``, ``preset``, ``order``, ``jobs``, ``threads`` (None:
+            default), ``retry_failed`` and ``keep_copies``.
         """
         return {"crf": getattr(self.encoder, "crf", None),
                 "preset": getattr(self.encoder, "preset", None), "order": self.opts.order,
                 "jobs": self.opts.jobs,
-                "threads": getattr(self.encoder, "threads_given", None)}
+                "threads": getattr(self.encoder, "threads_given", None),
+                "retry_failed": self.opts.retry_failed, "keep_copies": self.opts.keep_copies}
 
     def _encode_serial(self, todo: list[tuple[str, int]]) -> None:
         """Encode the planned videos one after the other.
@@ -467,6 +468,10 @@ class Shrinker:
         if self.stats["regrown"]:
             self.log.info("recorded as shrunk, but larger again and not HEVC (e.g. restored "
                           "from a backup): %i - planned again", self.stats["regrown"])
+        if self.stats["retry_broken"]:
+            self.log.warning("--retry-failed: %i video(s) recorded as BROKEN (damaged) are "
+                             "planned again - 'mediatools broken --collect' sets them aside "
+                             "instead", self.stats["retry_broken"])
         if self.stats["failed_before"]:
             self.log.info("left out, failed in an earlier run (FAILED/BROKEN, size unchanged): "
                           "%i - retry with --retry-failed", self.stats["failed_before"])

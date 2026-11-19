@@ -22,11 +22,21 @@ class JobPicker:
     is called once and the dialog closes. *Cancel* or closing the window
     starts nothing.
 
+    Because the two buttons start different things, the dialog says it in
+    words and shows the command line *Continue* would run for the selected
+    line next to the one of the form.
+
     Attributes:
         window: The dialog window.
         jobs: The job list inside it.
         on_choice: Receives the chosen job, or None for the form values.
+        selected: Command line of the selected job (what *Continue* runs).
     """
+
+    HELP = ("Continue: runs the selected job again with ITS folder and settings "
+            "(the form is ignored).\n"
+            "Run as in the form: runs exactly the command line of the form shown next to "
+            "that button.")
 
     def __init__(self, master: tk.Misc, monitor: ShrinkMonitor, form_line: str,
                  on_choice: Callable[[JobEntry | None], object]):
@@ -45,10 +55,14 @@ class JobPicker:
         frame = ttk.Frame(self.window, padding=10)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Continue an earlier shrink job, or run the values of the form.",
-                  style="Title.TLabel").pack(anchor="w", pady=(0, 6))
+                  style="Title.TLabel").pack(anchor="w", pady=(0, 2))
+        ttk.Label(frame, text=self.HELP, justify="left").pack(anchor="w", pady=(0, 6))
+        self.selected = tk.StringVar(value="Continue runs: (select a job)")
         self.jobs = JobList(frame, monitor, self._picked)
         self.jobs.jobs.configure(height=8)
         self.jobs.refresh()
+        ttk.Label(frame, textvariable=self.selected, style="Hint.TLabel").pack(
+            anchor="w", pady=(4, 0))
         footer = ttk.Frame(frame)
         footer.pack(fill="x", pady=(6, 0))
         ttk.Button(footer, text="Run as in the form", command=lambda: self.choose(None)).pack(
@@ -64,6 +78,7 @@ class JobPicker:
             entry: Selected job.
             start: True for *Continue* or a double click.
         """
+        self.selected.set("Continue runs: mediatools " + " ".join(entry.argv()))
         if start:
             self.choose(entry)
 

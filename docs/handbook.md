@@ -376,6 +376,8 @@ src/mediatools/
     assessor.py       Assessor         full decode: decodes, still, errors
     assessment.py     Assessment       measurement and class
     quarantine.py     Quarantine       _broken folder, manifest, restore, recover, delete
+    quarantineset.py  QuarantineSet    all _broken folders below a path
+    assessmentstore.py AssessmentStore stored measurements (size, time, method)
     backup.py         BackupMirror     intact copies on the backup disk (same path, then by name)
     collector.py      BrokenCollector  find, measure, confirm, move, check the backup
     command.py        BrokenCommand    the command and its options
@@ -1082,6 +1084,49 @@ mediatools broken ~/Pictures/collection --review              # decide video by 
 mediatools broken ~/Pictures/collection                       # list what is set aside
 ~~~
 
+## Step by step
+
+The usual order, with the backup disk plugged in and unlocked:
+
+| Step | Command | What happens | What does not happen |
+|---|---|---|---|
+| 1 | `mediatools stop` | shrink ends after its running files | - |
+| 2 | `broken PATH --collect --dry-run --report FILE` | measure (or take stored measurements), list, preview of the backup check | nothing is moved or stored |
+| 3 | `broken PATH --collect --report FILE` | false alarms back to shrink, damaged videos into `_broken`, backup check | nothing is repaired or deleted |
+| 4 | `broken PATH --review` | decide per video: recover, repair, keep, delete | repair and delete only after a backup check without an intact copy |
+| 5 | `mediatools shrink ...` | shrink continues | videos in `_broken` are never touched |
+
+`PATH` may be a parent folder: all `_broken` folders below it are read
+(see *Several _broken folders*). `--recheck` measures and checks again
+although results exist.
+
+## Several _broken folders
+
+Every path on which `broken` runs keeps its own `_broken` folder, just as
+every directory keeps its own `shrink.db`. A run on a parent folder reads
+all `_broken` folders below it first (`QuarantineSet`) and names them at the
+start:
+
+~~~text
+_broken folder _broken: 0 video(s) set aside
+_broken folder sub/_broken: 2 video(s) set aside
+backup: /mnt/backup/USER available
+~~~
+
+A video set aside in any of them is not collected again; listing, backup
+check, re-measuring and review cover all of them. New finds go into the
+`_broken` folder of the given path.
+
+## Stored measurements
+
+A measurement decodes the whole video. It is kept in
+`<state>/state/assessments.json` (mode 600) with the size and modification
+time of the file and used again as long as both and the measuring method
+are unchanged (log: `stored measurement of ... used`). A changed file, an
+unreadable entry or `--recheck` lead to a new measurement. The same rule
+holds for the backup check: a video with a result is checked again only
+with `--recheck` or when the backup copy changed after the check.
+
 ## Collecting
 
 Sources (`BrokenFinder`):
@@ -1156,6 +1201,8 @@ and shows a moving picture counts as **not damaged**:
 * Videos already in `_broken` measured by 1.7.0 (manifest without
   `method`) are measured again by `--collect` and at the start of the
   review. Those not damaged go back for shrink (state `released`).
+  Since 1.8.0 every result is reported, damaged or not
+  (`re-measured 1/5: damaged, hopeless (...)`).
 
 ## Backup check
 
@@ -1187,9 +1234,12 @@ empty mount point belongs to the system disk) and it holds the mirror of the
 shrink root (a locked encrypted folder shows only scrambled names). If not,
 it says why - e.g. `backup disk not mounted` - and nothing is decided.
 
-The check runs automatically after `--collect` (also with `--dry-run`, for
-the videos not moved yet), with `--backup-check` for every video in
-`_broken`, and with `c` in the review.
+The check runs automatically after `--collect`, with `--backup-check` for
+the set-aside videos that have no result yet (`--recheck`: all), and with
+`c` in the review. A dry run (`--collect --dry-run`) shows the result for
+the videos not moved yet *and* for set-aside videos without a result, but
+stores nothing; `--review` and `--backup-check` are not carried out in a
+dry run (the log says so).
 
 ~~~bash
 mediatools broken --backup-check            # check all set-aside videos now

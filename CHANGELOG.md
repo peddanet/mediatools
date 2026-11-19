@@ -5,6 +5,39 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-19
+
+### Added
+- `broken` reads every `_broken` folder below the given path
+  (`QuarantineSet`): a video set aside in a sub-folder is not collected
+  again by a run on the parent; listing, backup check, re-measuring and
+  review cover all folders. The folders found and the state of the backup
+  are named at the start of every run.
+- Stored measurements (`AssessmentStore`, `<state>/state/assessments.json`,
+  mode 600): a video is decoded again only when its size, modification
+  time or the measuring method changed, the entry cannot be read, or with
+  the new option `--recheck`.
+- Shrink tab: the line `job:` shows root and options of the running job as
+  it was started (from its log), not the values of the form.
+- Job dialog: says in words what *Continue* and *Run as in the form* start
+  and shows the command line *Continue* would run for the selected job.
+- A remembered shrink job keeps `--retry-failed` and `--keep-copies`.
+- `shrink --retry-failed` warns how many videos recorded as `BROKEN` it
+  plans again.
+
+### Changed
+- Re-measuring reports every result, damaged or not.
+- `--collect --dry-run` also previews the backup check of set-aside videos
+  without a result (nothing stored); with `--review` or `--backup-check` it
+  says that they are not carried out in a dry run.
+- `--backup-check` checks only set-aside videos without a result, or whose
+  backup copy changed after the check (`--recheck`: all).
+- A real `--collect` without new finds still checks the backup of set-aside
+  videos.
+- The console of the GUI says "shrink runs in the background (pid N)"
+  when a command hands its job to the background, instead of
+  "finished, exit code 0".
+
 ## [1.7.1] - 2026-11-18
 
 ### Added

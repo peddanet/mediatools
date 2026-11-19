@@ -221,7 +221,7 @@ class MediaToolsApp:
         self.appearance.zoom(steps)
 
     @staticmethod
-    def job_values(entry: JobEntry) -> dict[str, str]:
+    def job_values(entry: JobEntry) -> dict[str, object]:
         """Return the shrink form values of a remembered job.
 
         Args:
@@ -241,7 +241,9 @@ class MediaToolsApp:
                 "ext": ",".join(ext.lstrip(".") for ext in sorted(spec.extensions)),
                 "min_seconds": f"{spec.min_seconds:g}",
                 "min_size": JobSpec.size_text(spec.min_size) if spec.min_size else "",
-                "newer_than": str(newer or "")}
+                "newer_than": str(newer or ""),
+                "retry_failed": bool(entry.settings.get("retry_failed")),
+                "keep_copies": bool(entry.settings.get("keep_copies"))}
 
     def pick_job(self, entry: JobEntry, start: bool = False) -> bool:
         """Fill the shrink form with a job; optionally run it.

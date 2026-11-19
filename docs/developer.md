@@ -237,7 +237,9 @@ directory, configuration -- lives in `core`.
 | `Assessment` | measurement and class (hopeless / promising), usable share, repair advice |
 | `Quarantine`, `QuarantineItem` | `_broken/<class>/<relative path>`, all hard link names, manifest (JSON Lines, mode 600), restore, release, re-measure, backup result, recover, delete, install of a repair |
 | `BackupMirror`, `BackupResult` | backup disk as mirror of the home: availability (exists, other file system, mirror of the root present), same path first, then search by name in the whole backup; a copy counts only after a full decode without errors |
-| `BrokenCollector` | find, measure, list, confirm, move, check the backup; removes the entries of false alarms; re-measures videos measured by 1.7.0; leaves videos with output in the work folder alone |
+| `QuarantineSet` | the `_broken` of the given path plus every `_broken` with a manifest below it; new finds go to the first (since 1.8.0) |
+| `AssessmentStore` | stored measurements in `<state>/state/assessments.json` (size, modification time, method); reused while unchanged, `--recheck` measures again (since 1.8.0) |
+| `BrokenCollector` | find, measure (stored or new), list, confirm, move, check the backup where needed; removes the entries of false alarms; re-measures videos measured by 1.7.0 and reports every result; leaves videos with output in the work folder alone |
 | `BrokenCommand` | the command: collect, backup check, review (terminal or GUI), listing |
 | `RepairEncoder` | `HevcEncoder` with error-tolerant input; output must decode without errors, length and size are not compared |
 | `DownloaderDatabase` | marks a deleted video as not downloaded in a downloader's SQLite table `medias` |
@@ -407,6 +409,8 @@ Invariants:
 <root>/_broken/manifest.jsonl         Quarantine       one JSON object per video: number, kind, names
                                                        [[original, quarantined], ...], assessment,
                                                        reason, state, when, outside (mode 600)
+<state>/state/assessments.json        AssessmentStore  {path: {size, mtime, assessment, measured}}
+                                                       (mode 600)
 <data>/reports/progress_*_<ts>.txt    ProgressReport   one path per line
 <data>/state/shrink_throughput.json   ThroughputLog    {bytes, seconds}
 <data>/ledger.tsv                     Ledger           when session status source result seconds

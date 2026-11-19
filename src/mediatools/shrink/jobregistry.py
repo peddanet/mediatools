@@ -20,7 +20,7 @@ class JobEntry:
     Attributes:
         spec: Root and filters.
         settings: Settings of the last run: ``crf``, ``preset``, ``order``,
-            ``jobs``, ``threads``.
+            ``jobs``, ``threads``, ``retry_failed``, ``keep_copies``.
         last: Time of the last activity, ``YYYY-MM-DD HH:MM``.
         todo_bytes: Source bytes still to encode (as of the last plan, minus
             the files finished since); -1 if not planned since 1.6.0 (job
@@ -71,6 +71,9 @@ class JobEntry:
         threads = self.settings.get("threads")
         if threads:
             args += ["--threads", str(threads)]
+        args += [flag for key, flag in (("retry_failed", "--retry-failed"),
+                                        ("keep_copies", "--keep-copies"))
+                 if self.settings.get(key)]
         return args + self.spec.filters()
 
     def gauge(self, width: int = 20) -> str:
@@ -176,7 +179,8 @@ class JobRegistry:
                             data = json.loads(match.group(1))
                             found = (JobSpec.from_dict(data),
                                      {key: data.get(key) for key in
-                                      ("crf", "preset", "order", "jobs", "threads")
+                                      ("crf", "preset", "order", "jobs", "threads",
+                                       "retry_failed", "keep_copies")
                                       if key in data})
                         except (ValueError, KeyError, TypeError):
                             continue
