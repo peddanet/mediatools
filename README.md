@@ -7,7 +7,7 @@ folder trees, back everything up to a second disk **without duplicating hard
 links**, and keep versioned snapshots of it with rsnapshot.
 
 [![tests](https://github.com/peddanet/mediatools/actions/workflows/tests.yml/badge.svg?branch=develop)](https://github.com/peddanet/mediatools/actions/workflows/tests.yml)
-![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -135,7 +135,7 @@ Everything except the system packages in step 1 runs as a **normal user**.
 
 | Tool | Needed by | Debian/Ubuntu package |
 |---|---|---|
-| Python ≥ 3.10 (standard library only) | all | `python3` |
+| Python ≥ 3.12 (standard library only) | all | `python3` |
 | ffmpeg, ffprobe with libx265 | shrink, triage, broken | `ffmpeg` |
 | VLC or mpv | triage, broken | `vlc` / `mpv` |
 | gio (trash) | triage, broken | `libglib2.0-bin` |

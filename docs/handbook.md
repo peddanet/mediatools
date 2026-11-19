@@ -1807,7 +1807,7 @@ PYTHONPATH=src:tests pylint src tests tools
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
 gates (`tools/check.sh`: format, lint, types, security, tests) on Python
-3.10 and 3.14 for pull requests into `main` and `develop`; a release tag
+3.12 and 3.14 for pull requests into `main` and `develop`; a release tag
 only gets the tag check (`release-check`). Which run checks what is shown in
 `docs/developer.md`, section "CI runs"; the background is in
 `docs/ci-guide.md`.

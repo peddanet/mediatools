@@ -5,6 +5,16 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-19
+
+### Changed
+- Python 3.12 is the minimum (`requires-python = ">=3.12"`, `install.sh`,
+  pylint `py-version`, mypy `python_version`); Python 3.10 reached its end
+  of life on 2026-10-01. The CI matrix is 3.12 and 3.14; the required checks
+  of the branch protection become `gates (3.12)` and `gates (3.14)` and must
+  be changed before this release is applied (`docs/developer.md`, section
+  "Branch protection").
+
 ## [1.9.1] - 2026-11-19
 
 ### Fixed
