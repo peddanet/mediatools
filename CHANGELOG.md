@@ -5,6 +5,23 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-19
+
+### Added
+- New command `mediatools estimate [PATH]` (also a GUI tab): plans like
+  `shrink` without changing anything and groups the videos not shrunk yet
+  by playing time and bit rate. For every group it estimates the space
+  freed (output share measured per bit-rate class in the ledger) and the
+  time (measured speed), ranks the groups by GiB freed per hour, and sums
+  up what each `--min-seconds` value would take in. Report in
+  `reports/shrink_estimate_<time>.tsv`.
+- Progress display: new line `expect` - the GiB still to go times one minus
+  the measured output share, and the expected total freed at the end of
+  the job.
+- Planning probes missing durations and codecs with several ffprobe
+  processes at the same time (`probe_jobs`, default 8; `estimate
+  --probe-jobs`).
+
 ## [1.8.0] - 2026-11-19
 
 ### Added

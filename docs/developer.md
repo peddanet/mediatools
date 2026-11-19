@@ -195,6 +195,8 @@ directory, configuration -- lives in `core`.
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
 | `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and full decode of the output (`DecodeCheck.verify`); message file kept on failure |
+| `ShrinkPotential`, `PotentialGroup` | estimate of the remaining potential by playing time and bit rate, output share and speed per bit-rate class from the ledger (since 1.9.0) |
+| `EstimateCommand` | the read-only command `estimate` (since 1.9.0) |
 | `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, regrown originals (larger than recorded, not HEVC: planned again), minimum duration, HEVC set-aside, order |
 | `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |
 | `Shrinker` | per-file decision (HEVC, trial decode, encode), serial or parallel encodes (`--jobs`), ledger and job registry, failure rows, kept ffmpeg messages, two-stage Ctrl+C, stop request via `RunControl`, summary |

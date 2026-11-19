@@ -22,6 +22,8 @@ class ShrinkOptions:
         newer_than: Leave out videos modified before this time (epoch
             seconds); None processes all.
         jobs: Number of videos encoded at the same time (1: one after the other).
+        probe_jobs: Number of ffprobe processes run at the same time while
+            planning (durations and codecs not in the cache yet).
     """
 
     keep_copies: bool = False
@@ -33,6 +35,7 @@ class ShrinkOptions:
     min_size: int = 0
     newer_than: float | None = None
     jobs: int = 1
+    probe_jobs: int = 8
 
     ORDERS = ("largest", "smallest", "path")
 
@@ -49,5 +52,5 @@ class ShrinkOptions:
             raise ValueError("min_seconds must not be negative")
         if self.min_size < 0:
             raise ValueError("min_size must not be negative")
-        if self.jobs < 1:
-            raise ValueError("jobs must be at least 1")
+        if self.jobs < 1 or self.probe_jobs < 1:
+            raise ValueError("jobs and probe_jobs must be at least 1")

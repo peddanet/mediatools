@@ -445,7 +445,7 @@ def test_plan_saves_probes_at_checkpoints_and_logs_cache_hits(
     """
     videos(tmp_path)
     cache_file = tmp_path / "durations.tsv"
-    shrinker, _encoder = build(tmp_path, ShrinkOptions(min_seconds=1))
+    shrinker, _encoder = build(tmp_path, ShrinkOptions(min_seconds=1, probe_jobs=1))
     monkeypatch.setattr(ShrinkPlanner, "CHECKPOINT", 2)
     durations = DurationCache(str(cache_file))
     shrinker.state["durations"] = durations
