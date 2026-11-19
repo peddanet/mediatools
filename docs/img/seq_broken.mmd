@@ -2,6 +2,7 @@ sequenceDiagram
   actor U as User
   participant C as BrokenCollector
   participant F as BrokenFinder
+  participant S as AssessmentStore
   participant A as Assessor
   participant Q as Quarantine
   participant K as BackupMirror
@@ -9,11 +10,18 @@ sequenceDiagram
   participant E as RepairEncoder
   participant D as DownloaderDatabase
   U->>C: broken --collect
+  C->>C: QuarantineSet: read every _broken below PATH
   C->>F: find()
-  F-->>C: (path, reason) from shrink.db / report
+  F-->>C: (path, reason) from shrink.db / report, not held anywhere
   loop each video
-    C->>A: assess(path)
-    A-->>C: Assessment (decodes, still, errors, class)
+    C->>S: stored(path)?
+    alt unchanged (size, mtime, method)
+      S-->>C: stored Assessment
+    else new or changed or --recheck
+      C->>A: assess(path)
+      A-->>C: Assessment (decodes, still, errors, class)
+      C->>S: put(path, assessment)
+    end
   end
   C->>C: false alarms (healthy): clear BROKEN entry, not moved
   C->>U: plan, confirm?

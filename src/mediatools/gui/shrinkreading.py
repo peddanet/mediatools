@@ -14,6 +14,7 @@ class ShrinkReading:
         progress: Progress lines of the status file (two or three).
         percent: Overall percentage from the first progress line, or None.
         log_path: Log file of the run, or None.
+        job: Root and options of the running job (from its log), or empty.
         overall: Space line: read, written and freed in this (or the last)
             session and in all sessions.
     """
@@ -23,4 +24,5 @@ class ShrinkReading:
     progress: list[str] = field(default_factory=list)
     percent: float | None = None
     log_path: str | None = None
+    job: str = ""
     overall: str = ""
