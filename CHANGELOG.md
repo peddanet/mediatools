@@ -5,6 +5,23 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-20
+
+### Fixed
+- `shrink` re-encodes **only the picture**: ffmpeg now runs with
+  `-map 0 -c copy -c:V libx265`, so every audio track, subtitle, chapter,
+  data stream and cover picture is copied unchanged. Up to 1.11.1 ffmpeg's
+  automatic stream selection kept one stream per type and re-encoded the
+  audio (e.g. AAC 130 kbit/s became 69 kbit/s; a second audio track and
+  subtitles were dropped).
+- Validation rejects an output that has fewer streams of any type than the
+  source (`output lost stream(s) (audio 2 -> 1)`); the original is kept.
+  A stream the container cannot take makes ffmpeg fail; the original is
+  kept as well.
+- `broken` repairs keep the former behaviour on purpose (one stream per
+  type, audio re-encoded), because damaged audio packets cannot be copied
+  into a clean file.
+
 ## [1.11.1] - 2026-11-20
 
 ### Fixed
