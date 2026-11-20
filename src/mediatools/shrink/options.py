@@ -24,6 +24,9 @@ class ShrinkOptions:
         jobs: Number of videos encoded at the same time (1: one after the other).
         probe_jobs: Number of ffprobe processes run at the same time while
             planning (durations and codecs not in the cache yet).
+        probe_durations: Probe durations together with codecs while
+            planning, one ffprobe call per video (for estimates, which need
+            both).
     """
 
     keep_copies: bool = False
@@ -36,6 +39,7 @@ class ShrinkOptions:
     newer_than: float | None = None
     jobs: int = 1
     probe_jobs: int = 8
+    probe_durations: bool = False
 
     ORDERS = ("largest", "smallest", "path")
 

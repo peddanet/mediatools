@@ -98,6 +98,8 @@ class ShrinkPlanner:
                 break
         if self.opts.min_seconds > 0:
             todo = self._drop_short(todo)
+        if self.opts.probe_durations:
+            self.prefetch_both([path for path, _size in todo])
         todo = self._set_aside_hevc(todo)
         if self.opts.order == "largest":
             todo.sort(key=lambda item: item[1], reverse=True)
@@ -277,6 +279,48 @@ class ShrinkPlanner:
                         cache.put(path, st, value)
                 cache.save()
                 self.log.info("probed %s: %i of %i", what, start + len(chunk), len(missing))
+
+    def prefetch_both(self, paths: list[str]) -> None:
+        """Probe missing durations and codecs with one ffprobe call per video.
+
+        Used when both values are needed (estimates): a video missing in
+        either cache is probed once for both, ``probe_jobs`` at a time; the
+        results go into both caches, saved every :attr:`CHECKPOINT` videos.
+
+        Args:
+            paths: Videos about to be checked.
+        """
+        durations, codecs = self.state["durations"], self.state["codecs"]
+        both = getattr(self.probe, "duration_and_codec", None)
+        if durations is None or codecs is None or both is None:
+            self.prefetch("durations", paths)
+            return
+        missing = []
+        hits = (durations.hits, codecs.hits)
+        for path in paths:
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            if durations.get(path, st) is None or codecs.get(path, st) is None:
+                missing.append((path, st))
+        durations.hits, codecs.hits = hits
+        if not missing:
+            return
+        self.log.info("probing durations and codecs of %i video(s), %i at a time",
+                      len(missing), self.opts.probe_jobs)
+        with ThreadPoolExecutor(max_workers=self.opts.probe_jobs) as pool:
+            for start in range(0, len(missing), self.CHECKPOINT):
+                chunk = missing[start:start + self.CHECKPOINT]
+                for (path, st), (seconds, codec) in zip(chunk,
+                                                        pool.map(both, [p for p, _s in chunk])):
+                    if seconds is not None:
+                        durations.put(path, st, seconds)
+                    if codec is not None:
+                        codecs.put(path, st, codec)
+                durations.save()
+                codecs.save()
+                self.log.info("probed: %i of %i", start + len(chunk), len(missing))
 
     def duration(self, path: str) -> float | None:
         """Return a video's duration, from the cache if possible (public for estimates).
