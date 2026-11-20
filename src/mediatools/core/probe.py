@@ -82,6 +82,31 @@ class MediaProbe:
         """
         return self.value(path, "stream=codec_name", "v:0")
 
+    def duration_and_codec(self, path: str) -> tuple[float | None, str | None]:
+        """Return duration and video codec with one ffprobe call.
+
+        Starting ffprobe costs more than reading a header, so asking for both
+        values at once halves the time of a first check of many videos.
+
+        Args:
+            path: Media file.
+
+        Returns:
+            ``(seconds, codec)``; each None if it cannot be determined.
+        """
+        cmd = [self.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+               "format=duration:stream=codec_name", "-of", "default=noprint_wrappers=1", path]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            return None, None
+        values = dict(line.strip().split("=", 1) for line in res.stdout.splitlines()
+                      if "=" in line)
+        try:
+            seconds: float | None = float(values.get("duration", ""))
+        except ValueError:          # missing or "N/A"
+            seconds = None
+        return seconds, values.get("codec_name") or None
+
     def has_video(self, path: str) -> bool:
         """Tell whether a decodable video stream exists.
 
