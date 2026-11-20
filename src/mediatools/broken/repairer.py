@@ -15,6 +15,10 @@ class RepairEncoder(HevcEncoder):
     quality settings as ``shrink``, so a repaired video is shrunk at the
     same time.
 
+    Unlike ``shrink`` it does not copy all streams (:attr:`KEEP_STREAMS` is
+    False): ffmpeg picks one stream per type and re-encodes the audio,
+    because damaged audio packets cannot be copied into a clean file.
+
     Validation differs from :class:`HevcEncoder`: the output is shorter
     than the damaged input by design, so size and duration are not
     compared. It must have a video stream and - with a decode check - decode
@@ -22,6 +26,7 @@ class RepairEncoder(HevcEncoder):
     """
 
     TOLERANT_INPUT = ["-err_detect", "ignore_err", "-fflags", "+discardcorrupt"]
+    KEEP_STREAMS = False
 
     def clone(self) -> RepairEncoder:
         """Return an encoder with the same settings.

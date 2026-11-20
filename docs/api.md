@@ -1650,6 +1650,22 @@ Returns:
     Codec name such as ``h264`` or ``hevc``, or None without video.
 ~~~
 
+**`stream_counts`**
+
+~~~text
+stream_counts(self, path: str) -> dict[str, int] | None
+
+Count the streams of a file by type.
+
+Args:
+    path: Media file.
+
+Returns:
+    Number of streams per ``codec_type`` (``video``, ``audio``,
+    ``subtitle``, ``data``, ``attachment``), or None if ffprobe
+    fails.
+~~~
+
 **`duration_and_codec`**
 
 ~~~text
@@ -2448,7 +2464,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.11.1') -> None
+__init__(self, control: RunControl, installed: str = '1.12.0') -> None
 
 Remember the job and the installed release.
 
@@ -2720,7 +2736,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.11.1')
+__init__(self, package_dir: str | None = None, version: str = '1.12.0')
 
 Locate the imported package.
 
@@ -3144,13 +3160,22 @@ Encodes a video with ffmpeg/libx265 and validates the result.
 
 The output is accepted only if ffmpeg exits with 0, the file is not
 empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
-a video stream, its duration matches the input within
+a video stream, it has at least as many streams of every type as the
+input (:meth:`lost_streams`), its duration matches the input within
 ``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
 :class:`DecodeCheck` set - the whole output decodes without a single
 error (:meth:`DecodeCheck.verify`; time limit
 ``max(VERIFY_MIN, duration * VERIFY_FACTOR)``). A
 suspiciously small output is typical of an input whose data could not
 be decoded: the encoder then writes almost nothing but grey frames.
+
+**Only the picture is re-encoded** (:attr:`KEEP_STREAMS`): all streams
+of the input are mapped (``-map 0``) and copied unchanged
+(``-c copy``) - every audio track, subtitle, chapter, data stream and
+cover picture - except the video streams that are not cover pictures
+(``-c:V libx265``). Without ``-map`` ffmpeg would keep only one stream
+per type and re-encode the audio. A stream the container cannot take
+makes ffmpeg fail; the original is then kept.
 
 **CPU use.** libx265 runs its own thread pool, which by default uses
 every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
@@ -3310,6 +3335,26 @@ Returns:
     has a video stream, a matching duration (or the duration of
     either file cannot be determined) and - with a decode check -
     decodes completely without errors.
+~~~
+
+**`lost_streams`**
+
+~~~text
+lost_streams(self, src: str, dst: str) -> str
+
+Compare the streams of input and output by type.
+
+Every audio, subtitle, data and attachment stream must arrive in
+the output, and as many video streams (cover pictures included).
+
+Args:
+    src: Input video.
+    dst: Encoded output.
+
+Returns:
+    Description of what is missing (e.g. ``audio 2 -> 1``), or empty
+    if nothing is missing or the probe cannot count streams (then
+    the comparison is skipped and logged).
 ~~~
 
 **`_info`**
@@ -9342,6 +9387,10 @@ The input is read with error tolerance (``-err_detect ignore_err``,
 goes on as far as the data reaches. The result is HEVC with the same
 quality settings as ``shrink``, so a repaired video is shrunk at the
 same time.
+
+Unlike ``shrink`` it does not copy all streams (:attr:`KEEP_STREAMS` is
+False): ffmpeg picks one stream per type and re-encodes the audio,
+because damaged audio packets cannot be copied into a clean file.
 
 Validation differs from :class:`HevcEncoder`: the output is shorter
 than the damaged input by design, so size and duration are not
