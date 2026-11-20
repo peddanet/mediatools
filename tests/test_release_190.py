@@ -78,7 +78,7 @@ def test_potential_ratio_and_speed_per_bit_rate() -> None:
     """Classes with enough measurements use their own share and speed, others the overall."""
     rows = [row(30 * MB, 3 * MB, 10.0, 60.0) for _ in range(ShrinkPotential.MIN_SAMPLES)]
     rows += [row(3 * MB, 1 * MB, 5.0, 60.0), row(1, 0, 0, 0), row(5, None, 1, 1, "FAILED")]
-    potential = ShrinkPotential(rows, wall_rate=6 * MB)           # type: ignore[arg-type]
+    potential = ShrinkPotential(rows, 6 * MB, 0.0)         # type: ignore[arg-type]
     fast = ShrinkPotential.quality_of(30 * MB, 60.0)
     assert fast == "4-8 Mbit/s" and potential.ratios[fast] == pytest.approx(0.1)
     slow = ShrinkPotential.quality_of(3 * MB, 60.0)
@@ -103,7 +103,7 @@ def test_potential_groups_rank_and_thresholds() -> None:
     ranked = potential.ranked()
     assert [group.files for group in ranked if group.band == "10-30 min"] == [2]
     lines = potential.table()
-    assert lines[0].startswith("length") and len(lines) == 4
+    assert lines[0].startswith("level length") and len(lines) == 4
     thresholds = dict((label, files) for label, files, _s, _f, _t in potential.thresholds())
     assert thresholds["--min-seconds 600"] == 2 and thresholds["--min-seconds 0"] == 3
     assert thresholds["--min-seconds 1800"] == 0

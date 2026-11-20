@@ -1650,6 +1650,23 @@ Returns:
     Codec name such as ``h264`` or ``hevc``, or None without video.
 ~~~
 
+**`duration_and_codec`**
+
+~~~text
+duration_and_codec(self, path: str) -> tuple[float | None, str | None]
+
+Return duration and video codec with one ffprobe call.
+
+Starting ffprobe costs more than reading a header, so asking for both
+values at once halves the time of a first check of many videos.
+
+Args:
+    path: Media file.
+
+Returns:
+    ``(seconds, codec)``; each None if it cannot be determined.
+~~~
+
 **`has_video`**
 
 ~~~text
@@ -2431,7 +2448,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.9.1') -> None
+__init__(self, control: RunControl, installed: str = '1.11.0') -> None
 
 Remember the job and the installed release.
 
@@ -2703,7 +2720,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.9.1')
+__init__(self, package_dir: str | None = None, version: str = '1.11.0')
 
 Locate the imported package.
 
@@ -3324,15 +3341,28 @@ Plans like ``shrink`` without encoding and estimates the potential.
 
 Read only: no database, cache of a run or video is changed, interrupted
 replacements are not completed (that is left to ``shrink``), and it can
-run while a shrink job is active. Videos recorded in a shrink database,
-recorded as failed, or already HEVC are left out exactly as ``shrink``
-does; the rest is grouped by playing time and bit rate
-(:class:`ShrinkPotential`) with the measured output share and speed.
-Durations and codecs come from the caches of shrink; missing ones are
-probed with several ffprobe processes at once and added to the caches.
+run while a shrink job is active. It runs only when it is called; no
+other command starts it. Videos recorded in a shrink database, recorded
+as failed, or already HEVC are left out exactly as ``shrink`` does; the
+rest is grouped by level, playing time and bit rate
+(:class:`ShrinkPotential`) with the measured output share, speed and
+fixed time per video.
+
+**Levels.** ``L1`` is the given folder (default ``[collection] root``);
+with ``--up N`` or ``--up-to DIR`` its parents are added as ``L2``,
+``L3`` ... Each level counts only what it adds to the level inside it,
+so the rows answer "what does going one level up bring". All levels
+are planned in **one** walk of the outermost folder, and every video is
+counted once even if it has several hard-linked names.
+
+**Speed of the estimate itself.** Durations and codecs come from the
+caches of shrink; a video missing there is probed once for both values
+(one ffprobe call), ``--probe-jobs`` at a time. The console names the
+levels only by label; their paths are in the report file.
 
 Attributes:
-    root: Directory to estimate.
+    root: The given folder (``L1``).
+    db_name: File name of the shrink databases.
     runlog: Log of this command.
 ~~~
 
@@ -3344,7 +3374,7 @@ __init__(self, root: str, db_name: str | None) -> None
 Bind the command to a directory.
 
 Args:
-    root: Directory.
+    root: Directory (``L1``).
     db_name: File name of the shrink databases.
 ~~~
 
@@ -3359,15 +3389,84 @@ Args:
     sub: Sub-parser collection of the main parser.
 ~~~
 
+**`default_probe_jobs`**
+
+~~~text
+default_probe_jobs() -> int
+
+Return the default number of parallel ffprobe processes.
+
+Returns:
+    The number of CPU threads, at least 2 and at most 16.
+~~~
+
+**`levels`**
+
+~~~text
+levels(self, up: int, up_to: str | None) -> list[str]
+
+Return the folders of the levels, the given one first.
+
+Args:
+    up: Number of parent folders to add.
+    up_to: Add every parent up to this folder, or None.
+
+Returns:
+    Absolute folders ``L1``, ``L2`` ... (each contains the previous).
+
+Raises:
+    SystemExit: If ``up`` is negative, goes above ``/`` or ``up_to``
+        does not contain the given folder.
+~~~
+
+**`level_of`**
+
+~~~text
+level_of(path: str, levels: list[str]) -> str
+
+Return the label of the innermost level that contains a video.
+
+Args:
+    path: Absolute video path.
+    levels: Folders, innermost first.
+
+Returns:
+    ``L1``, ``L2`` ...
+~~~
+
+**`unique`**
+
+~~~text
+unique(
+    cls,
+    todo: list[tuple[str, int]],
+    levels: list[str],
+) -> tuple[list[tuple[str, int]], int]
+
+Keep one name per video file (inode); hard links are encoded once.
+
+The name in the innermost level is kept, so a video linked into
+``L1`` and ``L3`` counts for ``L1``.
+
+Args:
+    todo: ``(path, size)`` pairs.
+    levels: Folders of the levels, innermost first.
+
+Returns:
+    The pairs without further names of the same inode, and the
+    number of names dropped.
+~~~
+
 **`run`**
 
 ~~~text
 run(self, args: argparse.Namespace) -> int
 
-Plan, group and report.
+Plan once over the outermost level, group by level and report.
 
 Args:
-    args: Parsed arguments (``ext``, ``probe_jobs``).
+    args: Parsed arguments (``up``, ``up_to``, ``overhead``, ``ext``,
+        ``probe_jobs``).
 
 Returns:
     0.
@@ -3376,14 +3475,34 @@ Returns:
 **`report`**
 
 ~~~text
-report(self, potential: ShrinkPotential, shrinker: Shrinker, count: int) -> None
+report(
+    self,
+    potential: ShrinkPotential,
+    shrinker: Shrinker,
+    counts: tuple[int, int],
+    levels: list[str],
+) -> None
 
-Log the basis, the ranked groups and the thresholds, and write a TSV report.
+Log the basis, the ranked groups and the thresholds per level; write a TSV report.
 
 Args:
     potential: Grouped videos.
     shrinker: The planning run (for its counters).
-    count: Videos still to shrink.
+    counts: Videos still to shrink, further hard-link names dropped.
+    levels: Folders of the levels, innermost first.
+~~~
+
+**`write_report`**
+
+~~~text
+write_report(path: str, potential: ShrinkPotential, levels: list[str]) -> None
+
+Write all groups as TSV, the level folders as comment lines first.
+
+Args:
+    path: Report file.
+    potential: Grouped videos.
+    levels: Folders of the levels, innermost first.
 ~~~
 
 ### `FileResult` (`mediatools.shrink.fileresult`) {.unnumbered}
@@ -4448,6 +4567,9 @@ Attributes:
     jobs: Number of videos encoded at the same time (1: one after the other).
     probe_jobs: Number of ffprobe processes run at the same time while
         planning (durations and codecs not in the cache yet).
+    probe_durations: Probe durations together with codecs while
+        planning, one ffprobe call per video (for estimates, which need
+        both).
 ~~~
 
 **`__post_init__`**
@@ -4493,6 +4615,7 @@ __init__(
     newer_than: float | None = None,
     jobs: int = 1,
     probe_jobs: int = 8,
+    probe_durations: bool = False,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -4725,6 +4848,21 @@ Args:
     paths: Videos about to be checked.
 ~~~
 
+**`prefetch_both`**
+
+~~~text
+prefetch_both(self, paths: list[str]) -> None
+
+Probe missing durations and codecs with one ffprobe call per video.
+
+Used when both values are needed (estimates): a video missing in
+either cache is probed once for both, ``probe_jobs`` at a time; the
+results go into both caches, saved every :attr:`CHECKPOINT` videos.
+
+Args:
+    paths: Videos about to be checked.
+~~~
+
 **`duration`**
 
 ~~~text
@@ -4781,7 +4919,7 @@ Args:
 ### `PotentialGroup` (`mediatools.shrink.potential`) {.unnumbered}
 
 ~~~text
-Videos of one length band and one bit-rate class.
+Videos of one level, one length band and one bit-rate class.
 
 Attributes:
     band: Length band, e.g. ``5-10 min``.
@@ -4790,6 +4928,9 @@ Attributes:
     size: Their size in bytes.
     ratio: Expected output share (output bytes per source byte).
     rate: Expected speed in source bytes per wall-clock second.
+    level: Level label (``L1`` = the given folder, ``L2`` its parent ...).
+    overhead: Expected fixed wall-clock seconds per video, in addition to the
+        time that grows with the size (start, checks, validation).
 ~~~
 
 **`saved`**
@@ -4805,7 +4946,7 @@ Bytes expected to be freed.
 ~~~text
 seconds(self) -> float
 
-Expected encoding time in wall-clock seconds.
+Expected encoding time in wall-clock seconds (fixed part included).
 ~~~
 
 **`per_hour`**
@@ -4835,6 +4976,8 @@ __init__(
     size: int = 0,
     ratio: float = 0.2,
     rate: float = 1.0,
+    level: str = 'L1',
+    overhead: float = 0.0,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -4871,8 +5014,16 @@ The estimate uses what was measured so far, not a model of the encoder:
   file (ledger), scaled to the measured wall-clock speed of the whole
   run (``ThroughputLog``), which includes parallel encodes.
 
-Videos are grouped by playing time (the bands of ``--min-seconds``) and
-by bit rate (a rough measure of quality: a high bit rate has the most to
+* **fixed time per video**: the ledger time of a video is fitted as
+  ``a + b x size`` (least squares); ``a`` is the part every video costs
+  regardless of its size - start of ffmpeg, trial decode, validation,
+  flushing. It matters for many short videos, where a pure
+  size/speed estimate is too optimistic. It is scaled to wall-clock time
+  like the speed and can be set by the caller instead (``overhead``).
+
+Videos are grouped by level (``L1`` the given folder, ``L2`` what its
+parent adds, ...), playing time (the bands of ``--min-seconds``) and bit
+rate (a rough measure of quality: a high bit rate has the most to
 lose). The groups are ranked by space freed per hour of encoding, so
 the first rows are the best next step.
 
@@ -4881,20 +5032,96 @@ Attributes:
     rates: Speed per bit-rate class (source bytes per wall second).
     overall_ratio: Output share over all measured videos.
     samples: Measured videos per bit-rate class.
-    groups: Groups by ``(band, quality)``.
+    overhead: Fixed wall-clock seconds per video used for the estimate.
+    overhead_basis: How :attr:`overhead` was found (for the report).
+    groups: Groups by ``(level, band, quality)``.
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, rows: list[LedgerRow], wall_rate: float | None) -> None
+__init__(
+    self,
+    rows: list[LedgerRow],
+    wall_rate: float | None,
+    overhead: float | None = None,
+) -> None
 
-Derive output share and speed per bit-rate class from the ledger.
+Derive output share, speed and fixed time per video from the ledger.
 
 Args:
     rows: Ledger entries.
     wall_rate: Measured wall-clock speed of shrinking (source bytes
         per second), or None.
+    overhead: Fixed wall-clock seconds per video to use instead of
+        the fitted value, or None to fit it.
+~~~
+
+**`variable`**
+
+~~~text
+variable(took: float, count: float, fixed: float) -> float
+
+Return the part of the measured time that grows with the size.
+
+Args:
+    took: Measured seconds of ``count`` videos.
+    count: Number of videos.
+    fixed: Fixed seconds per video.
+
+Returns:
+    ``took - count x fixed``, but at least a tenth of ``took`` (a
+    fixed time set too high must not make the speed infinite).
+~~~
+
+**`usable`**
+
+~~~text
+usable(row: LedgerRow) -> bool
+
+Tell whether a ledger entry is a measured, finished encode.
+
+Args:
+    row: Ledger entry.
+
+Returns:
+    True for ``shrunk``/``copy`` rows with sizes, time and length.
+~~~
+
+**`fit`**
+
+~~~text
+fit(rows: list[LedgerRow]) -> tuple[float, float] | None
+
+Fit the time of a video as ``a + b x size`` by least squares.
+
+Args:
+    rows: Usable ledger entries.
+
+Returns:
+    ``(a, b)`` with ``a`` in seconds and ``b`` in seconds per byte,
+    or None with fewer than two different sizes.
+~~~
+
+**`_overhead`**
+
+~~~text
+_overhead(
+    self,
+    rows: list[LedgerRow],
+    scale: float,
+    given: float | None,
+) -> tuple[float, str]
+
+Find the fixed wall-clock time per video.
+
+Args:
+    rows: Usable ledger entries.
+    scale: Wall-clock speed over per-file speed (parallel encodes).
+    given: Value set by the caller, or None.
+
+Returns:
+    ``(seconds, basis text)``.
 ~~~
 
 **`band_of`**
@@ -4929,13 +5156,14 @@ Returns:
 **`add`**
 
 ~~~text
-add(self, size: int, seconds: float | None) -> None
+add(self, size: int, seconds: float | None, level: str = 'L1') -> None
 
 Count one video still to shrink.
 
 Args:
     size: Its size in bytes.
     seconds: Its playing time, or None if unknown.
+    level: Level label of the folder it belongs to.
 ~~~
 
 **`ranked`**
@@ -4949,12 +5177,26 @@ Returns:
     Groups sorted by :attr:`PotentialGroup.per_hour`, descending.
 ~~~
 
+**`levels`**
+
+~~~text
+levels(self) -> list[str]
+
+Return the level labels that have videos.
+
+Returns:
+    Labels in order (``L1`` first).
+~~~
+
 **`thresholds`**
 
 ~~~text
-thresholds(self) -> list[tuple[str, int, int, float, float]]
+thresholds(self, level: str | None = None) -> list[tuple[str, int, int, float, float]]
 
 Sum up what each ``--min-seconds`` value would take in.
+
+Args:
+    level: Only the videos of this level, or None for all.
 
 Returns:
     ``(min-seconds label, files, bytes, bytes freed, seconds)`` per
@@ -4978,9 +5220,13 @@ Returns:
 **`table`**
 
 ~~~text
-table(self) -> list[str]
+table(self, limit: int | None = None) -> list[str]
 
 Format the ranked groups with running totals.
+
+Args:
+    limit: Show at most this many groups (the totals still run over
+        the rows shown), or None for all.
 
 Returns:
     Text lines, header first.
