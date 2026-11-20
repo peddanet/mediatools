@@ -17,13 +17,22 @@ class HevcEncoder:
 
     The output is accepted only if ffmpeg exits with 0, the file is not
     empty, it is at least :attr:`MIN_RATIO` of the input's size, it contains
-    a video stream, its duration matches the input within
+    a video stream, it has at least as many streams of every type as the
+    input (:meth:`lost_streams`), its duration matches the input within
     ``max(TOL_ABS, duration * TOL_REL)`` seconds and - with a
     :class:`DecodeCheck` set - the whole output decodes without a single
     error (:meth:`DecodeCheck.verify`; time limit
     ``max(VERIFY_MIN, duration * VERIFY_FACTOR)``). A
     suspiciously small output is typical of an input whose data could not
     be decoded: the encoder then writes almost nothing but grey frames.
+
+    **Only the picture is re-encoded** (:attr:`KEEP_STREAMS`): all streams
+    of the input are mapped (``-map 0``) and copied unchanged
+    (``-c copy``) - every audio track, subtitle, chapter, data stream and
+    cover picture - except the video streams that are not cover pictures
+    (``-c:V libx265``). Without ``-map`` ffmpeg would keep only one stream
+    per type and re-encode the audio. A stream the container cannot take
+    makes ffmpeg fail; the original is then kept.
 
     **CPU use.** libx265 runs its own thread pool, which by default uses
     every logical CPU; ffmpeg's ``-threads`` does not limit it. Both the
@@ -59,6 +68,7 @@ class HevcEncoder:
     TOL_ABS = 1.0
     TOL_REL = 0.02
     MIN_RATIO = 0.02
+    KEEP_STREAMS = True
     VERIFY_MIN = 600.0
     VERIFY_FACTOR = 2.0
 
@@ -133,10 +143,12 @@ class HevcEncoder:
         nice = shutil.which("nice")
         if self.niceness > 0 and nice:
             prefix = [nice, "-n", str(self.niceness)]   # exec's ffmpeg: same process
+        streams = (["-map", "0", "-c", "copy", "-c:V", "libx265"] if self.KEEP_STREAMS
+                   else ["-vcodec", "libx265"])
         return prefix + [
             self.ffmpeg, "-nostdin", "-y", "-hide_banner", "-nostats",
             "-progress", "pipe:1", "-threads", str(self.threads), "-i", src,
-            "-vcodec", "libx265", "-preset", self.preset, "-crf", str(self.crf),
+            *streams, "-preset", self.preset, "-crf", str(self.crf),
             "-x265-params", f"pools={self.threads}", dst]
 
     def encode(self, src: str, dst: str,
@@ -233,6 +245,10 @@ class HevcEncoder:
         if not self.probe.has_video(dst):
             self._error("output has no video stream, original kept: %s", src)
             return False
+        lost = self.lost_streams(src, dst)
+        if lost:
+            self._error("output lost stream(s) (%s), original kept: %s", lost, src)
+            return False
         d_in, d_out = self.probe.duration(src), self.probe.duration(dst)
         if d_in is None or d_out is None:
             self._info("duration unknown (in=%s, out=%s), not compared", d_in, d_out)
@@ -251,6 +267,32 @@ class HevcEncoder:
                        time.monotonic() - started)
         self._info("output validated (in=%s s, out=%s s)", d_in, d_out)
         return True
+
+    def lost_streams(self, src: str, dst: str) -> str:
+        """Compare the streams of input and output by type.
+
+        Every audio, subtitle, data and attachment stream must arrive in
+        the output, and as many video streams (cover pictures included).
+
+        Args:
+            src: Input video.
+            dst: Encoded output.
+
+        Returns:
+            Description of what is missing (e.g. ``audio 2 -> 1``), or empty
+            if nothing is missing or the probe cannot count streams (then
+            the comparison is skipped and logged).
+        """
+        count = getattr(self.probe, "stream_counts", None)
+        if count is None or not self.KEEP_STREAMS:
+            return ""
+        before, after = count(src), count(dst)
+        if before is None or after is None:
+            self._info("streams not compared (in=%s, out=%s)", before, after)
+            return ""
+        return ", ".join(f"{kind} {number} -> {after.get(kind, 0)}"
+                         for kind, number in sorted(before.items())
+                         if after.get(kind, 0) < number)
 
     def _info(self, *args) -> None:
         """Log details at DEBUG level (log file only) if a logger is set.
