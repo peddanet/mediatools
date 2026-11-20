@@ -5,6 +5,22 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-11-20
+
+### Fixed
+- `estimate`: the time of a video is modelled from its **playing time**
+  (`took = a + b_q x length`, one slope per bit-rate class, a shared fixed
+  part `a`), not from its size; the encoder works frame by frame, so a
+  small video with a low bit rate is not fast. New class `TimeModel`.
+- The fixed part per video counts as *measured* only when the ledger holds
+  at least 20 videos shorter than 5 min. Before that it is extrapolated from
+  long videos (1.11.0 showed 52 s per video as if measured); the output then
+  says so, shows the fixed part as `0 to N s` and every time as a range
+  (optimistic to cautious); groups are ranked by the cautious time.
+- Per bit-rate class the basis lines show the encoding speed as a multiple
+  of real time; the report has the columns `seconds_low` and
+  `playing_seconds`.
+
 ## [1.11.0] - 2026-11-20
 
 ### Added
