@@ -5,6 +5,28 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-20
+
+### Added
+- `estimate --up N` / `--up-to DIR`: estimates the given folder (`L1`) and
+  its parent folders (`L2`, `L3` ...) in one run. Every level counts only
+  what it adds to the level inside it, so the rows answer what going one
+  level up brings; the thresholds of `--min-seconds` are shown per level.
+- Fixed time per video: the ledger time of a video is fitted as
+  `a + b x size`; `a` (start, checks, validation) is added once per video,
+  so many short videos are no longer estimated too fast. `--overhead
+  SECONDS` sets it by hand, e.g. to see the effect of 5 or 10 s.
+
+### Changed
+- `estimate` walks the tree once for all levels and probes a video missing
+  in the caches with **one** ffprobe call for duration and codec (about
+  half the time of a first check); the default of `--probe-jobs` is the
+  number of CPU threads, at most 16 (was 8).
+- `estimate` counts a video with several hard-linked names once (in the
+  innermost level); the number of further names is shown.
+- The console output of `estimate` names the levels only as `L1`, `L2` ...;
+  the folders are in the report file, which also has a `level` column.
+
 ## [1.10.0] - 2026-11-19
 
 ### Changed

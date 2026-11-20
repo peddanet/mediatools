@@ -58,11 +58,17 @@ classDiagram
   }
   class EstimateCommand {
     +root
+    +db_name
     +runlog
     +init(root, db_name)
     +add_parser(sub)
+    +default_probe_jobs()
+    +levels(up, up_to)
+    +level_of(path, levels)
+    +unique(todo, levels)
     +run(args)
-    +report(potential, shrinker, count)
+    +report(potential, shrinker, counts, levels)
+    +write_report(path, potential, levels)
   }
   class FileResult {
     +path
@@ -192,7 +198,8 @@ classDiagram
     +newer_than
     +jobs
     +probe_jobs
-    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed, min_size, newer_than, jobs, probe_jobs)
+    +probe_durations
+    +init(keep_copies, extensions, db_name, order, min_seconds, retry_failed, min_size, newer_than, jobs, probe_jobs, probe_durations)
   }
   class ShrinkPlanner {
     +root
@@ -213,6 +220,7 @@ classDiagram
     -_set_aside_hevc(todo)
     -_checkpoint(what, cache, number, total)
     +prefetch(what, paths)
+    +prefetch_both(paths)
     +duration(path)
     -_codec(path)
     -_duration(path)
@@ -225,25 +233,34 @@ classDiagram
     +size
     +ratio
     +rate
+    +level
+    +overhead
     +saved()
     +seconds()
     +per_hour()
-    +init(band, quality, files, size, ratio, rate)
+    +init(band, quality, files, size, ratio, rate, level, overhead)
   }
   class ShrinkPotential {
     +ratios
     +rates
     +overall_ratio
     +samples
+    +overhead
+    +overhead_basis
     +groups
-    +init(rows, wall_rate)
+    +init(rows, wall_rate, overhead)
+    +variable(took, count, fixed)
+    +usable(row)
+    +fit(rows)
+    -_overhead(rows, scale, given)
     +band_of(seconds)
     +quality_of(size, seconds)
-    +add(size, seconds)
+    +add(size, seconds, level)
     +ranked()
-    +thresholds()
+    +levels()
+    +thresholds(level)
     -_low(band)
-    +table()
+    +table(limit)
   }
   class ProgressReport {
     +root
