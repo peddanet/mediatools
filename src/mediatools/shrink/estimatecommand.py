@@ -16,6 +16,7 @@ from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.potential import ShrinkPotential
 from mediatools.shrink.shrinker import Shrinker
 from mediatools.shrink.throughput import ThroughputLog
+from mediatools.shrink.timemodel import TimeModel
 
 
 class EstimateCommand:
@@ -243,11 +244,11 @@ class EstimateCommand:
                  "per bit rate where at least %i were measured:", potential.overall_ratio * 100,
                  potential.overall_rate / 1e6, sum(potential.samples.values()),
                  ShrinkPotential.MIN_SAMPLES)
+        model = potential.model
         for quality, ratio in sorted(potential.ratios.items()):
-            log.info("  %-12s output %3.0f %%  %5.1f MB/s  (%i measured)", quality, ratio * 100,
-                     potential.rates[quality] / 1e6, potential.samples[quality])
-        log.info("fixed time per video: %.1f s (%s)", potential.overhead,
-                 potential.overhead_basis)
+            log.info("  %-12s output %3.0f %%  %5.1f x real time  (%i measured)", quality,
+                     ratio * 100, model.speed(quality), potential.samples[quality])
+        log.info("fixed time per video: %s (%s)", self.fixed_text(model), model.basis)
         if len(levels) > 1:
             log.info("levels: L1 = the given folder, L2 = its parent ... - each row counts only "
                      "what a level adds to the level inside it")
@@ -259,12 +260,41 @@ class EstimateCommand:
         for level in potential.levels():
             log.info("what each --min-seconds would take in%s:",
                      f" - {level} only" if len(levels) > 1 else "")
-            for label, files, size, saved, seconds in potential.thresholds(level):
+            for label, files, size, saved, seconds, low in potential.thresholds(level):
                 log.info("  %-20s %6i files %8.1f GiB -> about %7.1f GiB freed in %s", label,
-                         files, size / gib, saved / gib, ThroughputLog.duration_text(seconds))
+                         files, size / gib, saved / gib, self.time_text(low, seconds))
         path = DataDir().file("reports", "shrink_estimate", ".tsv")
         self.write_report(path, potential, levels)
         log.info("report: %s", path)
+
+    @staticmethod
+    def fixed_text(model: TimeModel) -> str:
+        """Describe the fixed time per video.
+
+        Args:
+            model: :class:`TimeModel`.
+
+        Returns:
+            ``6.0 s``, or ``0 to 52.4 s`` while it is only extrapolated.
+        """
+        if model.uncertain:
+            return f"{model.fixed_low:.0f} to {model.fixed:.1f} s"
+        return f"{model.fixed:.1f} s"
+
+    @staticmethod
+    def time_text(low: float, high: float) -> str:
+        """Format an expected duration, as a range if the two variants differ.
+
+        Args:
+            low: Optimistic seconds.
+            high: Cautious seconds.
+
+        Returns:
+            ``1 d 7 h`` or ``1 d 7 h to 1 d 22 h``.
+        """
+        cautious = ThroughputLog.duration_text(high)
+        optimistic = ThroughputLog.duration_text(low)
+        return cautious if optimistic == cautious else f"{optimistic} to {cautious}"
 
     @staticmethod
     def write_report(path: str, potential: ShrinkPotential, levels: list[str]) -> None:
@@ -278,10 +308,12 @@ class EstimateCommand:
         with open(path, "w", encoding="utf-8") as handle:
             for number, folder in enumerate(levels, 1):
                 handle.write(f"# L{number}\t{folder}\n")
-            handle.write(f"# fixed seconds per video\t{potential.overhead:.1f}\n")
+            handle.write(f"# fixed seconds per video\t{potential.model.fixed_low:.1f}\t"
+                         f"{potential.model.fixed:.1f}\t{potential.model.basis}\n")
             handle.write("level\tlength\tbit_rate\tfiles\tbytes\tfreed_bytes\tseconds\t"
-                         "output_share\n")
+                         "seconds_low\tplaying_seconds\toutput_share\n")
             for group in potential.ranked():
                 handle.write(f"{group.level}\t{group.band}\t{group.quality}\t{group.files}\t"
                              f"{group.size}\t{group.saved:.0f}\t{group.seconds:.0f}\t"
+                             f"{group.seconds_low:.0f}\t{group.length:.0f}\t"
                              f"{group.ratio:.3f}\n")
