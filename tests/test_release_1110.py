@@ -9,11 +9,13 @@ import pytest
 from conftest import make_file, make_video
 from test_release_190 import MB, row
 from test_shrink_run import FakeProbe, build, videos
+from mediatools.broken.repairer import RepairEncoder
 from mediatools.cli import Cli
 from mediatools.core.codeccache import CodecCache
 from mediatools.core.datadir import DataDir
 from mediatools.core.durationcache import DurationCache
 from mediatools.core.probe import MediaProbe
+from mediatools.shrink.encoder import HevcEncoder
 from mediatools.shrink.estimatecommand import EstimateCommand
 from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.options import ShrinkOptions
@@ -272,3 +274,62 @@ def test_report_limits_the_ranked_rows(tmp_path: Path, capsys: pytest.CaptureFix
     assert EstimateCommand(str(tmp_path / "c"), None).run(args) == 0
     out = capsys.readouterr().out
     assert "first 0" in out and "only" not in out
+
+
+# -- 1.12.0: only the picture is re-encoded -------------------------------------------
+def rich_video(path: Path) -> str:
+    """Create an H.264 video with two audio tracks and a subtitle.
+
+    Args:
+        path: Target file.
+
+    Returns:
+        Its path.
+    """
+    subs = path.with_suffix(".srt")
+    subs.write_text("1\n00:00:00,000 --> 00:00:01,500\nx\n", encoding="utf-8")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc=duration=2:size=160x120:rate=10", "-f", "lavfi", "-i",
+                    "sine=f=440:duration=2", "-f", "lavfi", "-i", "sine=f=880:duration=2",
+                    "-i", str(subs), "-map", "0", "-map", "1", "-map", "2", "-map", "3",
+                    "-c:v", "libx264", "-c:a", "aac", "-c:s", "mov_text", str(path)],
+                   check=True)
+    return str(path)
+
+
+def test_shrink_keeps_every_stream(tmp_path: Path) -> None:
+    """All audio tracks and subtitles arrive unchanged; only the picture becomes HEVC.
+
+    Args:
+        tmp_path: Temporary directory.
+    """
+    src = rich_video(tmp_path / "rich.mp4")
+    dst = str(tmp_path / "out.mp4")
+    encoder = HevcEncoder(threads=2, preset="ultrafast", niceness=0)
+    cmd = encoder.command(src, dst)
+    assert cmd[cmd.index("-map") + 1] == "0" and cmd[cmd.index("-c:V") + 1] == "libx265"
+    assert encoder.encode(src, dst)
+    probe = MediaProbe()
+    assert probe.stream_counts(dst) == {"video": 1, "audio": 2, "subtitle": 1}
+    assert probe.video_codec(dst) == "hevc"
+    assert probe.value(dst, "stream=codec_name", "a:0") == "aac"
+    assert probe.stream_counts(str(tmp_path / "none.mp4")) is None
+
+
+def test_output_that_lost_a_stream_is_rejected(tmp_path: Path) -> None:
+    """A missing audio track or subtitle fails the validation; the original is kept.
+
+    Args:
+        tmp_path: Temporary directory.
+    """
+    src = rich_video(tmp_path / "rich.mp4")
+    poor = str(tmp_path / "poor.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", poor], check=True)
+    encoder = HevcEncoder(threads=2)
+    assert encoder.lost_streams(src, poor) == "audio 2 -> 1, subtitle 1 -> 0"
+    assert not encoder.validate(src, poor)
+    assert encoder.lost_streams(src, src) == ""
+    assert encoder.lost_streams(src, str(tmp_path / "gone.mp4")) == ""
+    assert HevcEncoder(probe=FakeProbe()).lost_streams(src, poor) == ""   # type: ignore
+    repair = RepairEncoder()
+    assert "-map" not in repair.command(src, poor) and repair.lost_streams(src, poor) == ""
