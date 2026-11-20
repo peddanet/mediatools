@@ -979,42 +979,84 @@ first plan of a large tree is about that many times faster.
 
 What shrinking could still free, and how long it would take - without
 changing anything (no database, no video; it may run while a shrink job is
-active):
+active). It runs only when you call it; `shrink` never starts it.
 
 ~~~bash
-mediatools estimate ~/Pictures                 # a whole tree, e.g. above the collection
 mediatools estimate                            # [collection] root
+mediatools estimate ~/Pictures/collection      # another folder
+mediatools estimate --up 2                     # [collection] root and 2 parent folders
+mediatools estimate --up-to ~                  # every parent folder up to the home folder
 ~~~
 
+| Option | Meaning |
+|---|---|
+| `PATH` | the folder `L1` (default `[collection] root`) |
+| `--up N` | also its `N` parent folders as `L2`, `L3` ... |
+| `--up-to DIR` | also every parent folder up to `DIR` (must contain `L1`) |
+| `--overhead SECONDS` | fixed time per video instead of the value fitted from the ledger |
+| `--probe-jobs N` | ffprobe processes at the same time (default: CPU threads, at most 16) |
+| `--ext` | video extensions (default `mp4`) |
+
 It plans exactly like `shrink` without `--min-seconds`: videos recorded in a
-shrink database, recorded as failed or already HEVC are left out. The rest
-is grouped by **playing time** (the bands of `--min-seconds`) and **bit
-rate** (size x 8 / playing time, a rough measure of quality: a high bit rate
-has the most to lose). For each group it estimates from what was measured
-so far:
+shrink database, recorded as failed or already HEVC are left out, and a
+video with several hard-linked names counts once. The rest is grouped by
+**level**, **playing time** (the bands of `--min-seconds`) and **bit rate**
+(size x 8 / playing time, a rough measure of quality: a high bit rate has
+the most to lose).
+
+**Levels.** `L1` is the given folder, `L2` its parent and so on. Each
+level counts only what it *adds* to the level inside it: the `L2` rows are
+the videos in the parent folder that are not in `L1`. So the output answers
+"what does going one level up bring, and at which `--min-seconds`". All
+levels are planned in one walk of the outermost folder. The console names
+only `L1`, `L2` ...; the folders are listed at the start of the report file.
+
+For each group it estimates from what was measured so far:
 
 | Value | Source |
 |---|---|
 | output share | ledger: output / source bytes of the shrunk videos of the same bit-rate class (at least 20 measured, else the overall share) |
-| speed | ledger: source bytes per second spent per class, scaled to the measured wall-clock speed of shrinking (parallel encodes included) |
+| fixed time per video | ledger: the time of each video fitted as `a + b x size` (least squares); `a` is what every video costs regardless of its size - start, trial decode, validation, flushing |
+| speed | ledger: source bytes per second of the size-dependent part, per class, scaled to the measured wall-clock speed of shrinking (parallel encodes included) |
+
+The fixed time matters for many short videos: without it, ten thousand
+videos of 30 s would be estimated as fast as a few long videos of the same
+total size. If the ledger has too few measured videos, 0 s is assumed and
+the output says so; `--overhead 5` or `--overhead 10` shows the effect.
+
+**Speed of the estimate itself.** The first run over a large tree spends
+its time in ffprobe. A video missing in the caches is probed once for both
+duration and codec, `--probe-jobs` at a time, and the results are kept in
+the caches of shrink; a second run reads them from there. The settings
+`--jobs` and `--threads` of `shrink` concern the encoder and do not apply.
 
 Output (numbers illustrative):
 
 ~~~text
+estimate for L1 and 2 level(s) above (nothing is changed; the paths are in the report)
+planned in 6 min (one walk, ffprobe 16 at a time)
+left out: already processed (database) 2752 | failed before 3 | already HEVC 410 | further hard-link names 12
 basis: output 17 % of the source and 2.4 MB/s (measured on 2752 video(s)); per bit rate ...
-1013 video(s) not shrunk yet - best groups first (most GiB freed per hour):
-  length     bit rate      files      GiB  freed GiB   hours  GiB/h  sum freed sum hours
-  10-30 min  >= 8 Mbit/s     120    150.0      127.5    17.4    7.3      127.5      17.4
-  5-10 min   4-8 Mbit/s      300     90.0       73.8    10.4    7.1      201.3      27.8
+fixed time per video: 6.0 s (fitted on 2752 measured video(s), 40 of them shorter than 5 min)
+levels: L1 = the given folder, L2 = its parent ... - each row counts only what a level adds to the level inside it
+34174 video(s) not shrunk yet - best groups first (most GiB freed per hour), first 20:
+  level length     bit rate      files      GiB  freed GiB   hours  GiB/h  sum freed sum hours
+  L1    2-5 min    >= 8 Mbit/s     900    180.0      151.0    20.1    7.5      151.0      20.1
+  L1    1-2 min    4-8 Mbit/s     1200     70.0       58.0     8.9    6.5      209.0      29.0
   ...
-what each --min-seconds would take in:
-  --min-seconds 300       420 files    240.0 GiB -> about   201.3 GiB freed in 1d 3h
-  --min-seconds 120      2100 files    290.0 GiB -> about   235.0 GiB freed in 1d 10h
+what each --min-seconds would take in - L1 only:
+  --min-seconds 300         2 files      0.6 GiB -> about     0.5 GiB freed in 5 min
+  --min-seconds 120      1748 files    264.2 GiB -> about   219.7 GiB freed in 1 d 7 h
+  ...
+what each --min-seconds would take in - L2 only:
+  ...
+report: <state>/reports/shrink_estimate_<time>.tsv
 ~~~
 
 The first rows are the best next step; *sum freed* and *sum hours* tell
-what taking the groups down to that row yields and costs. The table is
-also written to `<state>/reports/shrink_estimate_<time>.tsv`.
+what taking the groups down to that row yields and costs. The console
+shows the first 20 groups; the report file has all of them with a `level`
+column, and the folders of the levels as comment lines (`# L1 <folder>`).
 
 # progress
 
