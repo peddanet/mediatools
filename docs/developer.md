@@ -195,7 +195,8 @@ directory, configuration -- lives in `core`.
 | `ShrinkDatabase` | database per directory (name configurable), matching by file name, schema migration, UPSERT |
 | `DatabaseRenamer` | one-time renaming of databases and their backups, never overwrites |
 | `HevcEncoder` | ffmpeg in its own process group, progress, abort, validation of exit code, size (at least 2 % of the input), stream, duration and full decode of the output (`DecodeCheck.verify`); message file kept on failure |
-| `ShrinkPotential`, `PotentialGroup` | estimate of the remaining potential by level, playing time and bit rate; output share and speed per bit-rate class and the fixed time per video (least-squares fit `a + b x size`) from the ledger (since 1.9.0, levels and fixed time since 1.11.0) |
+| `ShrinkPotential`, `PotentialGroup` | estimate of the remaining potential by level, playing time and bit rate; output share per bit-rate class from the ledger (since 1.9.0, levels since 1.11.0) |
+| `TimeModel` | encoding time `took = a + b_q x length` fitted on the ledger (shared fixed part, one slope per bit-rate class, closed-form least squares); the fixed part counts as measured only with at least 20 videos shorter than 5 min, otherwise times are a range (since 1.11.1) |
 | `EstimateCommand` | the read-only command `estimate`: levels `L1` ... `Ln` (`--up`, `--up-to`) planned in one walk of the outermost folder, one name per inode, combined probing via `ShrinkPlanner.prefetch_both` and `MediaProbe.duration_and_codec` (since 1.9.0, levels since 1.11.0) |
 | `ShrinkPlanner` | planning phase: recovery, leftovers, database and failure rows, regrown originals (larger than recorded, not HEVC: planned again), minimum duration, HEVC set-aside, order |
 | `ReplaceJournal` | crash-safe in-place copy-back with marker file, recovery after a crash |

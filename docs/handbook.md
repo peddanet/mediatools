@@ -1016,13 +1016,19 @@ For each group it estimates from what was measured so far:
 | Value | Source |
 |---|---|
 | output share | ledger: output / source bytes of the shrunk videos of the same bit-rate class (at least 20 measured, else the overall share) |
-| fixed time per video | ledger: the time of each video fitted as `a + b x size` (least squares); `a` is what every video costs regardless of its size - start, trial decode, validation, flushing |
-| speed | ledger: source bytes per second of the size-dependent part, per class, scaled to the measured wall-clock speed of shrinking (parallel encodes included) |
+| time | ledger: the time of each video fitted as `a + b x playing time` with one `b` per bit-rate class (least squares); `a` is what every video costs regardless of its length - start, trial decode, validation, flushing; scaled to the measured wall-clock speed of shrinking (parallel encodes included) |
 
-The fixed time matters for many short videos: without it, ten thousand
-videos of 30 s would be estimated as fast as a few long videos of the same
-total size. If the ledger has too few measured videos, 0 s is assumed and
-the output says so; `--overhead 5` or `--overhead 10` shows the effect.
+The time grows with the **playing time**, not with the size: the encoder
+works frame by frame, so a small video with a low bit rate is not fast.
+
+The fixed part `a` matters for many short videos. It is only **measured**
+when the ledger holds at least 20 videos shorter than 5 min; before that
+it is extrapolated from long videos and may be far off. The output then
+says `extrapolated`, shows the fixed part as `0 to N s` and every time as a
+range from the optimistic (0 s) to the cautious value (`N s`); the groups
+are ranked by the cautious time. Shrinking some short videos first (e.g.
+`shrink --order smallest` for a few hours) makes it measured.
+`--overhead SECONDS` sets the fixed part by hand.
 
 **Speed of the estimate itself.** The first run over a large tree spends
 its time in ffprobe. A video missing in the caches is probed once for both
@@ -1037,16 +1043,16 @@ estimate for L1 and 2 level(s) above (nothing is changed; the paths are in the r
 planned in 6 min (one walk, ffprobe 16 at a time)
 left out: already processed (database) 2752 | failed before 3 | already HEVC 410 | further hard-link names 12
 basis: output 17 % of the source and 2.4 MB/s (measured on 2752 video(s)); per bit rate ...
-fixed time per video: 6.0 s (fitted on 2752 measured video(s), 40 of them shorter than 5 min)
+fixed time per video: 0 to 52.4 s (extrapolated from 3345 video(s), only 0 of them shorter than 5 min - ...)
 levels: L1 = the given folder, L2 = its parent ... - each row counts only what a level adds to the level inside it
 34174 video(s) not shrunk yet - best groups first (most GiB freed per hour), first 20:
-  level length     bit rate      files      GiB  freed GiB   hours  GiB/h  sum freed sum hours
-  L1    2-5 min    >= 8 Mbit/s     900    180.0      151.0    20.1    7.5      151.0      20.1
-  L1    1-2 min    4-8 Mbit/s     1200     70.0       58.0     8.9    6.5      209.0      29.0
+  level length     bit rate      files      GiB  freed GiB   hours  h min  GiB/h  sum freed sum hours
+  L1    2-5 min    >= 8 Mbit/s     900    180.0      151.0    20.1   12.5    7.5      151.0      20.1
+  L1    1-2 min    4-8 Mbit/s     1200     70.0       58.0     8.9    4.0    6.5      209.0      29.0
   ...
 what each --min-seconds would take in - L1 only:
   --min-seconds 300         2 files      0.6 GiB -> about     0.5 GiB freed in 5 min
-  --min-seconds 120      1748 files    264.2 GiB -> about   219.7 GiB freed in 1 d 7 h
+  --min-seconds 120      1748 files    264.2 GiB -> about   219.7 GiB freed in 1 d 7 h to 1 d 22 h
   ...
 what each --min-seconds would take in - L2 only:
   ...
@@ -1054,7 +1060,9 @@ report: <state>/reports/shrink_estimate_<time>.tsv
 ~~~
 
 The first rows are the best next step; *sum freed* and *sum hours* tell
-what taking the groups down to that row yields and costs. The console
+what taking the groups down to that row yields and costs (cautious);
+*h min* is the optimistic time and appears only while the fixed part is
+extrapolated. The console
 shows the first 20 groups; the report file has all of them with a `level`
 column, and the folders of the levels as comment lines (`# L1 <folder>`).
 

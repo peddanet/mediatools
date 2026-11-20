@@ -68,6 +68,8 @@ classDiagram
     +unique(todo, levels)
     +run(args)
     +report(potential, shrinker, counts, levels)
+    +fixed_text(model)
+    +time_text(low, high)
     +write_report(path, potential, levels)
   }
   class FileResult {
@@ -232,27 +234,25 @@ classDiagram
     +files
     +size
     +ratio
-    +rate
     +level
-    +overhead
+    +length
+    +model
     +saved()
+    +times()
     +seconds()
+    +seconds_low()
     +per_hour()
-    +init(band, quality, files, size, ratio, rate, level, overhead)
+    +init(band, quality, files, size, ratio, level, length, model)
   }
   class ShrinkPotential {
     +ratios
-    +rates
     +overall_ratio
+    +overall_rate
     +samples
-    +overhead
-    +overhead_basis
+    +model
     +groups
     +init(rows, wall_rate, overhead)
-    +variable(took, count, fixed)
     +usable(row)
-    +fit(rows)
-    -_overhead(rows, scale, given)
     +band_of(seconds)
     +quality_of(size, seconds)
     +add(size, seconds, level)
@@ -451,11 +451,29 @@ classDiagram
     +add(size, seconds, out_size)
     +duration_text(seconds)
   }
+  class TimeModel {
+    +fixed
+    +fixed_low
+    +slopes
+    +pooled
+    +byte_rate
+    +measured
+    +short
+    +basis
+    +init(rows, classify, scale, given)
+    +intercept(classes)
+    -_fixed(fitted, scale, given)
+    +slope(sums, fixed, scale)
+    +uncertain()
+    +seconds(quality, files, length)
+    +speed(quality)
+  }
   EstimateCommand ..> Ledger
   EstimateCommand ..> ShrinkOptions
   EstimateCommand ..> ShrinkPotential
   EstimateCommand ..> Shrinker
   EstimateCommand ..> ThroughputLog
+  EstimateCommand ..> TimeModel
   JobChooser --> JobRegistry
   JobEntry ..> JobSpec
   JobRegistry ..> JobEntry
@@ -482,10 +500,12 @@ classDiagram
   ShrinkPlanner --> ShrinkOptions
   ShrinkPlanner --> ShrinkState
   ShrinkPlanner ..> Shrinker
+  PotentialGroup ..> TimeModel
   ShrinkPotential --> Ledger
   ShrinkPotential --> LedgerRow
   ShrinkPotential --> PotentialGroup
   ShrinkPotential ..> ThroughputLog
+  ShrinkPotential --> TimeModel
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   ResultTable ..> FileResult
@@ -513,3 +533,4 @@ classDiagram
   SlotTable --> RunningEncode
   SpaceTally ..> Ledger
   SpaceTally ..> SavingsLog
+  TimeModel --> LedgerRow
