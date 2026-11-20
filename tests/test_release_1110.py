@@ -19,6 +19,7 @@ from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.potential import ShrinkPotential
 from mediatools.shrink.throughput import ThroughputLog
+from mediatools.shrink.timemodel import TimeModel
 
 
 class BothProbe(FakeProbe):
@@ -115,26 +116,62 @@ def test_plan_probes_both_when_asked(tmp_path: Path) -> None:
 
 
 # -- fixed time per video --------------------------------------------------------------
-def test_fit_and_fixed_time() -> None:
-    """The time is fitted as a + b x size; a goes per video, the rest scales with size."""
-    rows = [row(10 * MB, 1 * MB, 10.0, 60.0), row(30 * MB, 3 * MB, 30.0, 600.0)] * 10
-    assert ShrinkPotential.fit(rows) == pytest.approx((0.0, 1e-6))
-    shifted = [row(r.source, r.result or 0, r.took + 5.0, r.length or 0) for r in rows]
-    assert ShrinkPotential.fit(shifted) == pytest.approx((5.0, 1e-6))
-    assert ShrinkPotential.fit(rows[:1]) is None
-    assert ShrinkPotential.fit([rows[0], rows[0]]) is None
-    potential = ShrinkPotential(shifted, wall_rate=None)
-    assert potential.overhead == pytest.approx(5.0)
-    assert "fitted on 20 measured video(s), 10 of them shorter than 5 min" \
-        in potential.overhead_basis
-    potential.add(10 * MB, 30.0)
-    group = potential.ranked()[0]
-    assert group.seconds == pytest.approx(5.0 + 10.0, rel=0.05)
-    assert ShrinkPotential.variable(10.0, 3, 5.0) == 1.0
-    few = ShrinkPotential(shifted[:3], wall_rate=None)
-    assert few.overhead == 0.0 and "not measurable" in few.overhead_basis
-    given = ShrinkPotential(shifted, wall_rate=None, overhead=-1.0)
-    assert given.overhead == 0.0 and given.overhead_basis == "set with --overhead"
+def test_fixed_time_is_fitted_on_playing_time() -> None:
+    """A shared fixed part and one slope per bit-rate class are recovered from the ledger."""
+    rows = []
+    for length in (20.0, 40.0, 90.0, 150.0, 400.0, 900.0) * 4:
+        rows.append(row(int(length * MB), int(length * MB / 10), 30.0 + 0.5 * length, length))
+        rows.append(row(int(length * MB / 2.5), int(length * MB / 10), 30.0 + length, length))
+    potential = ShrinkPotential(rows, wall_rate=None)
+    model = potential.model
+    assert model.fixed == pytest.approx(30.0) and not model.uncertain
+    assert "measured on 48 video(s), 32 of them shorter than 5 min" in model.basis
+    fast = ShrinkPotential.quality_of(int(60 * MB), 60.0)
+    assert model.slopes[fast][0] == pytest.approx(0.5) and model.speed(fast) == pytest.approx(2)
+    potential.add(int(60 * MB), 60.0)
+    potential.add(int(60 * MB), None)                      # length guessed from the size
+    assert potential.ranked()[0].seconds == pytest.approx(30.0 + 0.5 * 60.0)
+    assert potential.groups[("L1", "unknown", "unknown")].length > 0
+
+
+def test_fixed_time_from_long_videos_only_is_a_range() -> None:
+    """Without short videos the fixed part is extrapolated and times become a range."""
+    rows = [row(int(length * MB), int(length * MB / 10), 30.0 + 0.5 * length, length)
+            for length in (400.0, 900.0, 1800.0) * 8]
+    model = ShrinkPotential(rows, wall_rate=None).model
+    assert model.uncertain and model.fixed == pytest.approx(30.0) and model.fixed_low == 0.0
+    assert "extrapolated from 24 video(s), only 0 of them" in model.basis
+    high, low = model.seconds(">= 8 Mbit/s", 2, 100.0)
+    assert high == pytest.approx(60.0 + 50.0) and low < high
+
+
+def test_fixed_time_given_missing_or_odd() -> None:
+    """--overhead wins; too few videos or no spread give 0 s; slopes stay positive."""
+    rows = [row(int(length * MB), 1, 5.0 + length, length) for length in (60.0, 600.0) * 10]
+    given = ShrinkPotential(rows, wall_rate=None, overhead=-3.0).model
+    assert given.fixed == 0.0 and given.basis == "set with --overhead"
+    assert ShrinkPotential(rows[:3], wall_rate=None).model.basis.startswith("not measurable")
+    assert TimeModel.intercept([[1.0, 5.0, 25.0, 5.0, 1.0]]) is None
+    same = [row(int(60 * MB), 1, 70.0, 60.0)] * 20
+    assert ShrinkPotential(same, wall_rate=None).model.fixed == 0.0
+    huge = ShrinkPotential(rows, wall_rate=None, overhead=10000.0).model
+    assert huge.slopes[ShrinkPotential.quality_of(int(60 * MB), 60.0)][0] > 0
+    empty = TimeModel([], ShrinkPotential.quality_of)
+    assert empty.seconds("x", 1, 10.0) == (10.0, 10.0)
+    assert empty.slope([0.0, 0.0, 0.0, 0.0, 0.0], 0.0, 1.0) == TimeModel.DEFAULT_SLOPE
+
+
+def test_estimate_texts_for_ranges() -> None:
+    """Times and the fixed part are shown as a range while it is extrapolated."""
+    rows = [row(int(length * MB), int(length * MB / 10), 30.0 + 0.5 * length, length)
+            for length in (400.0, 900.0, 1800.0) * 8]
+    model = ShrinkPotential(rows, wall_rate=None).model
+    assert EstimateCommand.fixed_text(model) == "0 to 30.0 s"
+    assert EstimateCommand.time_text(60.0, 7200.0) == "1 min to 2 h 0 min"
+    assert EstimateCommand.time_text(60.0, 60.0) == "1 min"
+    potential = ShrinkPotential(rows, wall_rate=None)
+    potential.add(int(60 * MB), 60.0)
+    assert "h min" in potential.table()[0]
 
 
 def test_levels_in_groups_and_thresholds() -> None:

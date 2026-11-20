@@ -83,9 +83,11 @@ def test_potential_ratio_and_speed_per_bit_rate() -> None:
     assert fast == "4-8 Mbit/s" and potential.ratios[fast] == pytest.approx(0.1)
     slow = ShrinkPotential.quality_of(3 * MB, 60.0)
     assert potential.ratios[slow] == pytest.approx(potential.overall_ratio)
-    assert potential.rates[slow] == 6 * MB and potential.samples[slow] == 1
+    assert potential.samples[slow] == 1 and potential.samples[fast] == 20
     file_rate = (20 * 30 + 3) * MB / (20 * 10 + 5)
-    assert potential.rates[fast] == pytest.approx(3 * MB * 6 * MB / file_rate)
+    scale = 6 * MB / file_rate
+    assert potential.model.speed(fast) == pytest.approx(6.0 * scale)    # 60 s in 10 s
+    assert slow not in potential.model.slopes
     empty = ShrinkPotential([], None)
     assert empty.overall_ratio == ShrinkPotential.DEFAULT_RATIO
     assert empty.overall_rate == ShrinkPotential.DEFAULT_RATE
@@ -104,11 +106,11 @@ def test_potential_groups_rank_and_thresholds() -> None:
     assert [group.files for group in ranked if group.band == "10-30 min"] == [2]
     lines = potential.table()
     assert lines[0].startswith("level length") and len(lines) == 4
-    thresholds = dict((label, files) for label, files, _s, _f, _t in potential.thresholds())
+    thresholds = dict((label, files) for label, files, *_rest in potential.thresholds())
     assert thresholds["--min-seconds 600"] == 2 and thresholds["--min-seconds 0"] == 3
     assert thresholds["--min-seconds 1800"] == 0
-    group = PotentialGroup("x", "y", 1, 3600 * MB, ratio=0.25, rate=MB)
-    assert group.saved == 2700 * MB and group.seconds == 3600
+    group = PotentialGroup("x", "y", 1, 3600 * MB, ratio=0.25, length=3600.0)
+    assert group.saved == 2700 * MB and group.seconds == 3600 and group.seconds_low == 3600
     assert group.per_hour == pytest.approx(2700 * MB)
 
 

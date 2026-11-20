@@ -2448,7 +2448,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.11.0') -> None
+__init__(self, control: RunControl, installed: str = '1.11.1') -> None
 
 Remember the job and the installed release.
 
@@ -2720,7 +2720,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.11.0')
+__init__(self, package_dir: str | None = None, version: str = '1.11.1')
 
 Locate the imported package.
 
@@ -3490,6 +3490,35 @@ Args:
     shrinker: The planning run (for its counters).
     counts: Videos still to shrink, further hard-link names dropped.
     levels: Folders of the levels, innermost first.
+~~~
+
+**`fixed_text`**
+
+~~~text
+fixed_text(model: TimeModel) -> str
+
+Describe the fixed time per video.
+
+Args:
+    model: :class:`TimeModel`.
+
+Returns:
+    ``6.0 s``, or ``0 to 52.4 s`` while it is only extrapolated.
+~~~
+
+**`time_text`**
+
+~~~text
+time_text(low: float, high: float) -> str
+
+Format an expected duration, as a range if the two variants differ.
+
+Args:
+    low: Optimistic seconds.
+    high: Cautious seconds.
+
+Returns:
+    ``1 d 7 h`` or ``1 d 7 h to 1 d 22 h``.
 ~~~
 
 **`write_report`**
@@ -4927,10 +4956,11 @@ Attributes:
     files: Number of videos.
     size: Their size in bytes.
     ratio: Expected output share (output bytes per source byte).
-    rate: Expected speed in source bytes per wall-clock second.
     level: Level label (``L1`` = the given folder, ``L2`` its parent ...).
-    overhead: Expected fixed wall-clock seconds per video, in addition to the
-        time that grows with the size (start, checks, validation).
+    length: Their total playing time in seconds (guessed from the size
+        where it is unknown).
+    model: Time model, or None to count one wall second per second of
+        playing time.
 ~~~
 
 **`saved`**
@@ -4941,12 +4971,31 @@ saved(self) -> float
 Bytes expected to be freed.
 ~~~
 
+**`times`**
+
+~~~text
+times(self) -> tuple[float, float]
+
+Expected wall-clock seconds, ``(cautious, optimistic)``.
+
+Returns:
+    Both variants; equal when the fixed part is measured.
+~~~
+
 **`seconds`**
 
 ~~~text
 seconds(self) -> float
 
-Expected encoding time in wall-clock seconds (fixed part included).
+Expected encoding time in wall-clock seconds (cautious variant).
+~~~
+
+**`seconds_low`**
+
+~~~text
+seconds_low(self) -> float
+
+Expected encoding time in wall-clock seconds (optimistic variant).
 ~~~
 
 **`per_hour`**
@@ -4954,7 +5003,7 @@ Expected encoding time in wall-clock seconds (fixed part included).
 ~~~text
 per_hour(self) -> float
 
-Bytes freed per hour of encoding.
+Bytes freed per hour of encoding (cautious variant).
 ~~~
 
 **`__replace__`**
@@ -4975,9 +5024,9 @@ __init__(
     files: int = 0,
     size: int = 0,
     ratio: float = 0.2,
-    rate: float = 1.0,
     level: str = 'L1',
-    overhead: float = 0.0,
+    length: float = 0.0,
+    model: TimeModel | None = None,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -5010,30 +5059,24 @@ The estimate uses what was measured so far, not a model of the encoder:
   source bytes of the shrunk videos in the ledger whose source had that
   bit rate (size x 8 / playing time). A class with fewer than
   :attr:`MIN_SAMPLES` measured videos uses the overall share.
-* **speed** per bit-rate class: source bytes per second spent on the
-  file (ledger), scaled to the measured wall-clock speed of the whole
-  run (``ThroughputLog``), which includes parallel encodes.
-
-* **fixed time per video**: the ledger time of a video is fitted as
-  ``a + b x size`` (least squares); ``a`` is the part every video costs
-  regardless of its size - start of ffmpeg, trial decode, validation,
-  flushing. It matters for many short videos, where a pure
-  size/speed estimate is too optimistic. It is scaled to wall-clock time
-  like the speed and can be set by the caller instead (``overhead``).
+* **time**: :class:`TimeModel` - a fixed part per video plus a part that
+  grows with the playing time, per bit-rate class, fitted on the ledger
+  and scaled to the measured wall-clock speed of the whole run
+  (``ThroughputLog``, parallel encodes included). While the fixed part is
+  only extrapolated, every time is a range (optimistic to cautious).
 
 Videos are grouped by level (``L1`` the given folder, ``L2`` what its
 parent adds, ...), playing time (the bands of ``--min-seconds``) and bit
 rate (a rough measure of quality: a high bit rate has the most to
-lose). The groups are ranked by space freed per hour of encoding, so
-the first rows are the best next step.
+lose). The groups are ranked by space freed per hour of encoding in the
+cautious variant, so the first rows are the best next step.
 
 Attributes:
     ratios: Output share per bit-rate class.
-    rates: Speed per bit-rate class (source bytes per wall second).
     overall_ratio: Output share over all measured videos.
+    overall_rate: Measured wall-clock speed in source bytes per second.
     samples: Measured videos per bit-rate class.
-    overhead: Fixed wall-clock seconds per video used for the estimate.
-    overhead_basis: How :attr:`overhead` was found (for the report).
+    model: The time model.
     groups: Groups by ``(level, band, quality)``.
 ~~~
 
@@ -5047,7 +5090,7 @@ __init__(
     overhead: float | None = None,
 ) -> None
 
-Derive output share, speed and fixed time per video from the ledger.
+Derive output share and the time model from the ledger.
 
 Args:
     rows: Ledger entries.
@@ -5055,23 +5098,6 @@ Args:
         per second), or None.
     overhead: Fixed wall-clock seconds per video to use instead of
         the fitted value, or None to fit it.
-~~~
-
-**`variable`**
-
-~~~text
-variable(took: float, count: float, fixed: float) -> float
-
-Return the part of the measured time that grows with the size.
-
-Args:
-    took: Measured seconds of ``count`` videos.
-    count: Number of videos.
-    fixed: Fixed seconds per video.
-
-Returns:
-    ``took - count x fixed``, but at least a tenth of ``took`` (a
-    fixed time set too high must not make the speed infinite).
 ~~~
 
 **`usable`**
@@ -5086,42 +5112,6 @@ Args:
 
 Returns:
     True for ``shrunk``/``copy`` rows with sizes, time and length.
-~~~
-
-**`fit`**
-
-~~~text
-fit(rows: list[LedgerRow]) -> tuple[float, float] | None
-
-Fit the time of a video as ``a + b x size`` by least squares.
-
-Args:
-    rows: Usable ledger entries.
-
-Returns:
-    ``(a, b)`` with ``a`` in seconds and ``b`` in seconds per byte,
-    or None with fewer than two different sizes.
-~~~
-
-**`_overhead`**
-
-~~~text
-_overhead(
-    self,
-    rows: list[LedgerRow],
-    scale: float,
-    given: float | None,
-) -> tuple[float, str]
-
-Find the fixed wall-clock time per video.
-
-Args:
-    rows: Usable ledger entries.
-    scale: Wall-clock speed over per-file speed (parallel encodes).
-    given: Value set by the caller, or None.
-
-Returns:
-    ``(seconds, basis text)``.
 ~~~
 
 **`band_of`**
@@ -5191,7 +5181,10 @@ Returns:
 **`thresholds`**
 
 ~~~text
-thresholds(self, level: str | None = None) -> list[tuple[str, int, int, float, float]]
+thresholds(
+    self,
+    level: str | None = None,
+) -> list[tuple[str, int, int, float, float, float]]
 
 Sum up what each ``--min-seconds`` value would take in.
 
@@ -5199,8 +5192,9 @@ Args:
     level: Only the videos of this level, or None for all.
 
 Returns:
-    ``(min-seconds label, files, bytes, bytes freed, seconds)`` per
-    threshold, from the longest videos only down to all videos.
+    ``(min-seconds label, files, bytes, bytes freed, seconds,
+    seconds optimistic)`` per threshold, from the longest videos only
+    down to all videos.
 ~~~
 
 **`_low`**
@@ -6820,6 +6814,164 @@ Args:
 
 Returns:
     Text such as ``3 d 4 h``, ``5 h 12 min`` or ``42 min``.
+~~~
+
+### `TimeModel` (`mediatools.shrink.timemodel`) {.unnumbered}
+
+~~~text
+Expected wall-clock time to shrink videos, with a fixed part per video.
+
+The encoder works frame by frame, so the time of a video grows with its
+**playing time**, not with its size: a long video with a low bit rate
+is small but slow. Every video also costs a part that does not depend
+on its length - start of ffmpeg, trial decode, validation, flushing.
+The ledger time of each shrunk video is therefore fitted as::
+
+    took = a + b_q x length
+
+with one fixed part ``a`` shared by all videos and one slope ``b_q`` per
+bit-rate class ``q`` (least squares with a shared intercept, closed
+form). Classes with fewer than :attr:`MIN_SAMPLES` measured videos use
+the slope over all videos.
+
+**Measured or extrapolated.** ``a`` is the value at length zero. It is
+only *measured* when the ledger holds at least :attr:`MIN_SAMPLES`
+videos shorter than :attr:`SHORT` seconds; otherwise it is extrapolated
+from long videos and may be far off. In that case the model keeps two
+variants - without a fixed part (``low``) and with the extrapolated one
+(``high``) - and the estimate shows the time as a range. A value set by
+the caller (``--overhead``) replaces the fit.
+
+All times are scaled to wall-clock time with ``scale`` (measured
+wall-clock speed over the per-file speed, i.e. the effect of parallel
+encodes).
+
+Attributes:
+    fixed: Fixed wall-clock seconds per video, cautious variant.
+    fixed_low: Fixed wall-clock seconds per video, optimistic variant.
+    slopes: Per bit-rate class: wall seconds per second of playing
+        time, ``(cautious, optimistic)``.
+    pooled: The same over all measured videos.
+    byte_rate: Bytes per second of playing time of the measured videos
+        (to guess the length of a video whose length is unknown).
+    measured: Number of usable ledger entries.
+    short: How many of them are shorter than :attr:`SHORT`.
+    basis: How the fixed part was found (for the report).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    rows: list[LedgerRow],
+    classify: Callable[[int, float | None], str],
+    scale: float = 1.0,
+    given: float | None = None,
+) -> None
+
+Fit the model.
+
+Args:
+    rows: Usable ledger entries (shrunk, with length and time).
+    classify: ``(size, length) -> class label`` of a video.
+    scale: Wall-clock speed over per-file speed.
+    given: Fixed wall-clock seconds per video set by the caller, or
+        None to fit it.
+~~~
+
+**`intercept`**
+
+~~~text
+intercept(classes: list[list[float]]) -> float | None
+
+Return the shared fixed part ``a`` of ``took = a + b_q x length``.
+
+Args:
+    classes: Per class the sums ``n, L, L^2, L x took, took``.
+
+Returns:
+    ``a`` in per-file seconds, or None if it cannot be determined
+    (fewer than two videos, or no spread of the lengths).
+~~~
+
+**`_fixed`**
+
+~~~text
+_fixed(
+    self,
+    fitted: float | None,
+    scale: float,
+    given: float | None,
+) -> tuple[float, float, str]
+
+Choose the fixed part and describe how it was found.
+
+Args:
+    fitted: Fitted ``a`` in per-file seconds, or None.
+    scale: Wall-clock speed over per-file speed.
+    given: Value set by the caller, or None.
+
+Returns:
+    ``(cautious, optimistic, basis)``: fixed wall-clock seconds per
+    video and the text for the report.
+~~~
+
+**`slope`**
+
+~~~text
+slope(self, sums: list[float], fixed: float, scale: float) -> float
+
+Return wall seconds per second of playing time for given sums.
+
+Args:
+    sums: ``n, L, L^2, L x took, took`` of the videos.
+    fixed: Fixed part in per-file seconds.
+    scale: Wall-clock speed over per-file speed.
+
+Returns:
+    ``(sum(L x took) - fixed x sum(L)) / sum(L^2)`` in wall seconds,
+    at least a hundredth of the plain ratio ``took / L`` (a fixed
+    part set too high must not make the encoder infinitely fast);
+    :attr:`DEFAULT_SLOPE` without data.
+~~~
+
+**`uncertain`**
+
+~~~text
+uncertain(self) -> bool
+
+True if the time is a range (extrapolated fixed part).
+~~~
+
+**`seconds`**
+
+~~~text
+seconds(self, quality: str, files: int, length: float) -> tuple[float, float]
+
+Return the expected wall-clock time of videos of one class.
+
+Args:
+    quality: Bit-rate class label.
+    files: Number of videos.
+    length: Their total playing time in seconds.
+
+Returns:
+    ``(cautious, optimistic)`` seconds.
+~~~
+
+**`speed`**
+
+~~~text
+speed(self, quality: str) -> float
+
+Return seconds of playing time encoded per wall second (cautious variant).
+
+Args:
+    quality: Bit-rate class label.
+
+Returns:
+    Speed as a multiple of real time.
 ~~~
 
 ## `mediatools.triage`
