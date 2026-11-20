@@ -596,8 +596,17 @@ them.
 
    ~~~text
    nice -n 19 ffmpeg -nostdin -y -hide_banner -nostats -progress pipe:1 \
-          -threads N -i SRC -vcodec libx265 -crf 28 -x265-params pools=N TMP
+          -threads N -i SRC -map 0 -c copy -c:V libx265 -preset P -crf 28 \
+          -x265-params pools=N TMP
    ~~~
+
+   **Only the picture is re-encoded** (since 1.12.0): `-map 0` takes every
+   stream of the source, `-c copy` copies them unchanged - all audio
+   tracks, subtitles, chapters, data streams, cover pictures - and
+   `-c:V libx265` re-encodes only the video streams that are not cover
+   pictures. Without `-map`, ffmpeg keeps one stream per type and
+   re-encodes the audio (releases up to 1.11.1 did that: their output has
+   one re-encoded audio track and no subtitles).
 
    `N` is the number of logical CPUs minus one (`--threads`). `-threads`
    before `-i` sets the decoder threads; libx265 runs its own thread pool,
@@ -608,7 +617,9 @@ them.
 
    in its own process group and accepts the result only if the exit code
    is 0, the output is not empty and at least 2 % of the input's size, has
-   a video stream, its duration equals the input within `max(1 s, 2 %)`,
+   a video stream, **at least as many streams of every type as the input**
+   (otherwise the log says e.g. `output lost stream(s) (audio 2 -> 1)`),
+   its duration equals the input within `max(1 s, 2 %)`,
    and **the whole output decodes without a single error line**
    (`ffmpeg -v error -i OUT -f null -` at `nice` 19; time limit
    `max(600 s, 2 × duration)`; a timeout or a missing ffmpeg counts as

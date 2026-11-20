@@ -82,6 +82,27 @@ class MediaProbe:
         """
         return self.value(path, "stream=codec_name", "v:0")
 
+    def stream_counts(self, path: str) -> dict[str, int] | None:
+        """Count the streams of a file by type.
+
+        Args:
+            path: Media file.
+
+        Returns:
+            Number of streams per ``codec_type`` (``video``, ``audio``,
+            ``subtitle``, ``data``, ``attachment``), or None if ffprobe
+            fails.
+        """
+        cmd = [self.ffprobe, "-v", "error", "-show_entries", "stream=codec_type",
+               "-of", "default=noprint_wrappers=1:nokey=1", path]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if res.returncode != 0:
+            return None
+        counts: dict[str, int] = {}
+        for line in res.stdout.split():
+            counts[line] = counts.get(line, 0) + 1
+        return counts
+
     def duration_and_codec(self, path: str) -> tuple[float | None, str | None]:
         """Return duration and video codec with one ffprobe call.
 
