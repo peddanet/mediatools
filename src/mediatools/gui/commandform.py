@@ -1,6 +1,7 @@
 """Form of one subcommand: a field per option, run, preview, copy."""
 from __future__ import annotations
 
+import shlex
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
@@ -31,6 +32,7 @@ class CommandForm:
         variables: Tk variables (or text boxes) by ``dest``.
         line: Text of the command-line preview.
         ask: Confirmation dialog, replaceable in tests.
+        enqueuer: Called by *Add to queue* instead of ``queue --add``, or None.
         chooser: Called by *Run* instead of starting directly (e.g. the
             job selection of the shrink tab), or None.
     """
@@ -49,6 +51,7 @@ class CommandForm:
         """
         self.frame = ttk.Frame(master)
         self.chooser: Callable[[], bool] | None = None
+        self.enqueuer: Callable[[], bool] | None = None
         self.spec = spec
         self.console = console
         self.store = store
@@ -70,6 +73,9 @@ class CommandForm:
         if self.preview_option() is not None:
             ttk.Button(toolbar, text="Preview (" + str(self.preview_option()) + ")",
                        command=self.preview).pack(side="left", padx=4)
+        if spec.name == "shrink":
+            ttk.Button(toolbar, text="Add to queue", command=self.enqueue).pack(side="left",
+                                                                                padx=4)
         ttk.Button(toolbar, text="Copy command", command=self.copy).pack(side="left", padx=4)
         ttk.Button(toolbar, text="Defaults", command=self.reset).pack(side="left")
         self.frame.columnconfigure(1, weight=1)
@@ -193,6 +199,29 @@ class CommandForm:
         """Copy the command line to the clipboard."""
         self.frame.clipboard_clear()
         self.frame.clipboard_append(self.line.get())
+
+    def enqueue(self) -> bool:
+        """Put the shrink command of the form into the queue.
+
+        Through :attr:`enqueuer` if set (the job dialog), else by running
+        ``mediatools queue --add`` in the console.
+
+        Returns:
+            True if ``mediatools queue --add`` was started (it checks the
+            arguments and reports in the console).
+        """
+        if self.enqueuer is not None:
+            return self.enqueuer()
+        try:
+            args = self.spec.argv(self.values())[1:]
+        except ValueError as exc:
+            self.console.state.set("not queued: " + str(exc))
+            return False
+        if not args or args[0].startswith("-"):
+            self.console.state.set("not queued: choose the folder (path)")
+            return False
+        command = ["queue", "--add", shlex.join(args)]
+        return self.console.run(command, shlex.join(self.spec.program + command))
 
     def reset(self) -> None:
         """Set all fields to the defaults of the command line."""
