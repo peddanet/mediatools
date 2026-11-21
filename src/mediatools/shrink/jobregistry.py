@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mediatools.shrink.jobspec import JobSpec
+from mediatools.shrink.ledgerrow import LedgerRow
 from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.savingslog import SavingsLog
 
@@ -239,21 +240,40 @@ class JobRegistry:
                           "todo_bytes": todo_bytes, "todo_files": todo_files}
         self._save(data)
 
-    def finished_file(self, spec: JobSpec, size: int) -> None:
-        """Take one finished (or skipped) video off the job's remainder.
+    def finished_file(self, spec: JobSpec, size: int, row: LedgerRow | None = None) -> None:
+        """Take one finished (or skipped) video off the remainder of every job it belongs to.
+
+        The running job loses it in any case. Every other remembered job
+        whose folder and filters include the video (:meth:`JobSpec.matches`)
+        loses it as well - e.g. a job on a sub-folder when a job on the
+        parent folder shrinks a video there; without this its remainder
+        would stay as it was at its last plan.
 
         Args:
             spec: The running job.
             size: Its source size in bytes.
+            row: The video with its path, length and modification time, or
+                None to update only the running job.
         """
         data = self._load()
-        entry = data.get(spec.key)
-        if entry is None or int(entry.get("todo_bytes", 0)) < 0:
-            return
-        entry["todo_bytes"] = max(0, int(entry.get("todo_bytes", 0)) - size)
-        entry["todo_files"] = max(0, int(entry.get("todo_files", 0)) - 1)
-        entry["last"] = time.strftime("%Y-%m-%d %H:%M")
-        self._save(data)
+        changed = False
+        for key, entry in data.items():
+            if int(entry.get("todo_bytes", 0)) < 0:
+                continue
+            if key != spec.key:
+                try:
+                    other = JobSpec.from_dict(entry["spec"])
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    continue
+                if row is None or not other.matches(row) or int(entry.get("todo_files", 0)) <= 0:
+                    continue
+            entry["todo_bytes"] = max(0, int(entry.get("todo_bytes", 0)) - size)
+            entry["todo_files"] = max(0, int(entry.get("todo_files", 0)) - 1)
+            if key == spec.key:
+                entry["last"] = time.strftime("%Y-%m-%d %H:%M")
+            changed = True
+        if changed:
+            self._save(data)
 
     def entries(self) -> list[JobEntry]:
         """Return the jobs, the most recently active first.

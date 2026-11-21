@@ -226,6 +226,7 @@ classDiagram
     +init(argv, log_path, python)
     +command()
     +installed_version()
+    +switch(run)
     +execute()
   }
   class SleepInhibitor {
@@ -271,4 +272,5 @@ classDiagram
   RunLog --> DataDir
   RunLog --> VersionInfo
   RunStatus --> RunControl
+  SelfRestart ..> RunLog
   TreeWalker --> MediaTypes

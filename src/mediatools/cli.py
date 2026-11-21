@@ -40,6 +40,8 @@ from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.resulttable import ResultTable
 from mediatools.shrink.savingslog import SavingsLog
 from mediatools.shrink.estimatecommand import EstimateCommand
+from mediatools.shrink.queuecommand import QueueCommand
+from mediatools.shrink.shrinkqueue import ShrinkQueue
 from mediatools.shrink.spacetally import SpaceTally
 from mediatools.snapshot import SnapshotSettings, Snapshotter, SystemdTrigger
 from mediatools.sync import Syncer, TargetPicker
@@ -107,6 +109,7 @@ class Cli:
         cmd.add_argument("--continue-log", help=argparse.SUPPRESS)   # set by a release switch
 
         EstimateCommand.add_parser(sub)
+        QueueCommand.add_parser(sub)
         sub.add_parser("reload", help="ask a running shrink to switch to the newly installed "
                                       "release after its current file; returns at once")
         sub.add_parser("status", help="show whether a shrink runs, with which release, "
@@ -526,28 +529,8 @@ class Cli:
         prompt = Prompt(args.yes)
         code = shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
         if code == Shrinker.RESTART:
-            return self._switch_release(restart, run)
-        return code
-
-    @staticmethod
-    def _switch_release(restart: SelfRestart, run: RunLog) -> int:
-        """Replace this process by the installed release (see :class:`SelfRestart`).
-
-        Args:
-            restart: Command line and log of the new process.
-            run: Log of this run; closed before the switch.
-
-        Returns:
-            1 - only if the new process could not be started.
-        """
-        run.logger.info("starting the installed release: %s", " ".join(restart.command()))
-        run.close()
-        try:
-            restart.execute()
-        except OSError as err:
-            print(f"switch to the installed release failed ({err}) - run "
-                  f"'mediatools shrink' again to continue", file=sys.stderr)
-        return 1
+            return restart.switch(run)
+        return ShrinkQueue.default().continue_after(code, shrinker.flags["declined"], run)
 
     @staticmethod
     def cmd_reload(_args: argparse.Namespace, wait: float = 10.0) -> int:
@@ -589,7 +572,7 @@ class Cli:
             0 if a shrink runs, 1 if none runs.
         """
         control = RunControl("shrink")
-        print("\n".join(RunStatus(control).lines()))
+        print("\n".join(RunStatus(control).lines() + ShrinkQueue.default().summary()))
         return 0 if control.active_pid() is not None else 1
 
     @staticmethod
@@ -692,6 +675,18 @@ class Cli:
             return 0
         triage.install_signal_handlers()
         return triage.run()
+
+    def _cmd_queue(self, args: argparse.Namespace) -> int:
+        """Run ``mediatools queue`` (see :class:`QueueCommand`).
+
+        Args:
+            args: Parsed arguments.
+
+        Returns:
+            Exit code of :meth:`QueueCommand.run`.
+        """
+        return QueueCommand(ShrinkQueue.default(), lambda a: self.parser.parse_args(["shrink", *a]),
+                            lambda a: self.main(["shrink", *a])).run(args)
 
     def _cmd_estimate(self, args: argparse.Namespace) -> int:
         """Run ``mediatools estimate`` (see :class:`EstimateCommand`).

@@ -11,10 +11,14 @@ from mediatools.core.durationcache import DurationCache
 from mediatools.core.mediatypes import MediaTypes
 from mediatools.core.probe import MediaProbe
 from mediatools.core.runlog import RunLog
+from mediatools.shrink.jobregistry import JobEntry, JobRegistry
+from mediatools.shrink.jobspec import JobSpec
+from mediatools.shrink.jobsuggester import JobSuggester, SuggestedJob
 from mediatools.shrink.ledger import Ledger
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.potential import ShrinkPotential
 from mediatools.shrink.shrinker import Shrinker
+from mediatools.shrink.shrinkqueue import ShrinkQueue
 from mediatools.shrink.throughput import ThroughputLog
 from mediatools.shrink.timemodel import TimeModel
 
@@ -83,6 +87,12 @@ class EstimateCommand:
         cmd.add_argument("--overhead", type=float, default=None, metavar="SECONDS",
                          help="fixed seconds per video instead of the value fitted from the "
                               "ledger")
+        cmd.add_argument("--suggest", type=int, default=0, metavar="N",
+                         help="propose up to N shrink jobs (level and --min-seconds), the "
+                              "most space per hour first")
+        cmd.add_argument("--queue", action="store_true",
+                         help="with --suggest: put the proposed jobs into the shrink queue, "
+                              "with the settings of the last shrink job")
         cmd.add_argument("--ext", default="mp4", help="video extensions (default mp4)")
         cmd.add_argument("--probe-jobs", type=int, default=EstimateCommand.default_probe_jobs(),
                          help="ffprobe processes at the same time for durations and codecs "
@@ -191,7 +201,7 @@ class EstimateCommand:
 
         Args:
             args: Parsed arguments (``up``, ``up_to``, ``overhead``, ``ext``,
-                ``probe_jobs``).
+                ``probe_jobs``, ``suggest``, ``queue``).
 
         Returns:
             0.
@@ -222,7 +232,66 @@ class EstimateCommand:
         if planner.state["durations"] is not None:
             planner.state["durations"].save()
         self.report(potential, shrinker, (len(todo), dropped), levels)
+        if getattr(args, "suggest", 0) > 0:
+            jobs = JobSuggester(potential).suggest(args.suggest)
+            self.report_jobs(jobs, potential.model.uncertain)
+            if getattr(args, "queue", False):
+                self.enqueue(jobs, levels, frozenset(opts.extensions))
+        elif getattr(args, "queue", False):
+            log.warning("--queue works only with --suggest N - nothing queued")
         return 0
+
+    def report_jobs(self, jobs: list[SuggestedJob], uncertain: bool) -> None:
+        """Log the proposed jobs with running totals.
+
+        Args:
+            jobs: Proposed jobs, best first.
+            uncertain: True if times are ranges (fixed part extrapolated).
+        """
+        log = self.runlog.logger
+        gib = 1024 ** 3
+        if not jobs:
+            log.info("no shrink job proposed: no combination frees at least 1 GiB")
+            return
+        log.info("proposed shrink jobs, the most space per hour first%s:",
+                 " (times: optimistic to cautious)" if uncertain else "")
+        freed = hours = 0.0
+        for number, job in enumerate(jobs, 1):
+            freed += job.saved
+            hours += job.seconds
+            log.info("  %i. shrink L%i --min-seconds %-4i %6i files  %7.1f GiB freed in %s  "
+                     "(%.1f GiB/h; total %.1f GiB in %s)", number, job.level, job.min_seconds,
+                     job.files, job.saved / gib, self.time_text(job.seconds_low, job.seconds),
+                     job.per_hour / gib, freed / gib, ThroughputLog.duration_text(hours))
+
+    def enqueue(self, jobs: list[SuggestedJob], levels: list[str],
+                extensions: frozenset) -> None:
+        """Put the proposed jobs into the shrink queue, in their order.
+
+        The settings (CRF, preset, parallel jobs, threads) are those of the
+        most recently active shrink job, so the queued jobs run as the user
+        usually runs them; options that change what is selected
+        (``--retry-failed``, ``--keep-copies``) are not taken over.
+
+        Args:
+            jobs: Proposed jobs, best first.
+            levels: Folders of the levels, innermost first.
+            extensions: Extensions of the estimate.
+        """
+        state = DataDir().sub("state")
+        known = JobRegistry(os.path.join(state, "jobs.json"), None, DataDir().sub("logs"))
+        recent = known.entries()
+        settings = {key: value for key, value in (recent[0].settings if recent else {}).items()
+                    if key in ("crf", "preset", "jobs", "threads")}
+        queue = ShrinkQueue.default()
+        for job in jobs:
+            spec = JobSpec(levels[job.level - 1], extensions, float(job.min_seconds))
+            queue.add(JobEntry(spec, settings).argv()[1:],
+                      f"estimate: L{job.level}, about {job.saved / 1024 ** 3:.0f} GiB")
+        self.runlog.logger.info("%i job(s) added to the shrink queue (settings of the last "
+                                "job: %s) - they start when the running shrink ends, or with "
+                                "'mediatools queue --run'; 'mediatools queue' lists them",
+                                len(jobs), settings or "defaults")
 
     def report(self, potential: ShrinkPotential, shrinker: Shrinker,
                counts: tuple[int, int], levels: list[str]) -> None:

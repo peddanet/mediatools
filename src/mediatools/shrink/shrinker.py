@@ -106,8 +106,9 @@ class Shrinker:
         control: Stop requests from ``mediatools stop``, or None.
         databases: Open databases per directory.
         flags: ``stop`` (finish the current file, then stop), ``abort``
-            (stop the current file at once) and ``restart`` (switch to the
-            installed release before the next file).
+            (stop the current file at once), ``restart`` (switch to the
+            installed release before the next file) and ``declined`` (the
+            user did not confirm the start; a queue does not continue).
         display: Progress display of the encode phase.
         stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
             ``failed``, ``broken``, ``failed_before`` (left out: recorded as
@@ -155,7 +156,7 @@ class Shrinker:
                                    "session": "", "encoders": [], "mtimes": {}}
         self.control: RunControl | None = None
         self.databases: dict[str, ShrinkDatabase] = {}
-        self.flags = {"stop": False, "abort": False, "restart": False}
+        self.flags = {"stop": False, "abort": False, "restart": False, "declined": False}
         self.display = display
         self.stats = {"shrunk": 0, "hevc": 0, "skipped": 0, "short": 0, "failed": 0,
                       "broken": 0, "failed_before": 0, "regrown": 0, "copies": 0,
@@ -269,6 +270,7 @@ class Shrinker:
                 and not confirm():
             if self.found["leftovers"]:
                 self.log.info("leftover work folders kept")
+            self.flags["declined"] = True
             self._finish()
             return 0
         if self.control is not None and todo:
@@ -329,17 +331,27 @@ class Shrinker:
                 self.display.file_done(size)
             else:
                 self.display.file_skipped(size)
-            self._job_progress(size)
+            self._job_progress(size, path)
 
-    def _job_progress(self, size: int) -> None:
-        """Take a finished or skipped video off the job's remainder.
+    def _job_progress(self, size: int, path: str | None = None) -> None:
+        """Take a finished or skipped video off the remainder of the jobs it belongs to.
 
         Args:
             size: Its source size.
+            path: The video, so that other remembered jobs that include it
+                are updated too (see :meth:`JobRegistry.finished_file`).
         """
         job, registry = self.state["job"], self.state["registry"]
-        if job is not None and registry is not None:
-            registry.finished_file(job, size)
+        if job is None or registry is None:
+            return
+        row = None
+        if path is not None:
+            mtime = None
+            with contextlib.suppress(OSError):
+                mtime = os.path.getmtime(path)
+            row = LedgerRow("", "", "", size, None, 0.0, self.planner.duration(path), mtime,
+                            path)
+        registry.finished_file(job, size, row)
 
     def _slots(self) -> list[HevcEncoder]:
         """Create one encoder per parallel slot.
@@ -399,7 +411,7 @@ class Shrinker:
             prepared = self._prepare(path, size)
             if prepared is None:
                 self.display.file_skipped(size)
-                self._job_progress(size)
+                self._job_progress(size, path)
                 continue
             item = RunningEncode(table.free.pop(), path, size, prepared[0], prepared[1],
                                  table.inode(path), self._length(path))
@@ -449,7 +461,7 @@ class Shrinker:
                 os.rmdir(os.path.dirname(item.out))
         if self.display is not None:
             self.display.file_done(item.size)
-        self._job_progress(item.size)
+        self._job_progress(item.size, item.path)
 
     def _freed_overall(self) -> int:
         """Return the bytes freed by shrinking in all sessions, this process included.
