@@ -29,7 +29,9 @@ class QueueList:
     filters.
 
     Buttons: *Continue* starts the selected waiting job now (it becomes
-    the first one) when no shrink runs; *Add* opens the job dialog for a
+    the first one) when no shrink runs; *Stop, then next* asks a running
+    shrink to stop after its current file and then start the selected
+    waiting job (or the first); *Add* opens the job dialog for a
     new job; *Change* opens it with the selected waiting job; *Remove*
     takes the selected waiting jobs off the queue (after a question);
     *Up* and *Down* change the order.
@@ -91,6 +93,8 @@ class QueueList:
         side.pack(side="left", fill="y", padx=(6, 0))
         ttk.Button(side, text="Continue", style="Accent.TButton",
                    command=self.start).pack(fill="x")
+        ttk.Button(side, text="Stop, then next", command=self.stop_then_next).pack(
+            fill="x", pady=(4, 0))
         for text, command in (("Add", self.add), ("Change", self.change),
                               ("Remove", self.remove)):
             ttk.Button(side, text=text, command=command).pack(fill="x", pady=(4, 0))
@@ -215,6 +219,27 @@ class QueueList:
             self.queue.move(chosen[0], 1)
         self.launcher(["queue", "--run"])
         self.message.set("started")
+        self.reload()
+        return True
+
+    def stop_then_next(self) -> bool:
+        """*Stop, then next*: stop the running job, then start the selected one.
+
+        Returns:
+            True if the stop was requested.
+        """
+        if self.monitor.control.active_pid() is None:
+            self.message.set("no shrink runs - Continue starts a job")
+            return False
+        if not self.queue.entries():
+            self.message.set("the queue is empty - Add puts a job into it")
+            return False
+        chosen = self.selected()
+        if chosen and chosen[0] != 1:
+            self.queue.move(chosen[0], 1)
+        self.queue.next_after_stop()
+        self.monitor.control.request_stop()
+        self.message.set("stopping after the current file, then the next job starts")
         self.reload()
         return True
 

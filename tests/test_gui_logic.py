@@ -390,8 +390,8 @@ def test_cli_gui_menu_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     assert Cli().main(["gui", "--install-desktop"]) == 0
     entry = tmp_path / "share" / "applications" / "mediatools.desktop"
     assert "gui" in entry.read_text(encoding="utf-8")
-    (tmp_path / "home" / "scripts").mkdir(parents=True)
-    (tmp_path / "home" / "scripts" / "mediatools").write_text("", encoding="utf-8")
+    (tmp_path / "home" / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / "home" / ".local" / "bin" / "mediatools").write_text("", encoding="utf-8")
     assert Cli().main(["gui", "--install-desktop"]) == 0
-    assert str(tmp_path / "home" / "scripts" / "mediatools") in entry.read_text()
+    assert str(tmp_path / "home" / ".local" / "bin" / "mediatools") in entry.read_text()
     assert Cli().main(["gui", "--remove-desktop"]) == 0 and not entry.exists()

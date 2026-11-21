@@ -26,53 +26,51 @@ BADGES = {                 # kind: (fill, stroke, text colour)
 }
 
 RELEASE = {
-    "lanes": [("main", "#185FA5", 0, 10), ("release/1.3.0", "#BA7517", 5, 7),
-              ("develop", "#0F6E56", 0, 10), ("feature/x", "#993556", 1, 4)],
+    "lanes": [("main", "#185FA5", 0, 12), ("release/1.3.0", "#BA7517", 6, 8),
+              ("merge/v1.3.0", "#534AB7", 10, 12), ("develop", "#0F6E56", 0, 12),
+              ("feature/x", "#993556", 1, 4)],
     "rows": [
         ("dot", "main", "main", "main (= former master): released versions", "", ""),
         ("branch", "develop", "feature/x", "new branch feature/x from develop", "", ""),
-        ("dot", "feature/x", "feature/x", "commits, then git push",
+        ("dot", "feature/x", "feature/x", "commits; tools/release.sh: rebase, gates",
          "local", "LOCAL"),
+        ("dot", "feature/x", "feature/x", "git push (pre-push hook)", "local", "LOCAL"),
         ("pr", "feature/x", "develop", "pull request feature/x -> develop", "ci", "CI"),
         ("merge", "feature/x", "develop", "merge into develop (CI was green)", "none",
          "none"),
         ("branch", "develop", "release/1.3.0",
-         "new branch release/1.3.0; version; push",
-         "local", "LOCAL"),
+         "release/1.3.0: version, CHANGELOG, gates, push", "local", "LOCAL"),
         ("pr", "release/1.3.0", "main", "pull request release/1.3.0 -> main", "ci", "CI"),
         ("merge", "release/1.3.0", "main", "merge into main (CI was green)", "none", "none"),
-        ("dot", "main", "main", "tag v1.3.0 pushed: + release-check", "ci",
+        ("dot", "main", "main", "tag v1.3.0 pushed: + release-check", "ci", "CI"),
+        ("branch", "main", "merge/v1.3.0", "merge/v1.3.0 from main, push", "local",
+         "LOCAL"),
+        ("pr", "merge/v1.3.0", "develop", "pull request merge/v1.3.0 -> develop", "ci",
          "CI"),
-        ("pr", "main", "develop", "pull request main -> develop", "ci", "CI"),
-        ("merge", "main", "develop", "merge into develop (CI was green)", "none", "none"),
+        ("merge", "merge/v1.3.0", "develop", "merge into develop; same-code: JA", "none",
+         "none"),
     ],
 }
 
 HOTFIX = {
-    "lanes": [("main", "#185FA5", 0, 10), ("hotfix/1.2.13", "#A32D2D", 1, 4),
-              ("merge/hotfix-1.2.13", "#534AB7", 6, 9), ("develop", "#0F6E56", 0, 10)],
+    "lanes": [("main", "#185FA5", 0, 10), ("hotfix/x", "#A32D2D", 1, 4),
+              ("merge/v1.3.1", "#534AB7", 6, 9), ("develop", "#0F6E56", 0, 10)],
     "rows": [
-        ("dot", "main", "main", "release 1.2.12 (tag v1.2.12)", "", ""),
-        ("branch", "main", "hotfix/1.2.13", "2: new branch hotfix/1.2.13 from main", "", ""),
-        ("dot", "hotfix/1.2.13", "hotfix/1.2.13", "2-3: git am patch, git push",
+        ("dot", "main", "main", "release 1.3.0 (tag v1.3.0)", "", ""),
+        ("branch", "main", "hotfix/x", "hotfix/x from main (update: git am patch)", "", ""),
+        ("dot", "hotfix/x", "hotfix/x", "release.sh: version 1.3.1, gates, push",
          "local", "LOCAL"),
-        ("pr", "hotfix/1.2.13", "main", "4: pull request hotfix -> main", "ci",
-         "CI 1/3"),
-        ("merge", "hotfix/1.2.13", "main", "5: merge into main (CI 1/3 green)",
-         "none", "none"),
-        ("dot", "main", "main", "6: tag v1.2.13 pushed: + release-check", "ci",
-         "CI 2/3"),
-        ("branch", "main", "merge/hotfix-1.2.13",
-         "7: new branch merge/hotfix from main", "", ""),
-        ("merge", "develop", "merge/hotfix-1.2.13",
-         "7: merge develop in, git push", "local",
+        ("pr", "hotfix/x", "main", "pull request hotfix/x -> main", "ci", "CI"),
+        ("merge", "hotfix/x", "main", "merge into main (CI was green)", "none", "none"),
+        ("dot", "main", "main", "tag v1.3.1 pushed: + release-check", "ci", "CI"),
+        ("branch", "main", "merge/v1.3.1", "merge/v1.3.1 from main", "", ""),
+        ("merge", "develop", "merge/v1.3.1", "merge develop in, git push", "local",
          "LOCAL"),
-        ("pr", "merge/hotfix-1.2.13", "develop",
-         "7: pull request -> develop", "ci", "CI 3/3"),
-        ("merge", "merge/hotfix-1.2.13", "develop",
-         "7: merge into develop (CI 3/3 green)",
+        ("pr", "merge/v1.3.1", "develop", "pull request merge/v1.3.1 -> develop", "ci",
+         "CI"),
+        ("merge", "merge/v1.3.1", "develop", "merge into develop (CI was green)",
          "none", "none"),
-        ("dot", "main", "main", "8: install.sh installs v1.2.13", "", ""),
+        ("dot", "main", "main", "install.sh v1.3.1, after-install.sh: reload", "", ""),
     ],
 }
 
@@ -184,12 +182,15 @@ class LaneDiagram:
         for index, item in enumerate(self.flow["rows"]):
             self.row(index, item)
         height = self.y(len(self.flow["rows"])) + 30
+        longest = max(len(row[3]) for row in self.flow["rows"])
+        width = max(self.WIDTH, self.LEFT + (len(self.flow["lanes"]) - 1) * self.LANE_GAP
+                    + 60 + 98 + 10 * longest + 20)
         marker = ('<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" '
                   'markerWidth="7" markerHeight="7" orient="auto">'
                   '<path d="M0 0L10 5L0 10z" fill="#2C2C2A"/></marker></defs>')
-        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.WIDTH}" '
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
                 f'height="{height}" font-family="DejaVu Sans" font-size="16">'
-                f'<rect width="{self.WIDTH}" height="{height}" fill="#FFFFFF"/>{marker}'
+                f'<rect width="{width}" height="{height}" fill="#FFFFFF"/>{marker}'
                 + "".join(self.parts) + "</svg>\n")
 
 

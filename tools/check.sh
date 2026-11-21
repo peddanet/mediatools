@@ -6,6 +6,7 @@
 # the first failure and returns its exit code.
 #
 #   0. privacy  no locally listed term in files, paths or commit messages
+#   0. shell    shellcheck for every shell script
 #   1. format   pycodestyle, max line length 100
 #   2. lint     pylint incl. Google-style docstring checks, score 10.00/10
 #   3. types    mypy (config in pyproject.toml)
@@ -26,6 +27,24 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH="src:tests${PYTHONPATH:+:$PYTHONPATH}"
 
+# Development venv: an active one is used as it is; otherwise the first of
+# .venv in the project and ~/.venvs/<tool> (older layout, transition) is
+# activated for this script only - the activation ends with the script, the
+# calling shell stays as it was. CI has neither and installs the tools
+# directly. Nothing is created or installed here.
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+    for venv in .venv "$HOME/.venvs/mediatools"; do
+        if [[ -f "$venv/bin/activate" ]]; then
+            # shellcheck disable=SC1091  # path chosen at run time
+            source "$venv/bin/activate"
+            echo "venv: $venv (activated for this check)"
+            [[ "$venv" == .venv ]] || echo "note: $venv lies at the first level of the home" \
+                "directory; move it to .venv in the project (see CONTRIBUTING.md)"
+            break
+        fi
+    done
+fi
+
 FAST=0
 [[ "${1:-}" == "--fast" ]] && FAST=1
 
@@ -37,10 +56,15 @@ gate() {
 
 for tool in pycodestyle pylint mypy bandit; do
     command -v "$tool" >/dev/null || {
-        echo "missing tool: $tool  ->  pip install -e '.[dev]'" >&2
+        echo "missing tool: $tool - create the development venv once (normal user):" >&2
+        echo "  python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
         exit 2
     }
 done
+command -v shellcheck >/dev/null || {
+    echo "missing tool: shellcheck  ->  sudo apt install shellcheck" >&2
+    exit 2
+}
 
 if (( FAST == 0 )); then
     # integration tests are skipped when these programs are missing, which
@@ -64,6 +88,7 @@ if (( FAST == 0 )); then
 fi
 
 gate privacy  python3 tools/privacy_scan.py
+gate shell    shellcheck install.sh tools/*.sh .githooks/pre-push src/mediatools/update/*.sh
 gate format   pycodestyle --max-line-length=100 src tests tools
 gate lint     pylint --fail-under=10 src tests tools
 gate types    mypy
