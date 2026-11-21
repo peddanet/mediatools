@@ -167,9 +167,9 @@ shows exactly the release you installed.
 **Option A - installer (recommended)**
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+cd ~/Downloads && curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
 bash install.sh                  # newest release; bash install.sh --list shows all
-mediatools --version             # e.g. "mediatools 1.2.0"
+~/.local/bin/mediatools --version   # e.g. "mediatools 1.14.0"
 ```
 
 The installer needs `git` and the Python venv module
@@ -178,18 +178,26 @@ The installer needs `git` and the Python venv module
 1. reads the release tags from GitHub and picks the newest one (or the one
    given: `bash install.sh v1.2.0`),
 2. installs that release into a virtual environment of its own,
-   `~/scripts/mediatools.d/venv`,
-3. links the command to `~/scripts/mediatools` (`BIN_DIR=~/.local/bin bash
-   install.sh` for another place; the directory must be in `PATH`),
-4. checks that the installed program reports the version of the tag.
+   `~/.local/share/mediatools/venv`,
+3. links the command to `~/.local/bin/mediatools` (`BIN_DIR=<folder> bash
+   install.sh` for another place; the folder must be in `PATH`; Ubuntu puts
+   `~/.local/bin` into `PATH` at login if it exists then, so a first
+   installation needs one logout and login),
+4. checks that the installed program reports the version of the tag,
+5. moves an installation of releases before 1.14.0
+   (`~/scripts/mediatools.d/venv`, link `~/scripts/mediatools`) out of the
+   way - only what an earlier `install.sh` created: the old venv is removed
+   when no process runs from it any more, the old link first points to the
+   new release and goes away at a later run once `~/.local/bin` is in
+   `PATH`.
 
-**Update** to the newest release: run `bash install.sh` again.
-Maintainers who receive hotfixes as patch archives
-(`mediatools-hotfix-X.Y.Z-patch.tar.gz` in `~/Downloads`) use
-`mediatools update` instead: it applies the archives in the clone
-(`~/Projects/mediatools`) through pull requests, tags the release, installs
-it and tidies the download folder (details in the developer documentation).
-**Remove**: `rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`
+**Update** to the newest release: `mediatools update` (or run
+`bash install.sh` again). Developers who receive patch archives
+(`mediatools-feature-<name>.tar.gz` in `~/Downloads`) use the same
+command: after installing a newer release it applies the archives in the
+clone (`~/Projects/mediatools`) and releases them with `tools/release.sh`
+(details in the developer documentation).
+**Remove**: `rm -rf ~/.local/share/mediatools/venv ~/.local/bin/mediatools`
 (configuration, logs and data stay; `mediatools where` shows where).
 
 **Option B - pipx**
@@ -212,8 +220,9 @@ Ubuntu 24.04 and later block `pip install --user` for the system Python
 mediatools follows the
 [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/latest/):
 configuration in `~/.config/mediatools`, logs and runtime state in
-`~/.local/state/mediatools`, kept data in `~/.local/share/mediatools`. The
-installed release (option A) stays in `~/scripts/mediatools.d/venv`.
+`~/.local/state/mediatools`, kept data and the installed release (option
+A, `venv/`) in `~/.local/share/mediatools`, re-creatable caches in
+`~/.cache/mediatools`.
 `mediatools where` prints every place; details in
 [Data directory](#data-directory). To keep everything in one folder
 instead, set `MEDIATOOLS_HOME` **before** installing, for example in
@@ -299,7 +308,7 @@ mediatools gui --remove-desktop   # remove it again
 
 The menu entry is the file `~/.local/share/applications/mediatools.desktop`
 (freedesktop.org standard) with the mediatools icon in
-`~/.local/share/icons/hicolor`; it starts `~/scripts/mediatools gui`. The
+`~/.local/share/icons/hicolor`; it starts `~/.local/bin/mediatools gui`. The
 GUI menu *mediatools > Add to application menu* does the same. The GUI
 needs a graphical session and the package `python3-tk`
 (`sudo apt install python3-tk`); without them `mediatools gui` says what is
@@ -697,16 +706,19 @@ place.
   privacy/allowlist.txt          mediatools privacy), mode 600
 ~/.local/state/mediatools/       logs and runtime state
   logs/      <command>_<YYYY-MM-DD_hh-mm-ss>.log
-  state/     triage_kept.tsv, triage_discarded.tsv, triage_durations.tsv,
-             shrink_codecs.tsv, shrink.pid, shrink.stop (only while stopping),
-             shrink_throughput.json, sync_targets.json, snapshot_levels.json
+  state/     triage_kept.tsv, triage_discarded.tsv, shrink.pid,
+             shrink.stop (only while stopping), shrink_throughput.json,
+             jobs.json, shrink_queue.json, sync_targets.json, snapshot_levels.json
   reports/   shrink_results_*.txt, progress_*.txt, sync_target_only_*.tsv,
              snapshot_removals_*.txt
   snapshot/  rsnapshot.conf (generated), rsnapshot.log
 ~/.local/share/mediatools/       kept data
   plans/     flatten_<ts>.tsv  (input for --undo)
-  releases/  applied release archives (mediatools update)
-~/scripts/mediatools.d/venv/     installed release (install.sh)
+  releases/  applied patch archives (mediatools update)
+  venv/      installed release (install.sh)
+~/.cache/mediatools/             re-creatable caches (since 1.14.0; moved from
+  triage_durations.tsv           state/ on first use, never overwritten)
+  shrink_codecs.tsv
 ```
 
 **Releases before 1.5.0** kept everything in `~/scripts/mediatools.d`. As
@@ -752,20 +764,25 @@ and all paths come from the configuration file; the defaults are generic.
 ## Development
 
 ```bash
-pip install -e '.[dev]'                  # pytest, pylint, mypy, pycodestyle, bandit
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # development venv, once
 git config core.hooksPath .githooks      # pre-push hook runs the gates
-tools/check.sh                           # privacy, format, lint, types, security, tests
-                                         # (needs ffmpeg, rsync, rsnapshot installed)
+tools/check.sh                           # privacy, shell, format, lint, types, security,
+                                         # tests (needs ffmpeg, rsync, rsnapshot, shellcheck)
 python3 tools/gen_docs.py                # UML class diagrams + API reference
 ```
+
+`tools/check.sh` activates `.venv` itself for its run; to call
+`mediatools` from the clone, activate it in the terminal
+(`source .venv/bin/activate`).
 
 Inside the development venv `mediatools` runs the code of the clone, and
 `mediatools --version` says so: `mediatools 1.2.0 (source checkout
 ~/Projects/mediatools, not an installed release)`. The installed release
-(`~/scripts/mediatools`) is not affected by anything in the clone.
+(`~/.local/bin/mediatools`) is not affected by anything in the clone.
 
 Branching: `main` holds releases only (tag `vX.Y.Z`), `develop` integrates,
-work happens on `feature/*` branches with pull requests into `develop`.
+work happens on `feature/*` branches; `tools/release.sh` merges them
+through pull requests and publishes releases.
 Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Coding standard: one class per module, Google-style docstrings for every

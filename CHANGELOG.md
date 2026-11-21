@@ -5,6 +5,47 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-21
+
+Last release in the versioned patch format; from now on patches carry no
+version and `tools/release.sh` sets it (dev-conventions handover v5).
+
+### Changed
+- Installation in the XDG layout: `install.sh` installs into
+  `~/.local/share/mediatools/venv` and links `~/.local/bin/mediatools`.
+  The old venv `~/scripts/mediatools.d/venv` is removed when no process
+  runs from it any more; the old link `~/scripts/mediatools` first points
+  to the new release and is removed by a later run once `~/.local/bin` is
+  in `PATH`; the snapshot trigger unit is rewritten to the new link. Only
+  what an earlier `install.sh` created is touched.
+- `mediatools update` works in two steps: (1) a newer release on GitHub is
+  installed (also without a clone), (2) patch archives
+  `mediatools-feature-<name>.tar.gz` / `mediatools-hotfix-<name>.tar.gz`
+  with `patch.info` are applied after one question, checked against the
+  tree or blob hashes before and after `git am`, and released with
+  `tools/release.sh` using the part and message from `patch.info`.
+- Caches of probed durations and codecs moved to `~/.cache/mediatools`
+  (moved once on first use, never overwritten).
+- `tools/check.sh` activates the development venv by itself (`.venv` in
+  the project, else `~/.venvs/mediatools`) when none is active; the
+  activation ends with the script. `.venv/` is ignored by git.
+- The menu entry starts `~/.local/bin/mediatools`.
+
+### Added
+- `tools/release.sh` (GitHub variant of the dev-conventions script):
+  feature, develop and hotfix releases through pull requests with required
+  checks, release branch `release/X.Y.Z`, tag, release check, merge back
+  through `merge/vX.Y.Z`, bit-identity check, installation and
+  `tools/after-install.sh` (reload of a running shrink); `--merge-only`.
+- `tools/same-code.sh`: are branches and tags bit-identical (tree hashes)?
+- Shrink tab: button *Stop, then next* - the running job stops after its
+  current file and the selected waiting job starts.
+- Quality gate `shell`: shellcheck for every shell script (CI installs it).
+
+### Fixed
+- The privacy gate refuses to run while privacy lists of the layout before
+  1.5.0 still exist, instead of passing without terms.
+
 ## [1.13.1] - 2026-11-21
 
 ### Changed
