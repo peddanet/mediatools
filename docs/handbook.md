@@ -1976,7 +1976,7 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
-| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, stale, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
+| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_release_1213.py` | workflow triggers and Python matrix |

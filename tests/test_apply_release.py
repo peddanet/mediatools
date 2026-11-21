@@ -188,8 +188,8 @@ def remote_tags(setup: dict[str, Path]) -> str:
     return git("ls-remote", "--tags", str(setup["origin"]), cwd=setup["repo"])
 
 
-def test_list_shows_releases_archives_and_stale_copies(setup: dict[str, Path]) -> None:
-    """--list names the installed and newest release, pending, stale and refused archives.
+def test_list_shows_releases_archives_and_leftovers(setup: dict[str, Path]) -> None:
+    """--list names the installed and newest release, pending, released, old and refused archives.
 
     Args:
         setup: Paths from the fixture.
@@ -202,9 +202,9 @@ def test_list_shows_releases_archives_and_stale_copies(setup: dict[str, Path]) -
     out = run(setup, "--list").stdout
     assert "installed release: 1.2.5" in out and "newest release:    v1.2.5 - installed" in out
     assert out.count("pending  feature") == 1
-    assert "stale    mediatools-hotfix-1.2.4-patch.tar.gz" in out
+    assert "released mediatools-hotfix-1.2.4-patch.tar.gz (removed at the end)" in out
     assert "refused  mediatools-hotfix-1.3.0-patch.tar.gz" in out
-    assert out.count("stale    mediatools-feature-x") == 1
+    assert out.count("old copy mediatools-feature-x") == 1 and "stale" not in out
     assert len(list(dl.iterdir())) == 4                       # --list changes nothing
 
 
