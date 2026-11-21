@@ -73,9 +73,9 @@ def test_command_line_order_checks_and_quoting() -> None:
 def test_catalog_covers_every_command_and_option() -> None:
     """Every subcommand and visible option of the command line is in the GUI."""
     commands = {spec.name: spec for spec in catalog().commands()}
-    assert set(commands) == {"shrink", "estimate", "reload", "status", "stop", "update", "progress",
-                             "triage", "broken", "flatten", "sync", "rename-db", "config",
-                             "snapshot", "savings", "where"}
+    assert set(commands) == {"shrink", "estimate", "queue", "reload", "status", "stop", "update",
+                             "progress", "triage", "broken", "flatten", "sync", "rename-db",
+                             "config", "snapshot", "savings", "where"}
     shrink = commands["shrink"]
     assert shrink.option("--continue-log") is None            # hidden option
     assert shrink.option("--order").kind == "choice"            # type: ignore[union-attr]

@@ -68,6 +68,8 @@ classDiagram
     +level_of(path, levels)
     +unique(todo, levels)
     +run(args)
+    +report_jobs(jobs, uncertain)
+    +enqueue(jobs, levels, extensions)
     +report(potential, shrinker, counts, levels)
     +fixed_text(model)
     +time_text(low, high)
@@ -115,7 +117,7 @@ classDiagram
     +from_log(path)
     +backfill()
     +planned(spec, settings, todo_bytes, todo_files)
-    +finished_file(spec, size)
+    +finished_file(spec, size, row)
     +entries()
     +line(entry)
   }
@@ -136,6 +138,25 @@ classDiagram
     +contains(path)
     +matches(row)
     +init(root, extensions, min_seconds, min_size, newer_than)
+  }
+  class JobSuggester {
+    +potential
+    +init(potential)
+    +low(group)
+    +level(group)
+    +suggest(limit)
+    +total(level, low, groups)
+  }
+  class SuggestedJob {
+    +level
+    +min_seconds
+    +files
+    +size
+    +saved
+    +seconds
+    +seconds_low
+    +per_hour()
+    +init(level, min_seconds, files, size, saved, seconds, seconds_low)
   }
   class ReplaceJournal {
     +log
@@ -279,6 +300,17 @@ classDiagram
     +write()
     +run()
   }
+  class QueueCommand {
+    +queue
+    +validate
+    +start
+    +init(queue, validate, start)
+    +add_parser(sub)
+    +run(args)
+    +change(args)
+    +checked(text)
+    +run_first()
+  }
   class ResultTable {
     +root
     +report
@@ -349,7 +381,7 @@ classDiagram
     -_run(confirm)
     +settings()
     -_encode_serial(todo)
-    -_job_progress(size)
+    -_job_progress(size, path)
     -_slots()
     -_encode_parallel(todo)
     -_start_free_slots(pool, table, pending)
@@ -377,6 +409,24 @@ classDiagram
     -_size_or_none(path)
     -_remove_quietly(path)
     -_finish()
+  }
+  class ShrinkQueue {
+    +path
+    +python
+    +init(path, python)
+    +default()
+    +entries()
+    -_save(entries)
+    +add(args, note, front)
+    +remove(number)
+    +move(number, to)
+    -_check(number, entries)
+    +clear()
+    +pop()
+    +lines()
+    +summary()
+    +command(args)
+    +continue_after(code, declined, run)
   }
   class ShrinkState {
     +durations
@@ -469,10 +519,16 @@ classDiagram
     +seconds(quality, files, length)
     +speed(quality)
   }
+  EstimateCommand ..> JobEntry
+  EstimateCommand ..> JobRegistry
+  EstimateCommand ..> JobSpec
+  EstimateCommand ..> JobSuggester
   EstimateCommand ..> Ledger
   EstimateCommand ..> ShrinkOptions
   EstimateCommand ..> ShrinkPotential
+  EstimateCommand ..> ShrinkQueue
   EstimateCommand ..> Shrinker
+  EstimateCommand ..> SuggestedJob
   EstimateCommand ..> ThroughputLog
   EstimateCommand ..> TimeModel
   JobChooser --> JobRegistry
@@ -480,9 +536,13 @@ classDiagram
   JobRegistry ..> JobEntry
   JobRegistry ..> JobSpec
   JobRegistry --> Ledger
+  JobRegistry ..> LedgerRow
   JobRegistry ..> SavingsLog
   JobSpec ..> Ledger
   JobSpec ..> LedgerRow
+  JobSuggester ..> PotentialGroup
+  JobSuggester --> ShrinkPotential
+  JobSuggester ..> SuggestedJob
   ReplaceJournal ..> ShrinkDatabase
   Ledger ..> JobSpec
   Ledger --> LedgerRow
@@ -509,10 +569,12 @@ classDiagram
   ShrinkPotential --> TimeModel
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
+  QueueCommand --> ShrinkQueue
   ResultTable ..> FileResult
   SavingsLog ..> Savings
   Shrinker ..> FileResult
   Shrinker --> HevcEncoder
+  Shrinker ..> JobRegistry
   Shrinker ..> JobSpec
   Shrinker ..> LedgerRow
   Shrinker --> ReplaceJournal
