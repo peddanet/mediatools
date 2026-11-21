@@ -275,6 +275,26 @@ class JobRegistry:
         if changed:
             self._save(data)
 
+    def remove(self, keys: list[str]) -> int:
+        """Forget remembered jobs.
+
+        Nothing on disk changes except ``jobs.json``: databases, ledger and
+        videos stay. A removed job comes back only when it is run again.
+
+        Args:
+            keys: :attr:`JobSpec.key` of the jobs.
+
+        Returns:
+            Number of jobs removed.
+        """
+        data = self._load()
+        removed = [key for key in keys if key in data and key != self.META]
+        for key in removed:
+            del data[key]
+        if removed:
+            self._save(data)
+        return len(removed)
+
     def entries(self) -> list[JobEntry]:
         """Return the jobs, the most recently active first.
 

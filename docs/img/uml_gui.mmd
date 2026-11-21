@@ -3,7 +3,6 @@ classDiagram
   class MediaToolsApp {
     +root
     +catalog
-    +store
     +forms
     +tabs
     +consoles
@@ -13,7 +12,11 @@ classDiagram
     +appearance
     +updates
     +restarter
+    +jobdialog
     +init(root, catalog, store, ask, refresh_ms, config)
+    -_shrink_tab(panes, spec, console, store_ask, refresh_ms)
+    +parse_shrink(args)
+    +open_job_dialog(position, args)
     -_menu()
     +program_path()
     +about_text()
@@ -24,8 +27,6 @@ classDiagram
     +zoom(steps)
     +job_values(entry)
     +pick_job(entry, start)
-    +choose_shrink_run()
-    +run_choice(entry)
     +check_update()
     +restart()
     -_exec_gui()
@@ -89,6 +90,7 @@ classDiagram
     +variables
     +line
     +ask
+    +enqueuer
     +chooser
     +init(master, spec, console, store, ask)
     -_field(row, option, value)
@@ -99,6 +101,7 @@ classDiagram
     +preview_option()
     +browse(option)
     +copy()
+    +enqueue()
     +reset()
     +preview()
     +run()
@@ -191,25 +194,43 @@ classDiagram
     +load(command)
     +save(command, values)
   }
+  class JobDialog {
+    +window
+    +form
+    +joblist
+    +queue
+    +checker
+    +on_change
+    +position
+    +mode
+    +status
+    +init(master, spec, console, parse, extra)
+    +open(position, args)
+    +fill(args)
+    +form_args()
+    +enqueue(first)
+    +save_changes()
+    +picked(entry, start)
+  }
   class JobList {
+    +frame
     +jobs
     +monitor
     +entries
     +on_pick
+    +confirm
+    +message
     +signature
-    +init(master, monitor, on_pick)
+    +init(master, monitor, on_pick, confirm, pack, start_text)
     +refresh()
-    -_stamp(path)
+    +settings_text(settings)
+    +stamp(path)
+    +form_values(entry)
+    +running_key()
+    +remove_selected()
+    +remove_finished()
+    -_remove(chosen, question)
     +pick(start)
-  }
-  class JobPicker {
-    +window
-    +jobs
-    +on_choice
-    +selected
-    +init(master, monitor, form_line, on_choice)
-    -_picked(entry, start)
-    +choose(entry)
   }
   class JobRunner {
     +program
@@ -254,6 +275,31 @@ classDiagram
     +initial()
     +init(dest, flags, help, kind, choices, default, required, path)
   }
+  class QueueList {
+    +frame
+    +jobs
+    +monitor
+    +queue
+    +parse
+    +open_dialog
+    +confirm
+    +launcher
+    +message
+    +signature
+    +init(master, monitor, parse, open_dialog, extra)
+    +spec_of(args)
+    +figures(entry)
+    +rows()
+    +refresh()
+    +reload()
+    +selected()
+    +start()
+    +add()
+    +change()
+    +remove()
+    +shift(step)
+    +launch(args)
+  }
   class SavingsPanel {
     +frame
     +logs
@@ -289,8 +335,10 @@ classDiagram
     +message
     +log_path
     +joblist
-    +init(master, monitor, opener, refresh_ms, on_pick)
+    +init(master, monitor, opener, refresh_ms, parse, open_dialog)
     +refresh()
+    +parts()
+    +unparsed(args)
     +stop()
     +reload()
     +show_log(text)
@@ -327,15 +375,16 @@ classDiagram
   MediaToolsApp --> Appearance
   MediaToolsApp --> CommandCatalog
   MediaToolsApp --> CommandForm
+  MediaToolsApp ..> CommandSpec
   MediaToolsApp --> ConfigPanel
   MediaToolsApp --> ConsoleView
   MediaToolsApp --> DesktopEntry
   MediaToolsApp --> FilesPanel
   MediaToolsApp --> FormStore
-  MediaToolsApp ..> JobPicker
+  MediaToolsApp ..> JobDialog
+  MediaToolsApp ..> JobList
   MediaToolsApp --> SavingsPanel
-  MediaToolsApp ..> ShrinkMonitor
-  MediaToolsApp --> ShrinkPanel
+  MediaToolsApp ..> ShrinkPanel
   MediaToolsApp --> UpdateBar
   Appearance --> SystemLook
   CommandCatalog ..> CommandSpec
@@ -349,14 +398,20 @@ classDiagram
   ConsoleView --> ChoiceDialog
   ConsoleView --> JobRunner
   FilesPanel --> Opener
+  JobDialog --> CommandForm
+  JobDialog --> CommandSpec
+  JobDialog --> ConsoleView
+  JobDialog --> FormStore
+  JobDialog --> JobList
+  JobDialog --> ShrinkMonitor
   JobList --> ShrinkMonitor
-  JobPicker --> JobList
-  JobPicker --> ShrinkMonitor
   GuiLauncher ..> CommandCatalog
   GuiLauncher ..> DesktopEntry
   GuiLauncher ..> MediaToolsApp
   OptionSpec ..> CommandCatalog
+  QueueList ..> JobList
+  QueueList --> ShrinkMonitor
   ShrinkMonitor ..> ShrinkReading
-  ShrinkPanel --> JobList
   ShrinkPanel --> Opener
+  ShrinkPanel --> QueueList
   ShrinkPanel --> ShrinkMonitor

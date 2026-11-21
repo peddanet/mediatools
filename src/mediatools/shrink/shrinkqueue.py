@@ -104,6 +104,24 @@ class ShrinkQueue:
         self._save(entries)
         return 1 if front else len(entries)
 
+    def replace(self, number: int, args: list[str], note: str | None = None) -> None:
+        """Change the arguments (and note) of one job, keeping its place.
+
+        Args:
+            number: Position, 1 = next.
+            args: New arguments of ``mediatools shrink``.
+            note: New note, or None to keep it.
+
+        Raises:
+            ValueError: If there is no job at that position.
+        """
+        entries = self.entries()
+        self._check(number, entries)
+        entries[number - 1]["args"] = list(args)
+        if note is not None:
+            entries[number - 1]["note"] = note
+        self._save(entries)
+
     def remove(self, number: int) -> dict:
         """Remove one job.
 

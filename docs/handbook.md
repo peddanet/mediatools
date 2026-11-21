@@ -498,17 +498,32 @@ again: a branch the interrupted run had already pushed with exactly the
 same content on the same base is taken over, so the gates and the CI run
 are not repeated; anything else is rebuilt as before.
 
-In the GUI, *Run* in the shrink tab opens the same choice as a dialog:
-*Continue* (or a double click) runs the selected job, *Run as in the form*
-the values of the form, *Cancel* nothing. Jobs started from the GUI are
-remembered like those of the command line.
+In the GUI (since 1.13.1) the shrink tab shows the **queue** in the order
+of processing - the running job first, then the waiting jobs, each with
+folder, options and progress. Next to it:
 
-To change a remembered job before running it, select it in the job list
-of the shrink tab (this fills the form), change the options in the form
-(e.g. `--jobs 2`, `--threads 11`, clear `--min-seconds`), then *Run* and
-*Run as in the form*. Settings (CRF, preset, order, jobs, threads) update
-the same job; other filters or another folder make a new job, because a
-job is defined by its folder and filters.
+| Button | Effect |
+|---|---|
+| *Continue* | starts the selected waiting job (or the first) now, when no shrink runs |
+| *Add* | opens the job dialog for a new job |
+| *Change* (or a double click) | opens the job dialog with the selected waiting job |
+| *Remove* | takes the selected waiting jobs off the queue (asks first) |
+| *Up*, *Down* | change the order |
+
+The **job dialog** lists every shrink job so far. Selecting one fills the
+form below it (folder chooser and every option); *Add to queue* next to
+the list puts the selected job into the queue as it is; *Remove* and
+*Remove finished* clean the list (they ask first, never remove the running
+job, and change only the list - databases, ledger and videos stay). The
+form's *Add to queue* puts the job of the form into the queue, *Run*
+starts it now; while a waiting job is changed, *Save changes* replaces it
+in its place. Jobs started from the GUI are remembered like those of the
+command line. Settings (CRF, preset, order, jobs, threads) update the same
+job; other filters or another folder make a new job, because a job is
+defined by its folder and filters.
+
+Every part of a tab is separated from the next by a sash: drag it to give
+the queue, the log or the console more room.
 
 Jobs run before 1.6.0 are taken once from the shrink logs: every log
 names its root and order (logs since 1.6.0 the whole job with filters,
@@ -1785,15 +1800,17 @@ of its own: every action is a command of the command line, run as a child
 process, or a request file that the command line uses as well (stop,
 reload). Command line and window therefore always behave the same.
 
-![The shrink tab: state of the run, progress, space, log end, start form](img/gui_shrink.png){width=100%}
+![The shrink tab: state of the run, progress and space; the queue in the order of processing with Continue, Add, Change, Remove, Up, Down; log end; output pane - each part resizable](img/gui_shrink.png){width=100%}
 
 | Tab | Content |
 |---|---|
-| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*, list of the shrink jobs with progress (select: fill the form; *Continue*: start), log end; start form |
+| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*; the queue in the order of processing (running job first) with *Continue*, *Add*, *Change*, *Remove*, *Up*, *Down*; log end; output pane - every part resizable. *Add*/*Change* open the job dialog: all jobs so far and the shrink form |
 | savings | freed space per session or per day, newest first, and the total |
 | update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
 | config | editor of `mediatools.ini` (checked before saving) and the effective values |
 | files | `logs/`, `reports/`, `plans/`, `state/`, newest first; viewer; undo plan for flatten |
+
+![The job dialog (Add, Change): every shrink job so far above, the shrink form with folder chooser and all options below; here changing waiting job 2](img/gui_jobs.png){width=100%}
 
 `status`, `stop` and `reload` are buttons of the shrink tab; `attach` is
 replaced by the tab itself; `config --init/--path/--set` are covered by the
