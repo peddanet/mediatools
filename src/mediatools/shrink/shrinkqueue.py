@@ -231,20 +231,48 @@ class ShrinkQueue:
         """
         return [self.python, "-m", "mediatools", "shrink", *args, "--foreground", "-y"]
 
-    def continue_after(self, code: int, declined: bool, run: RunLog) -> int:
+    @property
+    def next_file(self) -> str:
+        """Marker: continue with the next job after the coming stop.
+
+        Returns:
+            ``<queue file>.next``.
+        """
+        return self.path + ".next"
+
+    def next_after_stop(self, wanted: bool = True) -> None:
+        """Ask for (or withdraw) the start of the next job after a user's stop.
+
+        Args:
+            wanted: True to set the marker, False to remove it.
+        """
+        if wanted:
+            with open(self.next_file, "w", encoding="utf-8") as handle:
+                handle.write("continue after the stop\n")
+        elif os.path.exists(self.next_file):
+            os.remove(self.next_file)
+
+    def continue_after(self, code: int, declined: bool, run: RunLog,
+                       stopped: bool = False) -> int:
         """Start the next queued job in this process, if the last one ended normally.
+
+        A stop by the user ends the queue - unless *Stop, then next* asked
+        for the next job (:meth:`next_after_stop`); the marker is used once.
 
         Args:
             code: Exit code of the job that ended.
             declined: True if the user declined to start it.
             run: :class:`RunLog` of the job that ended (closed before the
                 switch).
+            stopped: True if the job ended because the user stopped it.
 
         Returns:
             ``code`` if nothing follows; 1 only if the next job could not be
             started (it is put back first).
         """
-        if code not in self.CONTINUE or declined:
+        go_on = stopped and os.path.exists(self.next_file)
+        self.next_after_stop(False)
+        if declined or (code not in self.CONTINUE and not go_on):
             return code
         entry = self.pop()
         if entry is None:
