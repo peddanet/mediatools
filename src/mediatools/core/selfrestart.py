@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 
+from mediatools.core.runlog import RunLog
+
 
 class SelfRestart:
     """Restarts the current command with the installed release, in the same process.
@@ -88,6 +90,25 @@ class SelfRestart:
             self.last_error = f"exit code {res.returncode}: {' '.join(tail)[:300]}"
             return None
         return words[1]
+
+    def switch(self, run: RunLog) -> int:
+        """Replace this process by the installed release, logging the switch.
+
+        Args:
+            run: :class:`RunLog` of the running command; closed before the
+                switch.
+
+        Returns:
+            1 - only if the new process could not be started.
+        """
+        run.logger.info("starting the installed release: %s", " ".join(self.command()))
+        run.close()
+        try:
+            self.execute()
+        except OSError as err:
+            print(f"switch to the installed release failed ({err}) - run "
+                  f"'mediatools shrink' again to continue", file=sys.stderr)
+        return 1
 
     def execute(self) -> None:
         """Replace the current process by the new one; returns only on failure.
