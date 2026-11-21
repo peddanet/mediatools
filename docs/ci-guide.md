@@ -2,7 +2,7 @@
 title: "How the GitHub CI of mediatools Works"
 subtitle: "Quality gates, workflow, runners, Python versions, containers and the gh command line tool"
 author: "Peter Wein"
-date: "2026-11-10 (release 1.2.14)"
+date: "2026-11-21 (release 1.14.0)"
 lang: en-GB
 abstract: |
   This document explains what happens between `git push` and a green or
@@ -17,12 +17,13 @@ abstract: |
   can be selected, shows the three ways Docker containers can be used, and
   explains how the `gh` command line tool talks to GitHub through the REST
   and GraphQL APIs, including authentication and the calls made by
-  `apply-release.sh`. A chapter shows the branches (`main` = former
-  `master`, `develop`, `feature`, `release`, `hotfix`) as parallel lanes
-  and marks for every step which gate run belongs to it. State: release
-  1.5.1 (CI for pull requests on Python 3.10 and 3.14, the tag run only
-  checks the tag, pip downloads cached, retries of GitHub calls in
-  `mediatools update`). The document is part
+  `tools/release.sh`. A chapter shows the branches (`main` = former
+  `master`, `develop`, `feature`, `release`, `hotfix`, `merge`) as parallel
+  lanes and marks for every step which gate run belongs to it. State:
+  release 1.14.0 (CI for pull requests on Python 3.12 and 3.14, the tag run
+  only checks the tag, pip downloads cached, shellcheck as gate, every
+  merge done by `tools/release.sh` through a pull request; `mediatools
+  update` applies a patch and calls it). The document is part
   of the repository (`docs/ci-guide.md`) and changes with every release
   that changes the CI. Branch protection, costs and limits, self-hosted and
   Forgejo runners, a command cheat sheet, a glossary and the sources close
@@ -69,7 +70,7 @@ Two numbers recur everywhere and are worth fixing first:
 |---|---|
 | Repository | `github.com/peddanet/mediatools`, **public** |
 | Workflow file | `.github/workflows/tests.yml`, workflow name `quality-gates` |
-| Gate script | `tools/check.sh` (privacy, format, lint, types, security, tests) |
+| Gate script | `tools/check.sh` (privacy, shell, format, lint, types, security, tests) |
 | Test matrix | CPython 3.12 and 3.14 on `ubuntu-24.04` (since 1.10.0; 3.10 and 3.14 from 1.5.1; 3.10, 3.12, 3.13, 3.14 before) |
 | Required checks | `gates (3.12)`, `gates (3.14)` |
 
@@ -154,7 +155,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: system tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb shellcheck
       - name: python tools
         run: pip install -e ".[dev]"
       - name: quality gates (format, lint, types, security, tests)
@@ -215,9 +216,13 @@ released states, each tagged `vX.Y.Z`. There is no separate `master`.
 | `main` (= `master`) | released versions, each tagged | - | - |
 | `develop` | integration of finished work | `main` | `main` via a release |
 | `feature/x` | one piece of work | `develop` | `develop` (pull request) |
-| `release/X` | version number, CHANGELOG, PDFs | `develop` | `main` (pull request) |
-| `hotfix/X` | urgent fix of a release | `main` | `main` (pull request) |
-| `merge/hotfix-X` | helper of `mediatools update` for the back-merge | `main` | `develop` (pull request) |
+| `release/X.Y.Z` | short-lived: version number and CHANGELOG, made by `tools/release.sh` | `develop` | `main` (pull request) |
+| `hotfix/x` | urgent fix of a release (gets the version commit itself) | `main` | `main` (pull request) |
+| `merge/vX.Y.Z` | helper of `tools/release.sh` for the merge back | `main` | `develop` (pull request) |
+
+`tools/release.sh` creates, pushes and deletes the `release/` and
+`merge/` branches itself; `main` and `develop` are protected, so even the
+version commit and the merge back reach them only through a pull request.
 
 ## Reading the lane diagrams
 
@@ -233,34 +238,38 @@ the gate run of the step:
 | **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.12 and 3.14 on the committed tree (pull requests); for a tag only `release-check`; binding for branch protection |
 | **none** | - | no test: the pull request tested the same tree before |
 
-![Feature and release, done by hand](img/lanes_release.png){width=100%}
+![Feature and release with `tools/release.sh`](img/lanes_release.png){width=100%}
 
-![Hotfix with `mediatools update`; the numbers are the steps of `apply-release.sh`](img/lanes_hotfix.png){width=100%}
+![Hotfix with `tools/release.sh` (also the end of `mediatools update` for a hotfix archive)](img/lanes_hotfix.png){width=100%}
 
 | Flow | LOCAL runs | CI runs on GitHub |
 |---|---|---|
-| feature | 1 | 1 (pull request into `develop`) |
-| release | 1 | 3 (pull request into `main`, tag, pull request `main` -> `develop`) |
-| hotfix (`mediatools update`) | 2 | 3, printed as `CI 1/3` ... `CI 3/3` |
+| feature | 2 (gates of `release.sh`, pre-push hook) | 1 (pull request into `develop`) |
+| release | 3 (gates after the version change, push of `release/`, push of `merge/`) | 3 (pull request into `main`, tag, pull request into `develop`) |
+| hotfix | 3 (as release) | 3 |
 
-## What `mediatools update` prints
+The local runs before a push repeat the gates of `release.sh` on the same
+tree; they are kept because the pre-push hook must never be bypassed.
 
-Since 1.2.13 the script announces every run before it waits for it and
-closes with a table of all CI runs (also when a step fails):
+## What `tools/release.sh` prints
+
+Every merge is announced with its pull request; the script waits
+`RELEASE_WAIT` seconds (default 30) after a push, because GitHub registers
+the checks of a new push with a delay, and then follows them:
 
 ~~~text
---- local gates (pre-push hook): tools/check.sh on this PC with Python 3.13.x;
-    GitHub starts no run for this push (hotfix/1.2.13 has no push trigger)
---- 1.2.13 CI 1/3: pull_request on hotfix/1.2.13 (commit 3f2a9c1)
-    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.14
-    purpose: required check: branch protection allows the merge into main only when green
-    run:     https://github.com/peddanet/mediatools/actions/runs/<id>
-
-CI runs on GitHub:
-  run              trigger                                    result     url
-  1.2.13 CI 1/3    pull_request hotfix/1.2.13                 success    https://...
-  1.2.13 CI 2/3    push v1.2.13                               success    https://...
-  1.2.13 CI 3/3    pull_request merge/hotfix-1.2.13           success    https://...
+Pull Request #41: release/1.14.0 -> main
+Pruefungen von PR #41 ...
+gates (3.12)    pass    3m12s   https://github.com/peddanet/mediatools/actions/runs/<id>
+gates (3.14)    pass    3m05s   https://github.com/peddanet/mediatools/actions/runs/<id>
+Release-Check von v1.14.0 ...
+Fertig: v1.14.0 ist veroeffentlicht.
+Pull Request #42: merge/v1.14.0 -> develop
+...
+main                     2f1c...
+develop                  2f1c...
+v1.14.0                  2f1c...
+Bitgleich: JA
 ~~~
 
 # The runner: which machine, how much of it, who pays
@@ -505,16 +514,17 @@ GitHub checks the token's permissions on the repository; branch
 protection is enforced by the server, so no client (web, `gh`, `curl`)
 can bypass it.
 
-## The calls made by `apply-release.sh`
+## The calls made by `tools/release.sh`
 
 | Command | What it does via the API |
 |---|---|
-| `gh pr list --head hotfix/X --base main --state open --json url` | look for an already open PR (makes the script re-runnable) |
-| `gh pr create --base main --title "Hotfix X" --fill` | create the PR; this **event** starts the matrix |
-| `gh run list ... --commit SHA` / `gh run view ID` | find the run of the pushed commit, its URL and its state |
-| `gh pr checks URL --watch` | poll the check state every 10 s until all are done |
-| `gh pr merge URL --merge --delete-branch` | merge commit into `main`, delete the remote branch; refused if protection is not satisfied |
-| `gh run list --branch vX --event push --limit 1 --json databaseId` | find the run started by the tag push |
+| `gh auth status` | refuse early if `gh` is not logged in |
+| `gh pr list --head B --base T --state open --json number` | look for an already open PR (makes the script re-runnable) |
+| `gh pr create --head B --base T --title ... --body ...` | create the PR; this **event** starts the matrix |
+| `gh pr checks N --watch` | poll the check state every 10 s until all are done |
+| `gh pr merge N --merge --subject S --body ""` | merge commit with the release message as subject; refused if protection is not satisfied |
+| `git push origin --delete B` | delete the remote helper branch after the merge (git protocol, not the API) |
+| `gh run list --branch vX.Y.Z --limit 1 --json databaseId` | find the run started by the tag push |
 | `gh run watch ID --exit-status` | follow that run; non-zero exit status if it fails |
 
 ![Pull request flow through the API](img/ci_seq_gh.png){width=100%}
@@ -522,18 +532,13 @@ can bypass it.
 Exit codes of `gh pr checks`: 0 all checks passed, 1 at least one
 failed, 8 checks still pending (without `--watch`).
 
-A short network loss must not stop an update half way. Since 1.2.14 the
-script therefore treats the calls in two groups. **Reading calls**
-(`gh run list`, `gh run view`, `gh pr list`) are repeated up to five times,
-10 s apart (`gh_read`). **Watching** (`gh pr checks --watch`,
-`gh run watch`) ends with a non-zero code both for a red run and for a
-lost connection; the script then asks GitHub for the state of the run:
-`completed success` continues, `completed` with any other result stops
-the update, anything else (still queued or running) resumes watching, at
-most five times. Calls that change something (`gh pr create`,
-`gh pr merge`) are not repeated blindly; after a failure the whole update
-is started again, which is safe because every step can be repeated (an
-open PR is reused, the hotfix branch is rebuilt).
+A short network loss must not stop a release half way. When watching
+ends with a non-zero code, `release.sh` asks once more without watching:
+exit code 0 continues, 8 (still pending) watches again (at most five
+times), anything else stops before the merge. Finding the run of a tag
+is tried ten times, 10 s apart. Calls that change something
+(`gh pr create`, `gh pr merge`) are not repeated blindly; after a failure
+the script is started again, which reuses an open pull request.
 
 Useful options of `gh pr checks`: `--fail-fast` (stop watching
 at the first failure), `--required` (only required checks),

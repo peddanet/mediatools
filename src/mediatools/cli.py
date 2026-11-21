@@ -116,11 +116,12 @@ class Cli:
                                       "whether it is current, and its log")
         sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
                                     "after its current file; returns at once")
-        cmd = sub.add_parser("update", help="apply delivered release patches from the download "
-                                            "folder (asks which version), then install")
-        cmd.add_argument("--list", action="store_true", help="only show what would be applied")
+        cmd = sub.add_parser("update", help="install a newer release, then apply and release "
+                                            "delivered patch archives from the download folder")
+        cmd.add_argument("--list", action="store_true",
+                         help="only show the releases and patch archives")
         cmd.add_argument("-y", "--yes", action="store_true",
-                         help="apply all pending versions without asking")
+                         help="no questions (every patch archive is applied)")
         cmd.add_argument("--downloads", help="folder with the patch archives (default ~/Downloads)")
         cmd.add_argument("--repo", help="git clone (default ~/Projects/mediatools)")
 
@@ -498,13 +499,13 @@ class Cli:
         probe = MediaProbe()
         encoder = HevcEncoder(args.crf, args.threads, probe, run.logger, decode=DecodeCheck(),
                               preset=self._preset(args.preset, config))
-        durations = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
+        durations = DurationCache(DataDir().cache_file("triage_durations.tsv"))
         jobs = args.jobs if args.jobs is not None else (config.integer("shrink", "jobs")
                                                         if config.get("shrink", "jobs") else 1)
         opts = ShrinkOptions(args.keep_copies, MediaTypes.parse_extensions(args.ext),
                              config.db_name(), args.order, args.min_seconds,
                              args.retry_failed, args.min_size or 0, args.newer_than, max(1, jobs))
-        codecs = CodecCache(os.path.join(DataDir().sub("state"), "shrink_codecs.tsv"))
+        codecs = CodecCache(DataDir().cache_file("shrink_codecs.tsv"))
         shrinker = Shrinker(root, run.logger, opts, encoder, probe, durations, codecs=codecs)
         shrinker.control = RunControl(
             "shrink", background=not args.foreground, log_path=run.path,
@@ -530,7 +531,8 @@ class Cli:
         code = shrinker.run(lambda: prompt.yes_no(f"Start encoding and {mode}?"))
         if code == Shrinker.RESTART:
             return restart.switch(run)
-        return ShrinkQueue.default().continue_after(code, shrinker.flags["declined"], run)
+        return ShrinkQueue.default().continue_after(code, shrinker.flags["declined"], run,
+                                                    shrinker.flags["stop"])
 
     @staticmethod
     def cmd_reload(_args: argparse.Namespace, wait: float = 10.0) -> int:
@@ -582,6 +584,7 @@ class Cli:
         Returns:
             0 if a running shrink was asked to stop, 1 if none runs.
         """
+        ShrinkQueue.default().next_after_stop(False)     # a plain stop ends the queue
         pid = RunControl("shrink").request_stop()
         if pid is None:
             print("no shrink run is active - nothing to stop")
@@ -654,7 +657,7 @@ class Cli:
         self._need("ffprobe")
         run = RunLog("triage")
         kept = Triage.kept_list()
-        cache = DurationCache(os.path.join(DataDir().sub("state"), "triage_durations.tsv"))
+        cache = DurationCache(DataDir().cache_file("triage_durations.tsv"))
         finder = CandidateFinder(root, MediaTypes.parse_extensions(args.ext), args.min_seconds,
                                  args.max_seconds, None if args.include_kept else kept,
                                  logger=run.logger, cache=cache)

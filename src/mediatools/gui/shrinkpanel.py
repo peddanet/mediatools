@@ -128,7 +128,8 @@ class ShrinkPanel:
         raise ValueError(f"no parser for {args}")
 
     def stop(self) -> None:
-        """Request a stop after the current file."""
+        """Request a stop after the current file (the queue does not go on)."""
+        self.joblist.queue.next_after_stop(False)
         self.message.set(self.monitor.stop())
 
     def reload(self) -> None:

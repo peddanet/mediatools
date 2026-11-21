@@ -1,55 +1,44 @@
 #!/usr/bin/env bash
-# apply-release.sh - apply mediatools release patches from the download folder.
+# apply-release.sh - "mediatools update": install a newer release, then apply
+# and release delivered patch archives (dev-conventions handover, chapter 12).
 #
-# One script for every release (replaces the per-version apply-mediatools-X.sh):
-#
-#   1. Looks for patch archives "mediatools-hotfix-X.Y.Z-patch.tar.gz" in the
-#      download folder. Browser copies such as "... (1).tar.gz" are handled:
-#      per version the most recently saved copy is used.
-#   2. Compares them with the released version on main. Older or equal
-#      versions are stale; newer ones are pending.
-#   3. Asks which version to apply: a version means "every pending version up
-#      to and including this one, in ascending order" (each patch is based on
-#      the release before it). Default: all pending versions.
-#   4. Per version (git-flow hotfix): patch -> hotfix branch -> PR into main
-#      -> CI -> merge -> tag vX -> CI of the tag -> back-merge into develop.
-#      Each version causes two local gate runs (pre-push hook) and three CI
-#      runs on GitHub; each is announced with its purpose and URL, and a
-#      summary table of all CI runs closes the output:
-#        local  push hotfix/X           gates on this PC, one Python version
-#        CI 1   PR hotfix/X -> main     merge result; required check for the merge
-#        CI 2   tag vX                  release-check only (tag on main, tag = version);
-#                                       the gates already ran on CI 1 for the same tree
-#        local  push merge/hotfix-X     gates on this PC, one Python version
-#        CI 3   PR merge/hotfix-X -> develop   merge result; required check
-#      Merges into main and develop start no further run (no push trigger).
-#      Reading GitHub calls are retried (5 attempts, 10 s apart), so a short
-#      network loss does not stop the update; a red CI run still does.
-#   5. Installs the newest release (install.sh), checks --version and asks a
-#      running shrink to switch to it after its current file (mediatools reload).
-#   6. Moves the used archives to the releases folder (mediatools where) and deletes
-#      stale archives, browser copies and old apply scripts from the folder.
+# Step 1 (everyone): compare the installed release with the newest tag
+#   vX.Y.Z of the repository (git ls-remote, no clone needed). If it is
+#   newer, install it - with ./install.sh of the clone if there is one, else
+#   with pip into the venv of the running program - and ask a running shrink
+#   to switch to it after its current file (mediatools reload).
+# Step 2 (developer, needs the clone): patch archives in the download folder,
+#   "mediatools-feature-<name>.tar.gz" or "mediatools-hotfix-<name>.tar.gz"
+#   (browser copies "... (1).tar.gz": the newest copy is used). Each holds
+#   the patches and patch.info (branch, base, base_tree or blob lines, tree,
+#   release = patch|minor|major|none, message). Per archive one question;
+#   then: guard (base branch equals origin and has the expected tree or
+#   blobs) -> git switch -c <branch> <base> -> git am -> guard (result tree
+#   or blobs) -> tools/release.sh <part> -m <message> --yes (release=none:
+#   --merge-only --yes), which pushes, opens the pull requests, waits for
+#   the checks, merges, tags, merges back, installs and reloads. Archives
+#   with release=none are applied one after the other; the run ends after
+#   the first archive that releases (the next one is built on its result).
+#   Used archives move to the releases folder; old versioned archives
+#   "mediatools-hotfix-X.Y.Z-patch.tar.gz" of released versions are removed.
 #
 # Usage (normal user; git and gh act on your clone and with your GitHub
 # login, nothing here needs root). The script ships inside the package:
-#     mediatools update              # ask, then apply
+#     mediatools update              # step 1, then ask per patch archive
 #     mediatools update --list       # only show
-#     mediatools update -y           # all pending versions, no question
+#     mediatools update -y           # no questions
 #   options: --downloads DIR (default ~/Downloads),
 #            --repo DIR (default: the clone around this file, else
 #            ~/Projects/mediatools)
-# A standalone copy (e.g. ~/Downloads/apply-release.sh) works the same way:
-#     bash ~/Downloads/apply-release.sh
+# Environment (set by "mediatools update"): MEDIATOOLS_VENV (venv of the
+# running program), MEDIATOOLS_VERSION (its version); MEDIATOOLS_REPO
+# replaces the repository URL (tests).
 #
 # The script runs from a temporary copy, because the branch switches below
-# and the installation rewrite this file while bash reads it.
-# Every step is logged; the first failing command stops the script and names
-# the step. On failure nothing in the download folder is removed, so the same
-# command can be repeated (an existing hotfix branch is rebuilt, an open pull
-# request reused). Since 1.6.3 a branch that an interrupted run already
-# pushed with exactly the same content on the same base is taken over
-# instead of pushed again (see same_as_pushed): no second gate run, and the
-# CI run already started for it is reused.
+# and the installation rewrite this file while bash reads it. Every step is
+# logged; the first failing command stops the script and names the step. On
+# failure nothing in the download folder is removed, so the same command can
+# be repeated.
 set -Eeuo pipefail
 
 # -- run from a temporary copy ----------------------------------------------
@@ -85,6 +74,8 @@ if [ -z "$REPO" ]; then                     # the clone this script belongs to
   REPO=$(git -C "$(dirname "$APPLY_RELEASE_ORIGIN")" rev-parse --show-toplevel 2>/dev/null || true)
   [ -f "$REPO/src/mediatools/__init__.py" ] || REPO="$HOME/Projects/mediatools"
 fi
+CLONE=0
+[ -d "$REPO/.git" ] && [ -f "$REPO/src/mediatools/__init__.py" ] && CLONE=1
 # folders as in mediatools.core.datadir.DataDir: one folder from
 # $MEDIATOOLS_HOME, the old folder while it still holds data, else XDG
 LEGACY="$HOME/scripts/mediatools.d"
@@ -102,345 +93,210 @@ else
 fi
 ARCHIVE="$DATA_DIR/releases"
 LOG_DIR="$STATE_DIR/logs"
-VENV="$HOME/.venvs/mediatools"
-NAME_RE='^mediatools-hotfix-([0-9]+\.[0-9]+\.[0-9]+)-patch( \([0-9]+\))?\.tar\.gz$'
+LOG=""
+NAME_RE='^mediatools-(feature|hotfix)-([A-Za-z0-9][A-Za-z0-9._-]*)( \([0-9]+\))?\.tar\.gz$'
+OLD_RE='^mediatools-hotfix-([0-9]+\.[0-9]+\.[0-9]+)-patch( \([0-9]+\))?\.tar\.gz$'
 STEP="start"
 
 step() { STEP="$1"; echo; echo "=== $STEP"; }
-
-# announce the local gate run of the pre-push hook before a branch push
-local_gates() {
-  echo "--- local gates (pre-push hook): tools/check.sh on this PC with $(python3 --version 2>&1);"
-  echo "    GitHub starts no run for this push ($1 has no push trigger)"
-}
-
-# run a reading gh command; a failed attempt (network, API hiccup) is retried
-# up to GH_TRIES times, GH_PAUSE seconds apart; output only of the good attempt
-GH_TRIES=5
-GH_PAUSE="${GH_PAUSE:-10}"
-gh_read() {
-  local attempt out
-  for attempt in $(seq 1 "$GH_TRIES"); do
-    if out=$(gh "$@"); then
-      printf '%s\n' "$out"
-      return 0
-    fi
-    echo "    gh $1 $2 failed (attempt $attempt/$GH_TRIES), retry in $GH_PAUSE s" >&2
-    sleep "$GH_PAUSE"
-  done
-  echo "    gh $1 $2 failed $GH_TRIES times, giving up" >&2
-  return 1
-}
-
-# CI runs of this invocation, one line each for the summary table
-declare -a CI_ROWS=()
-
-# announce a CI run, wait for GitHub to register it, follow it, record the result
-#   $1 label (e.g. "1.2.13 CI 1/3")  $2 ref  $3 event  $4 commit  $5 what  $6 why
-#   $7 PR url (empty: follow the run itself)
-ci_run() {
-  local label="$1" ref="$2" event="$3" sha="$4" what="$5" why="$6" pr="${7:-}" id url
-  echo "--- $label: $event on $ref (commit ${sha:0:7})"
-  echo "    checks:  $what"
-  echo "    purpose: $why"
-  wait_for_run "$ref" "$event" "$sha"
-  id=$(gh_read run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
-         --json databaseId --jq '.[0].databaseId')
-  url=$(gh_read run view "$id" --json url --jq .url)
-  echo "    run:     $url"
-  CI_ROWS+=("$label|$event $ref|running|$url")
-  # Watching ends with a non-zero code both for a red run and for a lost
-  # connection; the state of the run on GitHub decides which one it was.
-  local rc=1 attempt state
-  for attempt in $(seq 1 "$GH_TRIES"); do
-    if [ -n "$pr" ]; then
-      gh pr checks "$pr" --watch || true
-    else
-      gh run watch "$id" --exit-status || true
-    fi
-    state=$(gh_read run view "$id" --json status,conclusion --jq '.status + " " + .conclusion')
-    case "$state" in
-      "completed success") rc=0; break ;;
-      completed*) rc=1; break ;;
-    esac
-    echo "    watching interrupted, run is '$state' (attempt $attempt/$GH_TRIES), retry in $GH_PAUSE s"
-    sleep "$GH_PAUSE"
-  done
-  CI_ROWS[-1]="$label|$event $ref|${state#completed }|$url"
-  return "$rc"
-}
-
-# table of all CI runs of this invocation (also printed when a step fails)
-ci_summary() {
-  [ ${#CI_ROWS[@]} -gt 0 ] || return 0
-  echo
-  echo "CI runs on GitHub:"
-  printf '  %-16s %-42s %-10s %s\n' "run" "trigger" "result" "url"
-  local row label trigger result url
-  for row in "${CI_ROWS[@]}"; do
-    IFS='|' read -r label trigger result url <<< "$row"
-    printf '  %-16s %-42s %-10s %s\n' "$label" "$trigger" "$result" "$url"
-  done
-}
-version_of() { basename "$1" | sed -E 's/^[a-z-]*-([0-9]+\.[0-9]+\.[0-9]+).*/\1/'; }
 # true if version $1 is lower than version $2
 version_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
+# value of key $2 in the patch.info file $1
+info() { sed -n "s/^$2=//p" "$1" | head -n 1; }
 
-# released version on main (origin/main if known)
-# True if origin/<branch> holds exactly the content of HEAD on the same
-# parent commit(s). Such a branch can only have come from an earlier run of
-# this script that was interrupted later (e.g. lost connection while waiting
-# for CI): it was pushed through the pre-push hook, so the local gates have
-# passed for exactly this content, and GitHub still has to report the
-# required checks green before anything is merged (branch protection).
-same_as_pushed() {
-  git rev-parse -q --verify "origin/$1" >/dev/null || return 1
-  [ "$(git rev-parse "origin/$1^{tree}")" = "$(git rev-parse "HEAD^{tree}")" ] || return 1
-  [ "$(git rev-parse "origin/$1^@" | tr '\n' ' ')" = "$(git rev-parse "HEAD^@" | tr '\n' ' ')" ]
-}
-
-# push a branch through the gates - or take over the identical pushed one
-# (see same_as_pushed); sets PUSHED=yes|no
-push_or_resume() {
-  if same_as_pushed "$1"; then
-    echo "--- origin/$1 holds exactly this content on the same base, pushed through the"
-    echo "    gates by an earlier, interrupted run: taken over (no new push, no new gate run)"
-    git reset -q --keep "origin/$1"
-    git branch -q --set-upstream-to="origin/$1"
-    PUSHED=no
-  else
-    local_gates "$1"
-    git push -u --force-with-lease origin "$1"
-    PUSHED=yes
-  fi
-}
-
-released_version() {
-  local ref=main
-  git -C "$REPO" rev-parse -q --verify origin/main >/dev/null && ref=origin/main
-  git -C "$REPO" show "$ref:src/mediatools/__init__.py" \
-    | sed -n 's/^__version__ = "\(.*\)"$/\1/p'
-}
-
-# lines "version<TAB>path" of all patch archives, newest copy first per version
-scan() {
-  find "$DL" -maxdepth 1 -type f -name 'mediatools-hotfix-*-patch*.tar.gz' -printf '%T@\t%p\n' \
-    | while IFS=$'\t' read -r mtime path; do
-        [[ "$(basename "$path")" =~ $NAME_RE ]] && printf '%s\t%s\t%s\n' \
-          "${BASH_REMATCH[1]}" "$mtime" "$path"
-      done \
-    | sort -t$'\t' -k1,1V -k2,2nr | cut -f1,3
-}
-
-# wait until GitHub has registered at least one run for a branch or tag
-wait_for_run() {
-  local ref="$1" event="$2" sha="${3:-}" n
-  for _ in $(seq 1 30); do
-    if [ -n "$sha" ]; then
-      n=$(gh_read run list --branch "$ref" --event "$event" --commit "$sha" --limit 1 \
-            --json databaseId --jq length)
-    else
-      n=$(gh_read run list --branch "$ref" --event "$event" --limit 1 --json databaseId \
-            --jq length)
+# the installed release: the link of install.sh, the old link, else the caller
+installed_version() {
+  local program
+  for program in "$HOME/.local/bin/mediatools" "$HOME/scripts/mediatools"; do
+    if [ -x "$program" ]; then
+      "$program" --version 2>/dev/null | awk '{print $2}' && return 0
     fi
-    [ "$n" -ge 1 ] && return 0
-    sleep 10
   done
-  echo "no CI run appeared for $ref ($event) within 5 minutes"
-  return 1
+  echo "${MEDIATOOLS_VERSION:-0}"
 }
 
-# -- inventory -------------------------------------------------------------------
-# root would leave root-owned files in your clone and home (tests set the variable)
+# the repository URL: MEDIATOOLS_REPO, origin of the clone, or GitHub
+repo_url() {
+  if [ -n "${MEDIATOOLS_REPO:-}" ]; then echo "$MEDIATOOLS_REPO"; return; fi
+  if [ "$CLONE" -eq 1 ]; then git -C "$REPO" remote get-url origin && return; fi
+  echo "https://github.com/peddanet/mediatools.git"
+}
+
+# newest release tag vX.Y.Z of the repository (empty if none or unreachable)
+newest_release() {
+  git ls-remote --tags --refs "$1" 'v*' 2>/dev/null | sed 's#.*refs/tags/##' \
+    | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1
+}
+
+# newest copy per archive name: lines "kind<TAB>name<TAB>path", oldest first
+scan() {
+  find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
+    | while IFS=$'\t' read -r mtime path; do
+        [[ "$(basename "$path")" =~ $OLD_RE ]] && continue
+        [[ "$(basename "$path")" =~ $NAME_RE ]] || continue
+        printf '%s\t%s\t%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$mtime" "$path"
+      done | sort -t$'\t' -k2,2 -k3,3nr | awk -F'\t' '!seen[$1 FS $2]++' \
+    | sort -t$'\t' -k3,3n | cut -f1,2,4
+}
+
+# old copies of each archive name and old versioned archives: one path per line
+stale() {
+  local released="$1"
+  find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
+    | sort -t$'\t' -k1,1nr | while IFS=$'\t' read -r _mtime path; do
+        local base; base="$(basename "$path")"
+        if [[ "$base" =~ $OLD_RE ]]; then
+          version_lt "$released" "${BASH_REMATCH[1]}" || echo "$path"
+        elif [[ "$base" =~ $NAME_RE ]]; then
+          key="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
+          if [[ " ${SEEN:-} " == *" $key "* ]]; then echo "$path"; else SEEN="${SEEN:-} $key"; fi
+        fi
+      done
+}
+
+# -- start ---------------------------------------------------------------------
 [ "$(id -u)" -ne 0 ] || [ -n "${APPLY_RELEASE_ALLOW_ROOT:-}" ] \
   || { echo "do not run as root"; exit 1; }
-[ -d "$REPO/.git" ] || { echo "no git clone at $REPO (use --repo DIR)"; exit 1; }
 if [ "$LIST" -eq 0 ]; then
   mkdir -p "$LOG_DIR"
   LOG="$LOG_DIR/apply-release_$(date +%Y-%m-%d_%H-%M-%S).log"
   exec > >(tee -a "$LOG") 2>&1
   # shellcheck disable=SC2154  # rc is assigned inside the trap string
-  trap 'rc=$?; ci_summary; echo; echo "FAILED in step: $STEP (line $LINENO, exit code $rc)"; echo "log: $LOG"' ERR
-  git -C "$REPO" fetch -q origin
+  trap 'rc=$?; echo; echo "FAILED in step: $STEP (line $LINENO, exit code $rc)"; echo "log: $LOG"' ERR
 fi
-CURRENT=$(released_version)
-[ -n "$CURRENT" ] || { echo "cannot read the released version from main in $REPO"; exit 1; }
 
-declare -a PENDING=() USE=() STALE=()
-last=""
-while IFS=$'\t' read -r version path; do
-  if [ "$version" = "$last" ]; then
-    STALE+=("$path")                         # older copy of the same version
-  elif version_lt "$CURRENT" "$version"; then
-    PENDING+=("$version"); USE+=("$path")
-  else
-    STALE+=("$path")                         # released already
+# -- step 1: newer release ------------------------------------------------------
+URL="$(repo_url)"
+INSTALLED="$(installed_version)"
+NEWEST="$(newest_release "$URL")"
+echo "installed release: $INSTALLED   (repository: $URL)"
+if [ -z "$NEWEST" ]; then
+  echo "newest release:    unknown (repository not reachable) - step 1 skipped"
+elif version_lt "$INSTALLED" "${NEWEST#v}"; then
+  echo "newest release:    $NEWEST - newer"
+  if [ "$LIST" -eq 0 ]; then
+    step "1 install $NEWEST"
+    if [ "$CLONE" -eq 1 ] && [ -x "$REPO/install.sh" ]; then
+      "$REPO/install.sh" "$NEWEST"
+      program="$HOME/.local/bin/mediatools"
+    else
+      [ -n "${MEDIATOOLS_VENV:-}" ] || { echo "no venv of the running program known"; exit 1; }
+      "$MEDIATOOLS_VENV/bin/python" -m pip install --quiet --disable-pip-version-check \
+        --force-reinstall --no-deps "mediatools @ git+$URL@$NEWEST"
+      program="$MEDIATOOLS_VENV/bin/mediatools"
+    fi
+    [ "$("$program" --version)" = "mediatools ${NEWEST#v}" ]
+    INSTALLED="${NEWEST#v}"
+    "$program" reload || true                # a running shrink switches after its file
   fi
-  last="$version"
-done < <(scan)
-
-echo "released on main: $CURRENT   (clone: $REPO)"
-echo "download folder:  $DL"
-if [ ${#PENDING[@]} -eq 0 ]; then
-  echo "pending patches:  none"
 else
-  for i in "${!PENDING[@]}"; do
-    printf '  pending  %-8s %s\n' "${PENDING[$i]}" "$(basename "${USE[$i]}")"
-  done
+  echo "newest release:    $NEWEST - installed"
 fi
+
+# -- step 2: patch archives -----------------------------------------------------
+mapfile -t FOUND < <(scan)
+mapfile -t STALE < <(stale "$INSTALLED")
+echo "download folder:   $DL"
+[ ${#FOUND[@]} -gt 0 ] || echo "patch archives:    none"
+for line in "${FOUND[@]}"; do
+  IFS=$'\t' read -r kind name path <<< "$line"
+  printf '  pending  %-8s %-28s %s\n' "$kind" "$name" "$(basename "$path")"
+done
 for path in "${STALE[@]}"; do
-  printf '  stale    %-8s %s\n' "$(version_of "$path")" "$(basename "$path")"
+  printf '  stale    %s\n' "$(basename "$path")"
+done
+for path in "$DL"/mediatools-hotfix-*-patch*.tar.gz; do
+  if [ -f "$path" ] && [[ "$(basename "$path")" =~ $OLD_RE ]] \
+     && version_lt "$INSTALLED" "${BASH_REMATCH[1]}"; then
+    printf '  refused  %s (old format of releases before 1.14.0 - apply it with that release)\n' \
+           "$(basename "$path")"
+  fi
 done
 [ "$LIST" -eq 1 ] && exit 0
 
-# -- choice ----------------------------------------------------------------------
-TARGET=""
-if [ ${#PENDING[@]} -gt 0 ]; then
-  TARGET="${PENDING[-1]}"
-  if [ "$YES" -eq 0 ]; then
-    echo
-    echo "Apply up to which version? Every pending version up to it is applied in order."
-    read -r -p "version [${PENDING[*]}] (Enter = $TARGET, n = none): " answer
-    case "$answer" in
-      "") ;;
-      n|N) TARGET="" ;;
-      *) [[ " ${PENDING[*]} " == *" $answer "* ]] || { echo "not a pending version: $answer"; exit 1; }
-         TARGET="$answer" ;;
-    esac
-  fi
-fi
-
-# -- apply -------------------------------------------------------------------------
-apply_one() {
-  local VERSION="$1" tar="$2" dir
-  dir=$(mktemp -d /tmp/mediatools-patch.XXXXXX)
-  step "$VERSION: 0 check the archive"
-  echo "archive: $tar"
-  tar -xzf "$tar" -C "$dir"
-  grep -q "^+__version__ = \"$VERSION\"" "$dir"/*/*.patch \
-    || { echo "$tar does not contain release $VERSION"; exit 1; }
-  ! git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null \
-    || { echo "tag v$VERSION exists already"; exit 1; }
-
-  step "$VERSION: 1 update main"
-  git switch main
-  git pull --ff-only
-
-  step "$VERSION: 2 apply the patch on hotfix/$VERSION (rebuilt from main if it exists)"
-  git switch -C "hotfix/$VERSION" main
-  if ! git am "$dir"/*/*.patch; then
-    # leave no half-applied session behind: the next run would fail at "git switch"
-    git am --abort 2>/dev/null || true
-    git switch -q main
-    git branch -q -D "hotfix/$VERSION"
-    echo
-    echo "The patch of $VERSION does not fit onto main (released: $(released_version))."
-    echo "Usually an earlier release is missing in $DL; nothing was pushed."
-    exit 1
-  fi
-  git log --oneline -1
-
-  step "$VERSION: 3 push (pre-push hook runs all quality gates)"
-  git fetch origin
-  push_or_resume "hotfix/$VERSION"
-
-  step "$VERSION: 4 pull request into main"
-  local pr
-  pr=$(gh_read pr list --head "hotfix/$VERSION" --base main --state open --json url \
-         --jq '.[0].url // empty')
-  [ -n "$pr" ] || pr=$(gh pr create --base main --title "Hotfix $VERSION" --fill)
-  echo "PR: $pr"
-  [ "$PUSHED" = no ] || sleep 15             # let GitHub register the new push
-  ci_run "$VERSION CI 1/3" "hotfix/$VERSION" pull_request "$(git rev-parse HEAD)" \
-    "merge result of hotfix/$VERSION and main, Python $PYTHONS" \
-    "required check: branch protection allows the merge into main only when green" "$pr"
-
-  step "$VERSION: 5 merge into main"
-  gh pr merge "$pr" --merge --delete-branch
-  git switch main
-  git pull --ff-only
-  grep -qx "__version__ = \"$VERSION\"" src/mediatools/__init__.py
-
-  step "$VERSION: 6 tag v$VERSION"
-  git tag -a "v$VERSION" -m "mediatools $VERSION"
-  git push origin "v$VERSION"                # tag push: the hook skips the gates
-  ci_run "$VERSION CI 2/3" "v$VERSION" push "$(git rev-parse HEAD)" \
-    "release-check only: tag on main, tag = version (the gates ran on CI 1)" \
-    "release gate: the back-merge into develop starts only after it is green"
-
-  step "$VERSION: 7 back-merge into develop (helper branch)"
-  git switch -C "merge/hotfix-$VERSION"
-  git fetch origin
-  git merge --no-ff origin/develop -m "Merge develop into merge/hotfix-$VERSION"
-  push_or_resume "merge/hotfix-$VERSION"
-  pr=$(gh_read pr list --head "merge/hotfix-$VERSION" --base develop --state open --json url \
-         --jq '.[0].url // empty')
-  [ -n "$pr" ] || pr=$(gh pr create --base develop --title "Merge hotfix $VERSION into develop" --fill)
-  echo "PR: $pr"
-  ci_run "$VERSION CI 3/3" "merge/hotfix-$VERSION" pull_request "$(git rev-parse HEAD)" \
-    "merge result of the release and develop, Python $PYTHONS" \
-    "required check: branch protection allows the merge into develop only when green" "$pr"
-  gh pr merge "$pr" --merge --delete-branch
-  git switch develop
-  git pull --ff-only
-  rm -rf "$dir"
-}
-
 APPLIED=()
-if [ -n "$TARGET" ]; then
-  step "preconditions"
-  # shellcheck disable=SC1091
-  source "$VENV/bin/activate"
+if [ ${#FOUND[@]} -gt 0 ]; then
+  [ "$CLONE" -eq 1 ] || { echo "patch archives need the clone ($REPO, or --repo DIR)"; exit 1; }
   cd "$REPO"
   git am --abort 2>/dev/null || true         # leftover of an interrupted earlier run
-  # Python versions of the CI matrix, for the announcements
-  PYTHONS=$(sed -n 's/^ *python: *\[\(.*\)\]/\1/p' .github/workflows/tests.yml 2>/dev/null \
-            | tr -d '" ' | tr , / || true)
-  [ -n "$PYTHONS" ] || PYTHONS="of the CI matrix"
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "uncommitted changes in $REPO"; exit 1
-  fi
-  for i in "${!PENDING[@]}"; do
-    apply_one "${PENDING[$i]}" "${USE[$i]}"
-    APPLIED+=("$i")
-    [ "${PENDING[$i]}" = "$TARGET" ] && break
-  done
-
-  step "install the release"
-  deactivate
-  hash -r
-  "$REPO/install.sh"
-  installed=$("$HOME/scripts/mediatools" --version)
-  echo "$installed"
-  [ "$installed" = "mediatools $TARGET" ]
-  # a shrink running in the background switches to the new release after its
-  # current file (prints "nothing to reload" if none runs)
-  "$HOME/scripts/mediatools" reload || true
-  "$HOME/scripts/mediatools" status || true  # which release runs, and whether it switches
+  [ -z "$(git status --porcelain)" ] || { echo "uncommitted changes in $REPO"; exit 1; }
 fi
+for line in "${FOUND[@]}"; do
+  IFS=$'\t' read -r kind name path <<< "$line"
+  dir=$(mktemp -d /tmp/mediatools-patch.XXXXXX)
+  step "2 $(basename "$path")"
+  tar -xzf "$path" -C "$dir"
+  infofile="$(find "$dir" -name patch.info | head -n 1)"
+  [ -n "$infofile" ] || { echo "no patch.info in $path"; exit 1; }
+  branch="$(info "$infofile" branch)"; base="$(info "$infofile" base)"
+  release="$(info "$infofile" release)"; message="$(info "$infofile" message)"
+  [ "$branch" = "$kind/$name" ] || { echo "patch.info names $branch, the archive $kind/$name"; exit 1; }
+  case "$release" in patch|minor|major|none) ;; *) echo "release=$release?"; exit 1 ;; esac
+  echo "branch $branch from $base, release: $release - $message"
+  if [ "$YES" -eq 0 ]; then
+    if [ "$release" = none ]; then question="in $base mergen (ohne Release)"; else
+      question="einspielen und als $release veroeffentlichen"; fi
+    read -r -p "$branch $question? [j/N] " answer || answer=""
+    [[ "$answer" =~ ^[jJyY]$ ]] || { echo "skipped: $branch"; rm -rf "$dir"; continue; }
+  fi
+
+  git fetch --quiet --tags origin
+  git switch --quiet "$base"
+  git merge --quiet --ff-only "origin/$base"
+  want="$(info "$infofile" base_tree)"
+  if [ -n "$want" ]; then
+    [ "$(git rev-parse "$base^{tree}")" = "$want" ] \
+      || { echo "STOPP: $base differs from the base of the patch (tree $want)"; exit 1; }
+  fi
+  while read -r bpath before _after; do
+    [ "$(git rev-parse "$base:$bpath")" = "$before" ] \
+      || { echo "STOPP: $bpath on $base differs from the base of the patch"; exit 1; }
+  done < <(sed -n 's/^blob=//p' "$infofile")
+  if git rev-parse --quiet --verify "refs/heads/$branch" >/dev/null; then
+    echo "STOPP: branch $branch exists already - delete it: git branch -D $branch"; exit 1
+  fi
+  git switch --quiet -c "$branch" "$base"
+  if ! git am --quiet "$(dirname "$infofile")"/*.patch; then
+    git am --abort 2>/dev/null || true
+    git switch --quiet "$base"
+    git branch --quiet -D "$branch"
+    echo "STOPP: the patches do not apply onto $base; nothing changed"; exit 1
+  fi
+  want="$(info "$infofile" tree)"
+  if [ -n "$want" ]; then
+    [ "$(git rev-parse "HEAD^{tree}")" = "$want" ] \
+      || { echo "STOPP: result differs from the patch (tree $want) - check $branch"; exit 1; }
+  fi
+  while read -r bpath _before after; do
+    [ "$(git rev-parse "HEAD:$bpath")" = "$after" ] \
+      || { echo "STOPP: $bpath after the patch differs - check $branch"; exit 1; }
+  done < <(sed -n 's/^blob=//p' "$infofile")
+  git log --oneline "$base..HEAD"
+
+  if [ "$release" = none ]; then
+    tools/release.sh --merge-only --yes
+  else
+    tools/release.sh "$release" -m "$message" --yes
+  fi
+  mkdir -p "$ARCHIVE"
+  mv -v -- "$path" "$ARCHIVE/$(basename "$path" | sed 's/ ([0-9]*)//')"
+  APPLIED+=("$branch")
+  rm -rf "$dir"
+  if [ "$release" != none ]; then
+    [ "${line}" = "${FOUND[-1]}" ] || echo "further archives: run 'mediatools update' again"
+    break
+  fi
+done
 
 # -- tidy the download folder --------------------------------------------------------
-step "archive used patches, remove stale downloads"
-mkdir -p "$ARCHIVE"
-for i in "${APPLIED[@]}"; do
-  mv -v -- "${USE[$i]}" "$ARCHIVE/mediatools-hotfix-${PENDING[$i]}-patch.tar.gz"
-done
-for path in "${STALE[@]}"; do
-  rm -v -- "$path"
-done
+if [ ${#STALE[@]} -gt 0 ]; then
+  step "remove stale downloads"
+  for path in "${STALE[@]}"; do rm -v -- "$path"; done
+fi
 # per-version apply scripts of earlier releases and downloaded copies of this one
 find "$DL" -maxdepth 1 -type f \( -name 'apply-mediatools-*.sh' -o -name 'apply-release*.sh' \) \
   ! -samefile "$APPLY_RELEASE_ORIGIN" -print0 | xargs -0 -r rm -v --
-if [ "$(dirname "$APPLY_RELEASE_ORIGIN")" = "$(readlink -f "$DL")" ] \
-   && [ -f "$REPO/src/mediatools/update/apply-release.sh" ]; then
-  rm -v -- "$APPLY_RELEASE_ORIGIN"           # the clone has its own copy now
-fi
 
 step "done"
-ci_summary
-if [ ${#APPLIED[@]} -gt 0 ]; then
-  echo "applied: $(for i in "${APPLIED[@]}"; do printf '%s ' "${PENDING[$i]}"; done)- installed $TARGET"
-else
-  echo "nothing applied"
-fi
+if [ ${#APPLIED[@]} -gt 0 ]; then echo "applied: ${APPLIED[*]}"; else echo "no patch applied"; fi
 echo "log: $LOG"
