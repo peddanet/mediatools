@@ -5,6 +5,28 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-21
+
+### Added
+- `mediatools queue`: shrink jobs that run one after the other. `--add
+  "FOLDER OPTIONS"` (checked with the parser of `shrink`, folder stored as
+  an absolute path), `--first`, `--note`, `--remove N`, `--move N --to M`,
+  `--clear`, `--run`; without options the list. A shrink job that ends
+  normally (exit code 0 or 2, not declined) starts the next queued job in
+  the same background process; `mediatools stop` pauses the queue.
+  `mediatools status` names the number of waiting jobs.
+- `estimate --suggest N`: proposes up to N concrete shrink jobs (level and
+  `--min-seconds`), the most space per hour first, each with files, GiB
+  freed, time and running totals (greedy: every job finds the earlier ones
+  done). `--queue` puts them into the queue in that order, with CRF,
+  preset, parallel jobs and threads of the most recently active job.
+
+### Fixed
+- The remainder of a remembered job is now also reduced when *another*
+  job shrinks one of its videos, e.g. a job on the parent folder shrinking
+  the rest of a sub-folder job; before, only the running job's remainder
+  shrank and the sub-folder job kept the figure of its last plan.
+
 ## [1.12.0] - 2026-11-20
 
 ### Fixed
