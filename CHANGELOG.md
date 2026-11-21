@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-11-21
+
 ### Changed
 - `mediatools update`: archives no longer needed are shown as `released`
   (version already released) or `old copy` (older copy of the same
