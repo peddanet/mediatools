@@ -121,11 +121,13 @@ from the working files of a clone, so `mediatools --version` always shows
 the installed release:
 
 ~~~bash
-curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
+cd ~/Downloads && curl -fsSLO https://raw.githubusercontent.com/peddanet/mediatools/main/install.sh
 bash install.sh
-mediatools --version
+~/.local/bin/mediatools --version
 ~~~
 
+* `cd ~/Downloads` -- downloads go there, never loose into the home
+  folder.
 * `curl -fsSLO URL` -- download the installer into the current directory
   (`-f` fail on HTTP errors, `-sS` quiet but show errors, `-L` follow
   redirects, `-O` keep the remote file name). A clone contains the same
@@ -133,20 +135,40 @@ mediatools --version
   from GitHub, not from the clone.
 * `bash install.sh` -- reads the release tags with `git ls-remote`, picks
   the newest `vX.Y.Z` (or the tag given as argument), installs it with pip
-  into `~/scripts/mediatools.d/venv`, checks that the program reports the
-  tag's version and links `~/scripts/mediatools` to it. It replaces only a
-  link it created itself or the launcher of version 1.1.0 and refuses any
-  other file.
+  into `~/.local/share/mediatools/venv`, checks that the program reports
+  the tag's version and links `~/.local/bin/mediatools` to it. It replaces
+  only a link it created itself or the launcher of version 1.1.0 and
+  refuses any other file.
 * `bash install.sh --list` -- list the releases; `bash install.sh v1.2.0`
   -- install a given release, also an older one.
-* `BIN_DIR=~/.local/bin bash install.sh` -- link the command elsewhere.
+* `BIN_DIR=<folder> bash install.sh` -- link the command elsewhere.
+
+**From the layout before 1.14.0** (`~/scripts/mediatools.d/venv` and the
+link `~/scripts/mediatools`) the installer moves on by itself, touching
+only what an earlier `install.sh` created:
+
+* the old venv is removed - unless a running process still uses it (a
+  shrink started from it); then it stays, and the next run removes it,
+* the old link first points to the new release, so the command keeps
+  working until `~/.local/bin` is in `PATH` (Ubuntu adds it at login if
+  the folder exists then, so a first installation needs one logout and
+  login); a later run removes the old link once `~/.local/bin` is in
+  `PATH`,
+* the systemd user unit of the snapshot trigger is rewritten to the new
+  link and the user units are reloaded.
+
+A shrink that runs from the old venv keeps running, but cannot switch to
+the new release with `mediatools reload` (it would restart its old
+interpreter): stop it once after its current file and start it again.
 
 Everything runs as normal user; the installer writes only below
-`~/scripts/mediatools.d` (or `$MEDIATOOLS_HOME`) and `BIN_DIR`. It needs
-`git` and the venv module (`sudo apt install git python3-venv`).
+`~/.local/share/mediatools` (or `$MEDIATOOLS_HOME`), `BIN_DIR`, the old
+folder `~/scripts` and `~/.config/systemd/user`. It needs `git` and the
+venv module (`sudo apt install git python3-venv`).
 
-Update: run `bash install.sh` again. Remove:
-`rm -rf ~/scripts/mediatools.d/venv ~/scripts/mediatools`.
+Update: `mediatools update` (step 1 installs the newest release; see
+"Updating") or run `bash install.sh` again. Remove:
+`rm -rf ~/.local/share/mediatools/venv ~/.local/bin/mediatools`.
 
 ## Option B: pipx
 
@@ -165,10 +187,28 @@ pipx install git+https://github.com/peddanet/mediatools.git@v1.2.0
 Ubuntu 24.04 and later block `pip install --user` for the system Python
 (PEP 668); both options use a virtual environment instead.
 
-## Development checkout
+## Updating
 
-Code imported from a clone (development venv with `pip install -e`) is
-marked by `--version`:
+~~~bash
+mediatools update --list         # only show: installed and newest release, patch archives
+mediatools update                # install a newer release, then the patch archives
+~~~
+
+Both run as normal user. **Step 1** (everyone) compares the installed
+release with the newest tag on GitHub (`git ls-remote`, no clone needed)
+and installs a newer one - with `./install.sh` of the clone if there is one
+(`~/Projects/mediatools` or `--repo DIR`), otherwise with pip into the
+venv of the running program - and then sends `mediatools reload`, so a
+running shrink switches after its current file. **Step 2** (developers)
+looks for patch archives `mediatools-feature-<name>.tar.gz` or
+`mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`),
+asks once per archive and releases it with `tools/release.sh` of the
+clone; users never have such archives. `-y` answers the questions with
+yes. Details: `docs/developer.md`, "Applying delivered patch archives".
+
+
+Code imported from a clone (development venv `.venv` with
+`pip install -e`) is marked by `--version`:
 
 ~~~text
 mediatools 1.2.0 (source checkout /home/USER/Projects/mediatools, not an installed release)
@@ -181,15 +221,18 @@ The installed release is not affected by anything in the clone.
 Since 1.5.0 mediatools follows the XDG Base Directory Specification
 (freedesktop.org): configuration, runtime state and kept data each have
 their own base folder, and below it a folder named `mediatools`. Absolute
-values of `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` replace
-the defaults.
+values of `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` and
+`XDG_CACHE_HOME` replace the defaults.
 
 | Kind | Default folder | Content |
 |---|---|---|
 | configuration | `~/.config/mediatools` | `mediatools.ini`, `privacy/denylist.txt`, `privacy/allowlist.txt` |
 | runtime state | `~/.local/state/mediatools` | `logs/`, `state/`, `reports/`, `snapshot/` |
-| kept data | `~/.local/share/mediatools` | `plans/` (flatten undo), `releases/` (applied archives) |
-| installed release | `~/scripts/mediatools.d/venv` | the program itself (`install.sh`) |
+| kept data | `~/.local/share/mediatools` | `plans/` (flatten undo), `releases/` (applied patch archives), `venv/` (installed release, `install.sh`) |
+| caches | `~/.cache/mediatools` | probed durations and codecs (`triage_durations.tsv`, `shrink_codecs.tsv`); may be deleted, they are rebuilt |
+
+The caches lay in `state/` before 1.14.0; the first use moves an old file
+into the cache folder (one message), and never overwrites an existing one.
 
 `mediatools where` prints every place with its full path, the layout in
 use and the size of the privacy lists, so no folder has to be remembered.
@@ -493,11 +536,6 @@ The chosen job's arguments are used as if typed; a later `reload`
 continues the same job. With any argument, or without a terminal, the
 list is skipped.
 
-After an interrupted `mediatools update` (power, network), simply run it
-again: a branch the interrupted run had already pushed with exactly the
-same content on the same base is taken over, so the gates and the CI run
-are not repeated; anything else is rebuilt as before.
-
 In the GUI (since 1.13.1) the shrink tab shows the **queue** in the order
 of processing - the running job first, then the waiting jobs, each with
 folder, options and progress. Next to it:
@@ -505,6 +543,7 @@ folder, options and progress. Next to it:
 | Button | Effect |
 |---|---|
 | *Continue* | starts the selected waiting job (or the first) now, when no shrink runs |
+| *Stop, then next* | the running job stops after its current file, then the selected waiting job (or the first) starts (since 1.14.0) |
 | *Add* | opens the job dialog for a new job |
 | *Change* (or a double click) | opens the job dialog with the selected waiting job |
 | *Remove* | takes the selected waiting jobs off the queue (asks first) |
@@ -564,10 +603,10 @@ Before anything is encoded, the whole tree is walked once:
    `--retry-failed` includes these videos again; a successful retry
    deletes the failure row.
 3. With `--min-seconds`, the durations of the remaining videos are read
-   (cached in `state/triage_durations.tsv`, shared with `triage`) and short
+   (cached in `~/.cache/mediatools/triage_durations.tsv`, shared with `triage`) and short
    ones are left out.
 4. The codec of every remaining video is read (cached in
-   `state/shrink_codecs.tsv`); videos that are already HEVC are set aside.
+   `~/.cache/mediatools/shrink_codecs.tsv`); videos that are already HEVC are set aside.
    They are recorded after the start question without encoding and are not
    counted in volume, time estimate and progress.
 
@@ -1193,7 +1232,7 @@ mediatools triage ~/Pictures/collection --min-seconds 10 --max-seconds 30
 
 1. **Count first.** `CandidateFinder` collects all clips within the
    duration range that are not on the kept list; empty placeholders are
-   skipped. Durations come from `state/triage_durations.tsv` when size and
+   skipped. Durations come from `~/.cache/mediatools/triage_durations.tsv` when size and
    modification time are unchanged, otherwise from ffprobe. The session then
    reports, for example (numbers illustrative):
 
@@ -1800,11 +1839,11 @@ of its own: every action is a command of the command line, run as a child
 process, or a request file that the command line uses as well (stop,
 reload). Command line and window therefore always behave the same.
 
-![The shrink tab: state of the run, progress and space; the queue in the order of processing with Continue, Add, Change, Remove, Up, Down; log end; output pane - each part resizable](img/gui_shrink.png){width=100%}
+![The shrink tab: state of the run, progress and space; the queue in the order of processing with Continue, Stop then next, Add, Change, Remove, Up, Down; log end; output pane - each part resizable](img/gui_shrink.png){width=100%}
 
 | Tab | Content |
 |---|---|
-| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*; the queue in the order of processing (running job first) with *Continue*, *Add*, *Change*, *Remove*, *Up*, *Down*; log end; output pane - every part resizable. *Add*/*Change* open the job dialog: all jobs so far and the shrink form |
+| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*; the queue in the order of processing (running job first) with *Continue*, *Stop, then next*, *Add*, *Change*, *Remove*, *Up*, *Down*; log end; output pane - every part resizable. *Add*/*Change* open the job dialog: all jobs so far and the shrink form |
 | savings | freed space per session or per day, newest first, and the total |
 | update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
 | config | editor of `mediatools.ini` (checked before saving) and the effective values |
@@ -1897,7 +1936,7 @@ mediatools gui --remove-desktop
 
 The entry is `~/.local/share/applications/mediatools.desktop`, the place
 where desktops following the freedesktop.org Desktop Entry Specification
-look for user applications; it starts `~/scripts/mediatools gui`. The icon
+look for user applications; it starts `~/.local/bin/mediatools gui`. The icon
 is copied to `~/.local/share/icons/hicolor/scalable/apps/mediatools.svg`
 and `.../256x256/apps/mediatools.png` (Icon Theme Specification).
 `StartupWMClass=Mediatools` is the window class of the GUI, so the dock or
@@ -1937,14 +1976,15 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
-| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newest copy per version, pending/stale, tidying of the download folder |
-| `test_release_1213.py` | `apply-release.sh`: announcement of each CI run, summary table, failed run recorded; workflow triggers and Python matrix |
+| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, stale, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
+| `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
+| `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
+| `test_release_1213.py` | workflow triggers and Python matrix |
 | `test_release_1215.py` | `mediatools status`: advice per version pair, last version line counts, pending reload/stop, missing log, source checkout, exit codes |
-| `test_release_1214.py` | `apply-release.sh`: reading GitHub calls retried and given up after five attempts, interrupted watch resumed, red run not retried |
 | `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
-gates (`tools/check.sh`: format, lint, types, security, tests) on Python
+gates (`tools/check.sh`: privacy, shell, format, lint, types, security, tests) on Python
 3.12 and 3.14 for pull requests into `main` and `develop`; a release tag
 only gets the tag check (`release-check`). Which run checks what is shown in
 `docs/developer.md`, section "CI runs"; the background is in

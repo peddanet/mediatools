@@ -51,10 +51,10 @@ class DesktopEntry:
         """Return the program an entry should start.
 
         Returns:
-            ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+            ``~/.local/bin/mediatools`` (link of install.sh) if it exists, else ``mediatools`` from
             the search path, else this interpreter's script.
         """
-        link = os.path.expanduser("~/scripts/mediatools")
+        link = os.path.expanduser("~/.local/bin/mediatools")
         if os.path.exists(link):
             return link
         return shutil.which("mediatools") or os.path.abspath(sys.argv[0])

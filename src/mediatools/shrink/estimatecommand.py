@@ -208,13 +208,13 @@ class EstimateCommand:
         """
         log = self.runlog.logger
         levels = self.levels(getattr(args, "up", 0) or 0, getattr(args, "up_to", None))
-        state = DataDir().sub("state")
+        data = DataDir()
         opts = ShrinkOptions(keep_copies=True, extensions=MediaTypes.parse_extensions(args.ext),
                              db_name=self.db_name, probe_jobs=max(1, args.probe_jobs),
                              probe_durations=True)
         shrinker = Shrinker(levels[-1], log, opts, probe=MediaProbe(),
-                            durations=DurationCache(os.path.join(state, "triage_durations.tsv")),
-                            codecs=CodecCache(os.path.join(state, "shrink_codecs.tsv")))
+                            durations=DurationCache(data.cache_file("triage_durations.tsv")),
+                            codecs=CodecCache(data.cache_file("shrink_codecs.tsv")))
         log.info("estimate for L1%s (nothing is changed; the paths are in the report)",
                  f" and {len(levels) - 1} level(s) above" if len(levels) > 1 else "")
         started = time.monotonic()
@@ -278,8 +278,8 @@ class EstimateCommand:
             levels: Folders of the levels, innermost first.
             extensions: Extensions of the estimate.
         """
-        state = DataDir().sub("state")
-        known = JobRegistry(os.path.join(state, "jobs.json"), None, DataDir().sub("logs"))
+        data = DataDir()
+        known = JobRegistry(os.path.join(data.sub("state"), "jobs.json"), None, data.sub("logs"))
         recent = known.entries()
         settings = {key: value for key, value in (recent[0].settings if recent else {}).items()
                     if key in ("crf", "preset", "jobs", "threads")}

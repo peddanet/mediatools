@@ -216,7 +216,7 @@ class MediaToolsApp:
         """Return the program the application menu entry starts.
 
         Returns:
-            ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+            ``~/.local/bin/mediatools`` (link of install.sh) if it exists, else ``mediatools`` from
             the search path, else this interpreter's script.
         """
         return DesktopEntry.default_program()

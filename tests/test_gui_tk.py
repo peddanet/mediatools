@@ -383,9 +383,9 @@ def test_app_tabs_undo_about_and_close(root: tk.Tk, tmp_path: Path,
     assert shown[-2:] == ["removed", "there was no entry"]
     assert app.program_path() == os.path.abspath(sys.argv[0]) or "mediatools" in \
         app.program_path()
-    (tmp_path / "home" / "scripts").mkdir(parents=True)
-    (tmp_path / "home" / "scripts" / "mediatools").write_text("", encoding="utf-8")
-    assert app.program_path() == str(tmp_path / "home" / "scripts" / "mediatools")
+    (tmp_path / "home" / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / "home" / ".local" / "bin" / "mediatools").write_text("", encoding="utf-8")
+    assert app.program_path() == str(tmp_path / "home" / ".local" / "bin" / "mediatools")
     del app.forms["flatten"]
     app.undo_plan("/x")                           # no flatten form: nothing happens
     console = app.consoles[0]

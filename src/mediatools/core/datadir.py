@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 from datetime import datetime
 
 
@@ -15,11 +17,14 @@ class DataDir:
         ~/.local/state/mediatools/   runtime state: logs/, state/, reports/,
                                      snapshot/
         ~/.local/share/mediatools/   kept data: plans/ (flatten undo),
-                                     releases/ (applied release archives)
+                                     releases/ (applied release archives),
+                                     venv/ (installed release, install.sh)
+        ~/.cache/mediatools/         re-creatable caches: probed durations
+                                     and codecs (since 1.14.0)
 
-    ``$XDG_CONFIG_HOME``, ``$XDG_STATE_HOME`` and ``$XDG_DATA_HOME`` replace
-    the defaults when they hold an absolute path. The installed release
-    (``venv``) is not data; it stays below ``~/scripts/mediatools.d``.
+    ``$XDG_CONFIG_HOME``, ``$XDG_STATE_HOME``, ``$XDG_DATA_HOME`` and
+    ``$XDG_CACHE_HOME`` replace the defaults when they hold an absolute
+    path.
 
     Two cases keep everything in one folder with the old file names:
 
@@ -35,6 +40,8 @@ class DataDir:
         config_dir: Folder of the configuration.
         state_dir: Folder of logs and runtime state.
         data_dir: Folder of kept data.
+        cache_dir: Folder of re-creatable caches (the state folder's
+            ``state`` subfolder outside the XDG layout).
         root: Main folder: the state folder (``xdg``) or the single folder.
     """
 
@@ -48,7 +55,8 @@ class DataDir:
                     "privacy_denylist.txt", "privacy_allowlist.txt")
     XDG = {"config": ("XDG_CONFIG_HOME", "~/.config"),
            "state": ("XDG_STATE_HOME", "~/.local/state"),
-           "data": ("XDG_DATA_HOME", "~/.local/share")}
+           "data": ("XDG_DATA_HOME", "~/.local/share"),
+           "cache": ("XDG_CACHE_HOME", "~/.cache")}
 
     def __init__(self, root: str | None = None):
         """Resolve the folders.
@@ -67,10 +75,12 @@ class DataDir:
         if single:
             folder = os.path.abspath(os.path.expanduser(single))
             self.config_dir = self.state_dir = self.data_dir = folder
+            self.cache_dir = os.path.join(folder, "state")
         else:
             self.config_dir = self.xdg_dir("config")
             self.state_dir = self.xdg_dir("state")
             self.data_dir = self.xdg_dir("data")
+            self.cache_dir = self.xdg_dir("cache")
         self.root = self.state_dir
 
     @classmethod
@@ -101,7 +111,7 @@ class DataDir:
         """Return the application folder of one XDG base directory.
 
         Args:
-            kind: ``config``, ``state`` or ``data``.
+            kind: ``config``, ``state``, ``data`` or ``cache``.
 
         Returns:
             ``<base>/mediatools``; the variable counts only if absolute.
@@ -134,6 +144,32 @@ class DataDir:
         if self.mode == "xdg":
             return os.path.join(self.config_dir, "privacy", f"{kind}list.txt")
         return os.path.join(self.config_dir, f"privacy_{kind}list.txt")
+
+    def cache_file(self, name: str) -> str:
+        """Path of a cache file; moves an old copy there once.
+
+        Before 1.14.0 the caches lay in ``<state>/state``. If the file is
+        still there and not yet in the cache folder, it is moved (one
+        message on standard error); an existing cache file is never
+        overwritten - then the old copy stays and is reported.
+
+        Args:
+            name: File name, e.g. ``triage_durations.tsv``.
+
+        Returns:
+            ``<cache_dir>/<name>``; the folder exists.
+        """
+        os.makedirs(self.cache_dir, exist_ok=True)
+        path = os.path.join(self.cache_dir, name)
+        old = os.path.join(self.state_dir, "state", name)
+        if old != path and os.path.isfile(old):
+            if os.path.exists(path):
+                print(f"cache: old copy not moved (the cache has its own): {old}",
+                      file=sys.stderr)
+            else:
+                shutil.move(old, path)
+                print(f"cache moved: {old}\n    -> {path}", file=sys.stderr)
+        return path
 
     def sub(self, name: str) -> str:
         """Return a subfolder, creating it if needed.

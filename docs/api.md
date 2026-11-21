@@ -881,11 +881,14 @@ Three places, each with a folder named after the application::
     ~/.local/state/mediatools/   runtime state: logs/, state/, reports/,
                                  snapshot/
     ~/.local/share/mediatools/   kept data: plans/ (flatten undo),
-                                 releases/ (applied release archives)
+                                 releases/ (applied release archives),
+                                 venv/ (installed release, install.sh)
+    ~/.cache/mediatools/         re-creatable caches: probed durations
+                                 and codecs (since 1.14.0)
 
-``$XDG_CONFIG_HOME``, ``$XDG_STATE_HOME`` and ``$XDG_DATA_HOME`` replace
-the defaults when they hold an absolute path. The installed release
-(``venv``) is not data; it stays below ``~/scripts/mediatools.d``.
+``$XDG_CONFIG_HOME``, ``$XDG_STATE_HOME``, ``$XDG_DATA_HOME`` and
+``$XDG_CACHE_HOME`` replace the defaults when they hold an absolute
+path.
 
 Two cases keep everything in one folder with the old file names:
 
@@ -901,6 +904,8 @@ Attributes:
     config_dir: Folder of the configuration.
     state_dir: Folder of logs and runtime state.
     data_dir: Folder of kept data.
+    cache_dir: Folder of re-creatable caches (the state folder's
+        ``state`` subfolder outside the XDG layout).
     root: Main folder: the state folder (``xdg``) or the single folder.
 ~~~
 
@@ -948,7 +953,7 @@ xdg_dir(cls, kind: str) -> str
 Return the application folder of one XDG base directory.
 
 Args:
-    kind: ``config``, ``state`` or ``data``.
+    kind: ``config``, ``state``, ``data`` or ``cache``.
 
 Returns:
     ``<base>/mediatools``; the variable counts only if absolute.
@@ -978,6 +983,25 @@ Args:
 Returns:
     ``<config_dir>/privacy/<kind>list.txt``, or the old name
     ``privacy_<kind>list.txt`` in the single folder.
+~~~
+
+**`cache_file`**
+
+~~~text
+cache_file(self, name: str) -> str
+
+Path of a cache file; moves an old copy there once.
+
+Before 1.14.0 the caches lay in ``<state>/state``. If the file is
+still there and not yet in the cache folder, it is moved (one
+message on standard error); an existing cache file is never
+overwritten - then the old copy stays and is reported.
+
+Args:
+    name: File name, e.g. ``triage_durations.tsv``.
+
+Returns:
+    ``<cache_dir>/<name>``; the folder exists.
 ~~~
 
 **`sub`**
@@ -2463,7 +2487,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.13.1') -> None
+__init__(self, control: RunControl, installed: str = '1.14.0') -> None
 
 Remember the job and the installed release.
 
@@ -2750,7 +2774,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.13.1')
+__init__(self, package_dir: str | None = None, version: str = '1.14.0')
 
 Locate the imported package.
 
@@ -6976,18 +7000,50 @@ Returns:
     was queued, so ``-y``.
 ~~~
 
+**`next_file`**
+
+~~~text
+next_file(self) -> str
+
+Marker: continue with the next job after the coming stop.
+
+Returns:
+    ``<queue file>.next``.
+~~~
+
+**`next_after_stop`**
+
+~~~text
+next_after_stop(self, wanted: bool = True) -> None
+
+Ask for (or withdraw) the start of the next job after a user's stop.
+
+Args:
+    wanted: True to set the marker, False to remove it.
+~~~
+
 **`continue_after`**
 
 ~~~text
-continue_after(self, code: int, declined: bool, run: RunLog) -> int
+continue_after(
+    self,
+    code: int,
+    declined: bool,
+    run: RunLog,
+    stopped: bool = False,
+) -> int
 
 Start the next queued job in this process, if the last one ended normally.
+
+A stop by the user ends the queue - unless *Stop, then next* asked
+for the next job (:meth:`next_after_stop`); the marker is used once.
 
 Args:
     code: Exit code of the job that ended.
     declined: True if the user declined to start it.
     run: :class:`RunLog` of the job that ended (closed before the
         switch).
+    stopped: True if the job ended because the user stopped it.
 
 Returns:
     ``code`` if nothing follows; 1 only if the next job could not be
@@ -12162,13 +12218,15 @@ Returns:
 ### `ReleaseUpdater` (`mediatools.update.updater`) {.unnumbered}
 
 ~~~text
-Apply delivered patch archives with the bundled ``apply-release.sh``.
+Run ``mediatools update`` with the bundled ``apply-release.sh``.
 
 The shell script is shipped inside the package, so every installed
-release carries it. It finds the patch archives in the download folder,
-asks up to which version to apply, runs the git-flow hotfix steps in the
-clone, installs the result and tidies the download folder (see the
-script header and the developer documentation).
+release carries it. Step 1 installs a newer release from the repository
+(for everyone); step 2 applies patch archives from the download folder
+and releases them with ``tools/release.sh`` of the clone (see the script
+header and the developer documentation). The script learns the venv
+and version of the running program from ``MEDIATOOLS_VENV`` and
+``MEDIATOOLS_VERSION``.
 
 Example:
     >>> ReleaseUpdater(["--list"]).run()
@@ -12353,7 +12411,7 @@ program_path() -> str
 Return the program the application menu entry starts.
 
 Returns:
-    ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+    ``~/.local/bin/mediatools`` (link of install.sh) if it exists, else ``mediatools`` from
     the search path, else this interpreter's script.
 ~~~
 
@@ -13537,7 +13595,7 @@ default_program() -> str
 Return the program an entry should start.
 
 Returns:
-    ``~/scripts/mediatools`` if it exists, else ``mediatools`` from
+    ``~/.local/bin/mediatools`` (link of install.sh) if it exists, else ``mediatools`` from
     the search path, else this interpreter's script.
 ~~~
 
@@ -14390,7 +14448,9 @@ and filters), the figures in GiB, the settings and the folder with its
 filters.
 
 Buttons: *Continue* starts the selected waiting job now (it becomes
-the first one) when no shrink runs; *Add* opens the job dialog for a
+the first one) when no shrink runs; *Stop, then next* asks a running
+shrink to stop after its current file and then start the selected
+waiting job (or the first); *Add* opens the job dialog for a
 new job; *Change* opens it with the selected waiting job; *Remove*
 takes the selected waiting jobs off the queue (after a question);
 *Up* and *Down* change the order.
@@ -14507,6 +14567,17 @@ start(self) -> bool
 
 Returns:
     True if ``mediatools queue --run`` was started.
+~~~
+
+**`stop_then_next`**
+
+~~~text
+stop_then_next(self) -> bool
+
+*Stop, then next*: stop the running job, then start the selected one.
+
+Returns:
+    True if the stop was requested.
 ~~~
 
 **`add`**
@@ -14815,7 +14886,7 @@ Raises:
 ~~~text
 stop(self) -> None
 
-Request a stop after the current file.
+Request a stop after the current file (the queue does not go on).
 ~~~
 
 **`reload`**
