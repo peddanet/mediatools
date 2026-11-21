@@ -19,8 +19,10 @@
 #   the checks, merges, tags, merges back, installs and reloads. Archives
 #   with release=none are applied one after the other; the run ends after
 #   the first archive that releases (the next one is built on its result).
-#   Used archives move to the releases folder; old versioned archives
-#   "mediatools-hotfix-X.Y.Z-patch.tar.gz" of released versions are removed.
+#   Used archives move to the releases folder. Removed at the end, and shown
+#   as such: "released" - old versioned archives
+#   "mediatools-hotfix-X.Y.Z-patch.tar.gz" of versions already released;
+#   "old copy" - older copies of the same archive name.
 #
 # Usage (normal user; git and gh act on your clone and with your GitHub
 # login, nothing here needs root). The script ships inside the package:
@@ -139,17 +141,23 @@ scan() {
     | sort -t$'\t' -k3,3n | cut -f1,2,4
 }
 
-# old copies of each archive name and old versioned archives: one path per line
-stale() {
+# archives no longer needed, one line "reason<TAB>path": "released" for a
+# versioned archive of a version already released, "old copy" for an older
+# copy of the same archive name (browser copy "... (1).tar.gz")
+leftovers() {
   local released="$1"
   find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
     | sort -t$'\t' -k1,1nr | while IFS=$'\t' read -r _mtime path; do
         local base; base="$(basename "$path")"
         if [[ "$base" =~ $OLD_RE ]]; then
-          version_lt "$released" "${BASH_REMATCH[1]}" || echo "$path"
+          version_lt "$released" "${BASH_REMATCH[1]}" || printf 'released\t%s\n' "$path"
         elif [[ "$base" =~ $NAME_RE ]]; then
           key="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
-          if [[ " ${SEEN:-} " == *" $key "* ]]; then echo "$path"; else SEEN="${SEEN:-} $key"; fi
+          if [[ " ${SEEN:-} " == *" $key "* ]]; then
+            printf 'old copy\t%s\n' "$path"
+          else
+            SEEN="${SEEN:-} $key"
+          fi
         fi
       done
 }
@@ -195,15 +203,16 @@ fi
 
 # -- step 2: patch archives -----------------------------------------------------
 mapfile -t FOUND < <(scan)
-mapfile -t STALE < <(stale "$INSTALLED")
+mapfile -t LEFTOVER < <(leftovers "$INSTALLED")
 echo "download folder:   $DL"
 [ ${#FOUND[@]} -gt 0 ] || echo "patch archives:    none"
 for line in "${FOUND[@]}"; do
   IFS=$'\t' read -r kind name path <<< "$line"
   printf '  pending  %-8s %-28s %s\n' "$kind" "$name" "$(basename "$path")"
 done
-for path in "${STALE[@]}"; do
-  printf '  stale    %s\n' "$(basename "$path")"
+for line in "${LEFTOVER[@]}"; do
+  IFS=$'\t' read -r reason path <<< "$line"
+  printf '  %-8s %s (removed at the end)\n' "$reason" "$(basename "$path")"
 done
 for path in "$DL"/mediatools-hotfix-*-patch*.tar.gz; do
   if [ -f "$path" ] && [[ "$(basename "$path")" =~ $OLD_RE ]] \
@@ -289,9 +298,9 @@ for line in "${FOUND[@]}"; do
 done
 
 # -- tidy the download folder --------------------------------------------------------
-if [ ${#STALE[@]} -gt 0 ]; then
-  step "remove stale downloads"
-  for path in "${STALE[@]}"; do rm -v -- "$path"; done
+if [ ${#LEFTOVER[@]} -gt 0 ]; then
+  step "remove downloads no longer needed (released, old copies)"
+  for line in "${LEFTOVER[@]}"; do rm -v -- "${line#*$'\t'}"; done
 fi
 # per-version apply scripts of earlier releases and downloaded copies of this one
 find "$DL" -maxdepth 1 -type f \( -name 'apply-mediatools-*.sh' -o -name 'apply-release*.sh' \) \
