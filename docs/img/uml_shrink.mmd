@@ -428,7 +428,9 @@ classDiagram
     +lines()
     +summary()
     +command(args)
-    +continue_after(code, declined, run)
+    +next_file()
+    +next_after_stop(wanted)
+    +continue_after(code, declined, run, stopped)
   }
   class ShrinkState {
     +durations

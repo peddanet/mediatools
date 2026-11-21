@@ -1,19 +1,25 @@
 """Run the bundled release script for ``mediatools update``."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+from mediatools import __version__
 
 
 class ReleaseUpdater:
-    """Apply delivered patch archives with the bundled ``apply-release.sh``.
+    """Run ``mediatools update`` with the bundled ``apply-release.sh``.
 
     The shell script is shipped inside the package, so every installed
-    release carries it. It finds the patch archives in the download folder,
-    asks up to which version to apply, runs the git-flow hotfix steps in the
-    clone, installs the result and tidies the download folder (see the
-    script header and the developer documentation).
+    release carries it. Step 1 installs a newer release from the repository
+    (for everyone); step 2 applies patch archives from the download folder
+    and releases them with ``tools/release.sh`` of the clone (see the script
+    header and the developer documentation). The script learns the venv
+    and version of the running program from ``MEDIATOOLS_VENV`` and
+    ``MEDIATOOLS_VERSION``.
 
     Example:
         >>> ReleaseUpdater(["--list"]).run()
@@ -54,4 +60,5 @@ class ReleaseUpdater:
         Returns:
             Exit code of the script.
         """
-        return subprocess.run(self.command(), check=False).returncode
+        env = dict(os.environ, MEDIATOOLS_VENV=sys.prefix, MEDIATOOLS_VERSION=__version__)
+        return subprocess.run(self.command(), check=False, env=env).returncode

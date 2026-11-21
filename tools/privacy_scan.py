@@ -22,7 +22,8 @@ ignores case; a term must not be part of a longer word (``cat`` does not
 match ``concatenate``). Without any local term the scan is skipped, so the
 check is neutral in CI.
 
-Exit codes: 0 clean or skipped, 1 terms found, 2 usage error.
+Exit codes: 0 clean or skipped, 1 terms found, 2 usage error or an old
+configuration (lists in ``~/scripts/mediatools.d``) still present.
 """
 from __future__ import annotations
 
@@ -121,6 +122,23 @@ class PrivacyScan:
                         if entry]
         except FileNotFoundError:
             return []
+
+    @staticmethod
+    def old_lists() -> list[str]:
+        """Find privacy lists in the folder of releases before 1.5.0.
+
+        A gate must not pass silently because its input moved: while such a
+        list exists (outside ``$MEDIATOOLS_HOME`` setups), the scan refuses.
+
+        Returns:
+            Paths of old lists; empty if none or ``$MEDIATOOLS_HOME`` is set.
+        """
+        data = PrivacyScan.datadir()
+        if data.mode == "single":
+            return []
+        folder = data.legacy_dir()
+        return [path for path in (os.path.join(folder, f"privacy_{kind}list.txt")
+                                  for kind in ("deny", "allow")) if os.path.exists(path)]
 
     @staticmethod
     def local_terms() -> list[str]:
@@ -229,6 +247,13 @@ def main() -> int:
         Exit code.
     """
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    old = PrivacyScan.old_lists()
+    if old:
+        print("privacy scan refused: old configuration still present - "
+              "move it first with: mediatools where --migrate", file=sys.stderr)
+        for path in old:
+            print(f"  {path}", file=sys.stderr)
+        return 2
     return PrivacyScan(repo, PrivacyScan.local_terms(),
                        PrivacyScan.read_list("privacy_allowlist.txt")).run()
 

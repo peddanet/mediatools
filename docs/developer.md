@@ -56,13 +56,16 @@ mediatools/
   CONTRIBUTING.md           rules for contributions
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
-  install.sh                installs a release tag into a venv (~/scripts/mediatools)
+  install.sh                installs a release tag into a venv (~/.local/bin/mediatools)
   .github/workflows/        CI: tools/check.sh on Python 3.12 and 3.14
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
   src/mediatools/gui/       Tk window (mediatools gui)
   tests/                    pytest suite
-  tools/check.sh            quality gates
+  tools/check.sh            quality gates (activates the development venv itself)
+  tools/release.sh          integration and releases through pull requests (git-flow)
+  tools/same-code.sh        bit-identity check of branches and tags (tree hashes)
+  tools/after-install.sh    called by release.sh after install.sh: reload, status
   tools/gen_docs.py         UML class diagrams + API reference from the code
   docs/handbook.md          user handbook (+ PDF)
   docs/developer.md         this document (+ PDF)
@@ -169,7 +172,7 @@ directory, configuration -- lives in `core`.
 |---|---|
 | `MediaTypes` | extensions, `_flat` / `newShrinkedFiles` names, `SKIP_DIRS` |
 | `Config` | local INI file: collection root, database name, abbreviations, snapshot settings; error messages name key and expected format |
-| `DataDir` | folders: XDG layout (config, state, data; since 1.5.0), one folder from `$MEDIATOOLS_HOME`, or the old `~/scripts/mediatools.d` while it still holds data; `sub()` puts `plans`/`releases` into the data folder, the rest into the state folder |
+| `DataDir` | folders: XDG layout (config, state, data, cache; since 1.5.0, cache since 1.14.0), one folder from `$MEDIATOOLS_HOME`, or the old `~/scripts/mediatools.d` while it still holds data; `sub()` puts `plans`/`releases` into the data folder, the rest into the state folder; `cache_file()` returns a cache path and moves an old copy from `state/` once |
 | `DataMigration` | `mediatools where --migrate`: moves the old folder's data into the XDG folders; refuses while another mediatools process runs or a target exists; leaves `WHERE-IS-THE-DATA.txt` |
 | `PlacesReport` | `mediatools where`: every folder and file location with the layout in use |
 | `PrivacyLists` | `mediatools privacy`: paths and sizes of the deny/allow list, `--edit` in `$EDITOR`, creates them with modes 700/600 |
@@ -303,7 +306,7 @@ loops.
 
 | Class | Responsibility |
 |---|---|
-| `ReleaseUpdater` | `mediatools update`: runs the bundled `apply-release.sh` (see "Applying delivered patch archives") |
+| `ReleaseUpdater` | `mediatools update`: runs the bundled `apply-release.sh` with `MEDIATOOLS_VENV` and `MEDIATOOLS_VERSION` of the running program (see "Applying delivered patch archives") |
 
 ## Package `gui`
 
@@ -411,7 +414,9 @@ Invariants:
 <data>/plans/flatten_<ts>.tsv         FlatPlan         action unit link source level note
 <data>/state/triage_kept.tsv          KeptList         path TAB size TAB mtime
 <data>/state/triage_discarded.tsv     Triage           time TAB size TAB path
-<data>/state/triage_durations.tsv     DurationCache    path TAB size TAB mtime_ns TAB seconds
+<cache>/triage_durations.tsv          DurationCache    path TAB size TAB mtime_ns TAB seconds
+<cache>/shrink_codecs.tsv             CodecCache       path TAB size TAB mtime_ns TAB codec
+<state>/state/shrink_queue.json.next  ShrinkQueue      marker of "Stop, then next" (used once)
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <root>/_broken/manifest.jsonl         Quarantine       one JSON object per video: number, kind, names
                                                        [[original, quarantined], ...], assessment,
@@ -516,16 +521,23 @@ installation hint instead. The GUI tests need a display; without
 virtual X server that draws into memory.
 
 ~~~bash
-pip install -e '.[dev]'                 # tools: pytest, pytest-cov, pylint,
-                                        #        mypy, pycodestyle, bandit
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # once: development venv
 git config core.hooksPath .githooks     # once per clone
+sudo apt install shellcheck             # once: gate "shell" (apt writes to /usr)
 tools/check.sh                          # all gates
-tools/check.sh --fast                   # gates 1-4 only
+tools/check.sh --fast                   # without the test gate
 ~~~
+
+`tools/check.sh` uses an active venv; otherwise it activates `.venv` of
+the project, or the older `~/.venvs/mediatools` (with a note to move it),
+for its own run only - the calling terminal is unchanged and no
+`deactivate` is needed. CI has neither and installs the tools directly.
+Nothing is created or installed by the script.
 
 | No. | Gate     | Tool        | Pass criterion                                     |
 |-----|----------|-------------|----------------------------------------------------|
-| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits   |
+| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits; refuses (exit code 2) while lists of the layout before 1.5.0 exist |
+| 0   | shell    | shellcheck  | no finding in `install.sh`, `tools/*.sh`, the hook and the update script |
 | 1   | format   | pycodestyle | PEP 8 layout, max line length 100                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
 | 3   | types    | mypy        | no error; `check_untyped_defs`, `warn_unreachable` |
@@ -559,7 +571,10 @@ python3 tools/privacy_scan.py
 
 `tools/privacy_scan.py` resolves the lists with `DataDir` from the source
 tree of the clone, so it finds them in the same place as the installed
-program (also before `mediatools where --migrate`, in the old folder).
+program. While `~/scripts/mediatools.d/privacy_denylist.txt` or
+`privacy_allowlist.txt` still exist (layout before 1.5.0), the gate
+refuses instead of scanning: a gate must not pass silently because its
+input moved. `mediatools where --migrate` moves them.
 
 Notes on the configuration (`pyproject.toml`):
 
@@ -610,37 +625,20 @@ is allowed. The badge on the right names the gate run of the step:
 **LOCAL** = pre-push hook on this PC (one Python version), **CI** = run on
 GitHub (Python 3.12 and 3.14; for a tag only `release-check`), **none** =
 nothing is tested at this step because the pull request tested the same
-tree before. The numbers in the hotfix diagram are the steps of
-`apply-release.sh` (shown as `=== 1.2.13: 4 pull request into main` in
-the output).
+tree before. Every step is done by `tools/release.sh` (section "Release
+procedure").
 
-![Feature and release: which branch goes where, and which run tests it](img/lanes_release.png){width=100%}
+![Feature and release with `tools/release.sh`: which branch goes where, and which run tests it](img/lanes_release.png){width=100%}
 
-![Hotfix with `mediatools update` (steps of `apply-release.sh`): CI 1/3 to CI 3/3](img/lanes_hotfix.png){width=100%}
+![Hotfix with `tools/release.sh` (also the end of `mediatools update` for a hotfix archive)](img/lanes_hotfix.png){width=100%}
 
 Count per flow:
 
 | Flow | Local runs | CI runs on GitHub |
 |---|---|---|
-| feature | 1 (push `feature/x`) | 1 (PR into `develop`) |
-| release | 1 (push `release/X`) | 3 (PR into `main`, tag, PR `main` -> `develop`) |
-| hotfix with `mediatools update` | 2 (push `hotfix/X`, push `merge/hotfix-X`) | 3, shown as `CI 1/3` ... `CI 3/3` |
-
-`mediatools update` announces every run before it waits for it and prints
-a table of all CI runs at the end (also when a step fails):
-
-~~~text
---- 1.2.13 CI 1/3: pull_request on hotfix/1.2.13 (commit 3f2a9c1)
-    checks:  merge result of hotfix/1.2.13 and main, Python 3.10/3.14
-    purpose: required check: branch protection allows the merge into main only when green
-    run:     https://github.com/peddanet/mediatools/actions/runs/<id>
-
-CI runs on GitHub:
-  run              trigger                                    result     url
-  1.2.13 CI 1/3    pull_request hotfix/1.2.13                 success    https://...
-  1.2.13 CI 2/3    push v1.2.13                               success    https://...
-  1.2.13 CI 3/3    pull_request merge/hotfix-1.2.13           success    https://...
-~~~
+| feature | 2 (gates of `release.sh`, push `feature/x`) | 1 (PR into `develop`) |
+| release | 3 (gates after the version change, push `release/X.Y.Z`, push `merge/vX.Y.Z`) | 3 (PR into `main`, tag, PR into `develop`) |
+| hotfix | 3 (as release, with `hotfix/x`) | 3 |
 
 Before 1.2.13 the workflow also ran on every push to `main` and `develop`.
 These two runs per release tested a tree already tested by the pull request
@@ -656,8 +654,9 @@ waited for them, they only made the Actions list harder to read.
 | `main`        | released states only, each one tagged | -         | -                  |
 | `develop`     | integration of finished features      | `main`    | `main`             |
 | `feature/<x>` | one feature or fix                    | `develop` | `develop` (PR)     |
-| `release/<x>` | version, CHANGELOG and PDFs           | `develop` | `main` (PR)        |
-| `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` |
+| `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` (PR) |
+| `release/X.Y.Z` | short-lived: version and CHANGELOG heading (`release.sh`) | `develop` | `main` (PR) |
+| `merge/vX.Y.Z`  | short-lived: the release back into `develop` (`release.sh`) | `main` | `develop` (PR) |
 
 **`main` is the branch called `master` in older git-flow texts.** git-flow
 (Driessen, 2010) names the release branch `master`; GitHub creates new
@@ -665,9 +664,9 @@ repositories with the default branch `main` since 1 October 2020. Name and
 role are the same: `main` holds only released states, every one tagged
 `vX.Y.Z`. There is no separate `master` in this repository.
 
-Roles: developers work on `feature/*` and open pull requests into
-`develop`. The **integrator** reviews and merges them, checks `develop` as
-a whole and decides when a release is cut.
+Roles: developers work on `feature/*`; `tools/release.sh` integrates a
+feature into `develop` and cuts a release when the **integrator** answers
+the questions (or passes part and message, as `mediatools update` does).
 
 CI (`.github/workflows/tests.yml`) runs the gates on pull requests into
 `main` and `develop` (section "CI runs" shows every run per branch). Branch pushes start no run. A branch without a pull request
@@ -714,17 +713,15 @@ protection; the integrator pushes release tags directly.
 ## Feature cycle
 
 ~~~bash
-git switch develop && git pull --ff-only
-git switch -c feature/<name>
-# ... edit, commit ...
-tools/check.sh
-git push -u origin feature/<name>        # hook runs the gates again
-gh pr create --base develop --fill       # or in the web UI
-# after review and green CI: merge the PR, then
-git switch develop && git pull --ff-only
-git branch -d feature/<name>
-git push origin --delete feature/<name>
+git switch develop && git pull --ff-only && git switch -c feature/<name>
+# ... edit, test, CHANGELOG line under [Unreleased], commit ...
+tools/release.sh                       # rebase, gates, then the questions
 ~~~
+
+"Release jetzt bauen?" `n` and then `j` merges the feature into `develop`
+only (push, pull request, checks, merge); `j` merges and releases at once.
+The remote feature branch is deleted after the merge; the local one with
+`git branch -d feature/<name>`.
 
 # Building the documentation
 
@@ -751,89 +748,85 @@ pandoc ci-guide.md -o ci-guide.pdf --pdf-engine=xelatex --resource-path=.
 
 # Release procedure
 
-Performed by the integrator. Because `main` and `develop` are protected,
-every step that changes a branch goes through a pull request.
-
-1. Release branch from an up-to-date `develop`; set `__version__` in
-   `src/mediatools/__init__.py` (Semantic Versioning), turn the
-   `[Unreleased]` section of `CHANGELOG.md` into `[X.Y.Z] - date`, rebuild
-   diagrams and PDFs, run `tools/check.sh`, commit "mediatools X.Y.Z":
+Done by `tools/release.sh` (GitHub variant of the script of the
+dev-conventions handover; tests in `tests/test_release_tools.py`). It runs
+as normal user; `git` and `gh` (logged in once: `gh auth login`) act on
+the clone and on GitHub with the integrator's account. Because `main` and
+`develop` are protected, every change of them goes through a pull request.
 
 ~~~bash
-git switch develop && git pull --ff-only
-git switch -c release/X.Y.Z
-# ... version, CHANGELOG, PDFs ...
-git commit -am "mediatools X.Y.Z"
-git push -u origin release/X.Y.Z
-gh pr create --base main --title "Release X.Y.Z" --fill
-gh pr checks --watch && gh pr merge --merge --delete-branch
+tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
 ~~~
 
-2. Tag the merge commit on `main` and push the tag; CI runs
-   `release-check` for it:
+1. **Start checks:** clean working tree; branch type (`feature/*`,
+   `develop`, `hotfix/*`; `main` refused); `gh` logged in; local `main`
+   and `develop` equal `origin`; `develop` contains `main`;
+   `__version__` equals the newest tag.
+2. **Feature:** rebase onto `develop`, gates, question
+   "Release jetzt bauen?" (a part on the command line answers it); merge
+   into `develop` through a pull request.
+3. **Release:** version from the newest tag and the part; non-empty
+   `[Unreleased]` and message; on `release/X.Y.Z` (hotfix: on the hotfix
+   branch) set `__version__` and the heading `## [X.Y.Z] - <date>`, run the
+   gates, commit `mediatools X.Y.Z`.
+4. **Question** "... pushen, nach main mergen und vX.Y.Z veroeffentlichen?",
+   then: push, pull request into `main`, `gh pr checks --watch`, merge with
+   the subject `mediatools X.Y.Z: <message>`; check that `main` has the tree
+   of the release branch; annotated tag with the same text, push, wait for
+   `release-check`.
+5. **Back into `develop`:** `merge/vX.Y.Z` from `main` with `develop`
+   merged in, pull request, checks, merge; a conflict (e.g. CHANGELOG after
+   a hotfix) stops here with the commands to finish by hand - the release
+   itself is complete.
+6. **Bit-identity:** `tools/same-code.sh main develop vX.Y.Z` (after a
+   hotfix while `develop` collects features: `main vX.Y.Z`).
+7. **Install:** question, `./install.sh vX.Y.Z`,
+   `~/.local/bin/mediatools --version`, `tools/after-install.sh` (reload
+   of a running shrink, status).
 
-~~~bash
-git switch main && git pull --ff-only
-git tag -a vX.Y.Z -m "mediatools X.Y.Z"
-git push origin vX.Y.Z
-~~~
-
-3. Bring the release back into `develop` (pull request from `main`):
-
-~~~bash
-gh pr create --base develop --head main --title "Merge release X.Y.Z into develop" \
-  --body "Back-merge of release X.Y.Z."
-gh pr checks --watch && gh pr merge --merge
-git switch develop && git pull --ff-only
-~~~
-
-4. Install the release on the own machine: `./install.sh` (newest tag).
-
-Merge commits (no squash, no rebase) keep every commit; `git log
---first-parent main` lists exactly the releases. A hotfix branches from
-`main`, goes into `main` by pull request (tag `vX.Y.Z+1`) and back into
-`develop` as in step 3.
+Remote helper branches are deleted after their merge. `CHECK_CMD`,
+`INSTALL_CMD` and `RELEASE_WAIT` (seconds after a push before the checks
+are watched, default 30) replace the gate script, the installer and the
+pause; the tests use them. Merge commits (no squash, no rebase) keep every
+commit; `git log --first-parent main` lists exactly the releases.
 
 # Applying delivered patch archives
 
-Hotfixes prepared outside the clone arrive as archives
-`mediatools-hotfix-X.Y.Z-patch.tar.gz` (output of `git format-patch`, one
-release per archive). `mediatools update` applies them. It runs the shell
-script `src/mediatools/update/apply-release.sh`, which is shipped inside the
-package (package data), so every installed release carries it; the same
-script serves every release:
+`mediatools update` runs the shell script
+`src/mediatools/update/apply-release.sh`, shipped inside the package, so
+every installed release carries it:
 
 ~~~bash
-mediatools update --list     # what is there, nothing changes
-mediatools update            # asks, then applies
-mediatools update -y         # all pending versions, no question
+mediatools update --list     # installed and newest release, archives; nothing changes
+mediatools update            # step 1, then one question per archive
+mediatools update -y         # no questions
 ~~~
 
 | Step | What happens |
 |---|---|
-| inventory | archives in `~/Downloads` (`--downloads DIR`); per version the most recently saved copy (browser copies `... (1).tar.gz`) |
-| classification | versions above the release on `main` are *pending*, the rest and older copies are *stale* |
-| choice | a version means "all pending versions up to it, in ascending order", because each patch builds on the release before it; Enter = all |
-| per version | archive check (`__version__` in the patch) -> `hotfix/X` from `main` -> `git am` -> push (local gates) -> PR into `main` -> CI 1/3 -> merge -> tag `vX` -> CI 2/3 -> back-merge into `develop` via `merge/hotfix-X` (local gates) -> CI 3/3 -> merge; see "CI runs" |
-| install | `install.sh` (newest tag), then `mediatools --version` must name the last applied version |
-| tidying | used archives to the releases folder (`~/.local/share/mediatools/releases/`, plain names), stale archives and old `apply-mediatools-*.sh` scripts deleted |
+| 1 newer release | installed release (`~/.local/bin/mediatools --version`, else the caller's version) against the newest tag of the repository (`git ls-remote`); newer: `./install.sh vX.Y.Z` of the clone, or without a clone pip into the venv of the running program (`MEDIATOOLS_VENV`); then `mediatools reload` |
+| 2 inventory | `mediatools-feature-<name>.tar.gz` / `mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`), newest copy per name (browser copies `... (1).tar.gz`); older copies and versioned archives of released versions are *stale*; versioned archives above the installed release are *refused* (format before 1.14.0) |
+| 2 per archive | `patch.info` read; question; `base` branch fast-forwarded to `origin`, its tree (or the listed blobs) compared with `base_tree` (or the "before" blobs); `git switch -c <branch> <base>`; `git am`; result compared with `tree` (or the "after" blobs); `tools/release.sh <part> -m <message> --yes`, for `release=none` `--merge-only --yes`; archive to the releases folder |
+| end | archives with `release=none` are applied one after the other; the run ends after the first archive that releases, because the next one is built on its result |
 
-Reading GitHub calls (`gh run list`, `gh run view`, `gh pr list`) are
-repeated up to five times, 10 s apart; an interrupted watch of a CI run is
-resumed until GitHub reports the run as completed. A short network loss
-therefore does not stop the update; a red run does.
+`patch.info` (written by the delivering side, `key=value`):
 
-The script copies itself to `/tmp` and runs from there, because switching
-branches and the installation rewrite the script while bash is still
-reading it.
-It finds the clone next to itself (source checkout) or uses
-`~/Projects/mediatools` (`--repo DIR`). It logs to
-`~/.local/state/mediatools/logs/apply-release_<ts>.log` (the old folder
-until `mediatools where --migrate`; `$MEDIATOOLS_HOME/logs` if set) and stops at the first
-failing command; nothing in the download folder is removed then, and the
-same command can be repeated (hotfix branch rebuilt, open pull request
-reused). It runs as a normal user; root would leave root-owned files in
-the clone.
+~~~text
+branch=feature/<name>            or hotfix/<name>
+base=develop                     or main (hotfix)
+base_tree=<tree hash of base>    or one line per file: blob=<path> <before> <after>
+tree=<tree hash after git am>
+release=minor                    patch | minor | major | none
+message=<one-line release message>
+~~~
+
+Every guard stops loudly ("STOPP: ...") and leaves the clone as it was; a
+patch that does not apply is aborted, its branch removed. The script
+copies itself to `/tmp` and runs from there, because switching branches
+and the installation rewrite it while bash reads it. It finds the clone
+next to itself (source checkout) or uses `~/Projects/mediatools`
+(`--repo DIR`), logs to `~/.local/state/mediatools/logs/apply-release_<ts>.log`
+and runs as a normal user; root would leave root-owned files in the clone.
 
 # Adding a subcommand
 
