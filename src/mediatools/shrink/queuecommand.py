@@ -16,7 +16,9 @@ class QueueCommand:
     ``mediatools shrink`` as one text (folder first, e.g. ``"~/Videos
     --min-seconds 120 --jobs 2"``); they are checked with the parser of
     ``shrink`` before they are stored, and the folder is stored as an
-    absolute path. ``--remove``, ``--move``/``--to`` and ``--clear`` change
+    absolute path; ``--foreground`` and ``-y``/``--yes`` are dropped (a
+    queued job runs in the background and is started without asking).
+    ``--remove``, ``--move``/``--to`` and ``--clear`` change
     the list; ``--run`` starts the first job when no shrink runs. Every
     change prints the list afterwards.
 
@@ -27,6 +29,8 @@ class QueueCommand:
         start: Runs ``mediatools shrink`` with arguments and returns its
             exit code.
     """
+
+    DROPPED = ("--foreground", "-y", "--yes")
 
     def __init__(self, queue: ShrinkQueue, validate: Callable[[list[str]], object],
                  start: Callable[[list[str]], int]) -> None:
@@ -124,6 +128,7 @@ class QueueCommand:
             raise ValueError(f"--add: {err}") from None
         if not args or args[0].startswith("-"):
             raise ValueError("--add: the folder must come first")
+        args = [arg for arg in args if arg not in self.DROPPED]
         args[0] = os.path.abspath(os.path.expanduser(args[0]))
         if not os.path.isdir(args[0]):
             raise ValueError(f"--add: not a folder: {args[0]}")

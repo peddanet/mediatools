@@ -118,6 +118,7 @@ classDiagram
     +backfill()
     +planned(spec, settings, todo_bytes, todo_files)
     +finished_file(spec, size, row)
+    +remove(keys)
     +entries()
     +line(entry)
   }
@@ -418,6 +419,7 @@ classDiagram
     +entries()
     -_save(entries)
     +add(args, note, front)
+    +replace(number, args, note)
     +remove(number)
     +move(number, to)
     -_check(number, entries)
