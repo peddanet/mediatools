@@ -1,15 +1,15 @@
 """Dashboard of the shrink run: state, progress, space, log, stop and reload."""
 from __future__ import annotations
 
+import argparse
 import os
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import scrolledtext, ttk
 
 from mediatools.gui.opener import Opener
+from mediatools.gui.queuelist import QueueList
 from mediatools.gui.shrinkmonitor import ShrinkMonitor
-from mediatools.gui.joblist import JobList
-from mediatools.shrink.jobregistry import JobEntry
 
 
 class ShrinkPanel:
@@ -23,8 +23,13 @@ class ShrinkPanel:
     ``mediatools reload``; the run itself continues independently of the
     GUI, which may be closed at any time.
 
-    Below, the shrink jobs so far are listed, the most recently active
-    first (:class:`JobList`).
+    Below, the shrink queue follows in the order of processing - the
+    running job first (:class:`QueueList`) - and the end of the log.
+
+    The three parts - status, job list, log - are separate widgets
+    (:attr:`parts`). Placed in a vertical :class:`ttk.PanedWindow` they get
+    their own sashes, so each can be made larger or smaller with the mouse;
+    in any other parent they are simply stacked.
 
     Attributes:
         frame: Container of the widgets (place it in the parent).
@@ -38,12 +43,13 @@ class ShrinkPanel:
         log: Area with the end of the log.
         message: Result of the last button.
         log_path: Log file of the shown run, or None.
-        joblist: List of the shrink jobs.
+        joblist: The shrink queue (:class:`QueueList`).
     """
 
     def __init__(self, master: tk.Misc, monitor: ShrinkMonitor | None = None,
                  opener: Opener | None = None, refresh_ms: int = 2000,
-                 on_pick: Callable[[JobEntry, bool], object] | None = None):
+                 parse: Callable[[list[str]], argparse.Namespace] | None = None,
+                 open_dialog: Callable[[int | None, list[str] | None], object] | None = None):
         """Build the dashboard and start refreshing.
 
         Args:
@@ -51,7 +57,9 @@ class ShrinkPanel:
             monitor: State reader; one for ``shrink`` if None.
             opener: Opener for the log file; ``xdg-open`` if None.
             refresh_ms: Refresh interval in milliseconds (0: no automatic refresh).
-            on_pick: Receives a selected job and True to start it.
+            parse: Parses ``shrink`` arguments (shows queued jobs with
+                their figures); without it they are shown as text.
+            open_dialog: Opens the job dialog for *Add* and *Change*.
         """
         self.frame = ttk.Frame(master)
         self.monitor = monitor or ShrinkMonitor()
@@ -78,17 +86,20 @@ class ShrinkPanel:
         ttk.Button(buttons, text="Refresh", command=self.refresh).pack(side="left")
         ttk.Button(buttons, text="Open log", command=self.open_log).pack(side="left", padx=4)
         ttk.Label(buttons, textvariable=self.message).pack(side="left", padx=8)
-        self.joblist = JobList(self.frame, self.monitor, on_pick)
-        self.log = scrolledtext.ScrolledText(self.frame, height=4, font="TkFixedFont",
+        self.joblist = QueueList(master, self.monitor, parse or self.unparsed, open_dialog)
+        self.log = scrolledtext.ScrolledText(master, height=4, font="TkFixedFont",
                                              wrap="none", state="disabled")
-        self.log.pack(fill="both", expand=True)
+        if not isinstance(master, ttk.PanedWindow):
+            for widget, weight in self.parts:
+                widget.pack(fill="both", expand=bool(weight))
         self.refresh()
 
     def refresh(self) -> None:
         """Read the state and show it; schedule the next refresh."""
         state = self.monitor.read()
         self.report.set("\n".join(state.report + [
-            state.job or "job:     no shrink is running - the form below starts one"]))
+            state.job or "job:     no shrink is running - Continue starts the first queued "
+                         "job, Add puts one in"]))
         self.progress.set("\n".join(state.progress) if state.progress
                           else "(no progress lines - no shrink is encoding right now)")
         self.overall.set(state.overall)
@@ -98,6 +109,23 @@ class ShrinkPanel:
         self.joblist.refresh()
         if self.refresh_ms:
             self.frame.after(self.refresh_ms, self.refresh)
+
+    @property
+    def parts(self) -> list[tuple[tk.Widget, int]]:
+        """Status, queue and log with their weights, for a paned window."""
+        return [(self.frame, 0), (self.joblist.frame, 1), (self.log, 1)]
+
+    @staticmethod
+    def unparsed(args: list[str]) -> argparse.Namespace:
+        """Parser stand-in when none is given: every queued job is shown as text.
+
+        Args:
+            args: Arguments of a queued job.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError(f"no parser for {args}")
 
     def stop(self) -> None:
         """Request a stop after the current file."""

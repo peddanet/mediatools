@@ -2463,7 +2463,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.13.0') -> None
+__init__(self, control: RunControl, installed: str = '1.13.1') -> None
 
 Remember the job and the installed release.
 
@@ -2750,7 +2750,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.13.0')
+__init__(self, package_dir: str | None = None, version: str = '1.13.1')
 
 Locate the imported package.
 
@@ -3967,6 +3967,23 @@ Args:
     size: Its source size in bytes.
     row: The video with its path, length and modification time, or
         None to update only the running job.
+~~~
+
+**`remove`**
+
+~~~text
+remove(self, keys: list[str]) -> int
+
+Forget remembered jobs.
+
+Nothing on disk changes except ``jobs.json``: databases, ledger and
+videos stay. A removed job comes back only when it is run again.
+
+Args:
+    keys: :attr:`JobSpec.key` of the jobs.
+
+Returns:
+    Number of jobs removed.
 ~~~
 
 **`entries`**
@@ -5575,7 +5592,9 @@ Without options the queue is listed. ``--add`` takes the arguments of
 ``mediatools shrink`` as one text (folder first, e.g. ``"~/Videos
 --min-seconds 120 --jobs 2"``); they are checked with the parser of
 ``shrink`` before they are stored, and the folder is stored as an
-absolute path. ``--remove``, ``--move``/``--to`` and ``--clear`` change
+absolute path; ``--foreground`` and ``-y``/``--yes`` are dropped (a
+queued job runs in the background and is started without asking).
+``--remove``, ``--move``/``--to`` and ``--clear`` change
 the list; ``--run`` starts the first job when no shrink runs. Every
 change prints the list afterwards.
 
@@ -6830,6 +6849,22 @@ Args:
 
 Returns:
     Its position (1 = next).
+~~~
+
+**`replace`**
+
+~~~text
+replace(self, number: int, args: list[str], note: str | None = None) -> None
+
+Change the arguments (and note) of one job, keeping its place.
+
+Args:
+    number: Position, 1 = next.
+    args: New arguments of ``mediatools shrink``.
+    note: New note, or None to keep it.
+
+Raises:
+    ValueError: If there is no job at that position.
 ~~~
 
 **`remove`**
@@ -12186,27 +12221,31 @@ Returns:
 ~~~text
 One window with a tab per task; every command of the command line.
 
-Tabs: *shrink* (dashboard of the running shrink and the form to start
-one), one tab per further subcommand, *savings* (freed space per
-session or day), *config* (editor of ``mediatools.ini``) and *files*
-(logs, reports, plans). ``status``,
-``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
+Tabs: *shrink* (dashboard of the running shrink and the queue in the
+order of processing; the shrink form is in the job dialog opened by
+*Add* and *Change*, :class:`JobDialog`), one tab per further
+subcommand, *savings* (freed space per session or day), *config*
+(editor of ``mediatools.ini``) and *files* (logs, reports, plans).
+``status``, ``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
 is replaced by the dashboard. Every command runs as a child process
 with the same interpreter as the GUI; one command per tab may run at a
 time, different tabs may run at the same time.
 
 Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
-fills the form, *Continue* runs it), and since 1.6.2 its *Run* first
-offers them in a dialog (:class:`JobPicker`); the menu *View* changes the font
+fills the form, *Continue* runs it); the menu *View* changes the font
 size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
 (default, followed live), light or dark (:class:`Appearance`); a newly
 installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
 a restart offered in a bar above the tabs.
 
+Since 1.13.1: the queue replaces the list of earlier jobs in the shrink
+tab; earlier jobs, the form and the queue editing are in the job
+dialog; every part of a tab can be resized with the sashes between
+them. ``queue`` has no tab of its own.
+
 Attributes:
     root: Tk main window.
     catalog: Subcommands read from the argument parser.
-    store: Remembered form values.
     forms: Command forms by subcommand.
     tabs: Tab of each command form by subcommand.
     consoles: Output panes of all tabs.
@@ -12217,6 +12256,7 @@ Attributes:
         file (``[gui]`` settings).
     updates: Bar shown when a newer release is installed.
     restarter: Replaces the process by a new GUI (replaceable in tests).
+    jobdialog: Earlier jobs and the shrink form (:class:`JobDialog`).
 ~~~
 
 **`__init__`**
@@ -12241,6 +12281,60 @@ Args:
     ask: Confirmation dialog (title, text) -> yes.
     refresh_ms: Refresh interval of the shrink dashboard (0: manual).
     config: Configuration file; the default file if None.
+~~~
+
+**`_shrink_tab`**
+
+~~~text
+_shrink_tab(
+    self,
+    panes: ttk.PanedWindow,
+    spec: CommandSpec,
+    console: ConsoleView,
+    store_ask: tuple[FormStore, Callable[[str, str], bool]],
+    refresh_ms: int,
+) -> CommandForm
+
+Fill the shrink tab: status, queue and log; the form lives in the job dialog.
+
+Args:
+    panes: The tab's paned window.
+    spec: The shrink command.
+    console: Console of the tab.
+    store_ask: Remembered form values and the yes/no question.
+    refresh_ms: Refresh interval of the panel.
+
+Returns:
+    The shrink form (in :attr:`jobdialog`).
+~~~
+
+**`parse_shrink`**
+
+~~~text
+parse_shrink(self, args: list[str]) -> argparse.Namespace
+
+Parse ``shrink`` arguments with the parser of the command line.
+
+Args:
+    args: Arguments, folder first.
+
+Returns:
+    The parsed options.
+
+Raises:
+    SystemExit: If they are not valid (as argparse does).
+~~~
+
+**`open_job_dialog`**
+
+~~~text
+open_job_dialog(self, position: int | None, args: list[str] | None) -> None
+
+Open the job dialog (*Add* and *Change* of the shrink tab).
+
+Args:
+    position: Waiting job to change, or None for a new job.
+    args: Its arguments, or None.
 ~~~
 
 **`_menu`**
@@ -12334,7 +12428,7 @@ Args:
     entry: The job.
 
 Returns:
-    Values by ``dest`` of the shrink form.
+    Values by ``dest`` of the shrink form (:meth:`JobList.form_values`).
 ~~~
 
 **`pick_job`**
@@ -12350,33 +12444,6 @@ Args:
 
 Returns:
     True if the form was filled (and, with ``start``, started).
-~~~
-
-**`choose_shrink_run`**
-
-~~~text
-choose_shrink_run(self) -> bool
-
-*Run* of the shrink tab: offer the earlier jobs first (:class:`JobPicker`).
-
-Without any remembered job the form runs at once.
-
-Returns:
-    True if the shrink was started now; False while the dialog is open.
-~~~
-
-**`run_choice`**
-
-~~~text
-run_choice(self, entry: JobEntry | None) -> bool
-
-Start the shrink chosen in the dialog.
-
-Args:
-    entry: An earlier job (fills the form first), or None for the form.
-
-Returns:
-    True if the shrink was started.
 ~~~
 
 **`check_update`**
@@ -12894,6 +12961,7 @@ Attributes:
     variables: Tk variables (or text boxes) by ``dest``.
     line: Text of the command-line preview.
     ask: Confirmation dialog, replaceable in tests.
+    enqueuer: Called by *Add to queue* instead of ``queue --add``, or None.
     chooser: Called by *Run* instead of starting directly (e.g. the
         job selection of the shrink tab), or None.
 ~~~
@@ -13004,6 +13072,21 @@ Args:
 copy(self) -> None
 
 Copy the command line to the clipboard.
+~~~
+
+**`enqueue`**
+
+~~~text
+enqueue(self) -> bool
+
+Put the shrink command of the form into the queue.
+
+Through :attr:`enqueuer` if set (the job dialog), else by running
+``mediatools queue --add`` in the console.
+
+Returns:
+    True if ``mediatools queue --add`` was started (it checks the
+    arguments and reports in the console).
 ~~~
 
 **`reset`**
@@ -13677,6 +13760,129 @@ Args:
     values: Values by ``dest``.
 ~~~
 
+### `JobDialog` (`mediatools.gui.jobdialog`) {.unnumbered}
+
+~~~text
+Window with every shrink job so far and the shrink form.
+
+Opened by *Add* (a new job) or *Change* (a waiting job) of the shrink
+tab. The upper part lists every remembered job (:class:`JobList`):
+selecting one fills the form with its folder and options, *Add to
+queue* there puts it into the queue as it is, *Remove* and *Remove
+finished* clean the list. The lower part is the shrink form with a
+folder chooser and all options. Its buttons start the job now (*Run*)
+or put it into the queue (*Add to queue*); when a waiting job is being
+changed, *Save changes* replaces it in its place. Both parts are
+separated by a sash. Closing the window only hides it.
+
+Attributes:
+    window: The dialog window.
+    form: The shrink form.
+    joblist: Every remembered job.
+    queue: The shrink queue.
+    checker: Checks arguments like ``mediatools queue --add``.
+    on_change: Called after the queue changed (refresh of the shrink tab).
+    position: Position of the waiting job being changed, or None.
+    mode: Text about what the dialog does now.
+    status: Result of the last action.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    spec: CommandSpec,
+    console: ConsoleView,
+    parse: Callable[[list[str]], argparse.Namespace],
+    **extra,
+) -> None
+
+Build the (hidden) dialog.
+
+Args:
+    master: Main window.
+    spec: The shrink command.
+    console: Console of the shrink tab (output of *Run*).
+    parse: Parses ``shrink`` arguments.
+    **extra: ``store`` (:class:`FormStore`), ``ask`` (yes/no
+        question), ``monitor`` (:class:`ShrinkMonitor`), ``queue``
+        (:class:`ShrinkQueue`) and ``on_change`` (callable).
+~~~
+
+**`open`**
+
+~~~text
+open(self, position: int | None = None, args: list[str] | None = None) -> None
+
+Show the dialog for a new job or for a waiting job.
+
+Args:
+    position: Position of the waiting job to change, or None.
+    args: Its arguments (fill the form), or None to keep the form.
+~~~
+
+**`fill`**
+
+~~~text
+fill(self, args: list[str]) -> None
+
+Fill the form from ``shrink`` arguments (folder first).
+
+Args:
+    args: Arguments; unknown words are ignored.
+~~~
+
+**`form_args`**
+
+~~~text
+form_args(self) -> list[str] | None
+
+Return the checked ``shrink`` arguments of the form.
+
+Returns:
+    Arguments with an absolute folder, or None (reason in
+    :attr:`status`).
+~~~
+
+**`enqueue`**
+
+~~~text
+enqueue(self, first: bool = False) -> bool
+
+Put the job of the form into the queue.
+
+Args:
+    first: Put it first instead of last.
+
+Returns:
+    True if it was added.
+~~~
+
+**`save_changes`**
+
+~~~text
+save_changes(self) -> bool
+
+Replace the waiting job being changed by the job of the form.
+
+Returns:
+    True if it was replaced.
+~~~
+
+**`picked`**
+
+~~~text
+picked(self, entry: JobEntry, start: bool) -> None
+
+Fill the form with a remembered job; with *Add to queue* also queue it.
+
+Args:
+    entry: The job.
+    start: True for *Add to queue* or a double click.
+~~~
+
 ### `JobList` (`mediatools.gui.joblist`) {.unnumbered}
 
 ~~~text
@@ -13687,13 +13893,25 @@ progress bar with percent (done against still to go), the figures in
 GiB, the settings of the last run and the folder with its filters. The
 list is filled again only when ``jobs.json`` or the ledger changed.
 Selecting a row hands the job to ``on_pick`` (fill the shrink form);
-*Continue* or a double click also asks to start it.
+*Continue* or a double click also asks to start it. The list scrolls,
+and the arrow keys move the selection as soon as the list has the
+keyboard focus (a click into it, or Tab).
+
+*Remove* forgets the selected jobs (several with Ctrl or Shift),
+*Remove finished* every job with nothing left to do; both ask first
+and never remove the job that is running. Only the entries of the list
+go - databases, ledger and videos stay; a removed job comes back when
+it is run again.
 
 Attributes:
+    frame: The box with list and buttons (packed by the caller if
+        ``pack`` is False).
     jobs: The list widget.
     monitor: Source of the registry.
     entries: Jobs shown, by row id.
     on_pick: Called with a job and whether to start it, or None.
+    confirm: Asks a yes/no question (title, text) before removing.
+    message: Result of the last removal (shown next to the buttons).
     signature: State of the job files when the list was last filled.
 ~~~
 
@@ -13705,6 +13923,9 @@ __init__(
     master: tk.Misc,
     monitor: ShrinkMonitor,
     on_pick: Callable[[JobEntry, bool], object] | None = None,
+    confirm: Callable[[str, str], bool] | None = None,
+    pack: bool = True,
+    start_text: str = 'Continue',
 )
 
 Build the list.
@@ -13713,6 +13934,11 @@ Args:
     master: Parent widget.
     monitor: Source of the registry.
     on_pick: Receives a selected job and True to start it.
+    confirm: Yes/no question before removing; a message box if None.
+    pack: Pack the box into ``master`` (False: the caller places
+        :attr:`frame`, e.g. in a paned window).
+    start_text: Text of the button that hands a job on with
+        ``start=True``.
 ~~~
 
 **`refresh`**
@@ -13723,10 +13949,24 @@ refresh(self) -> None
 Fill the list again if the job files changed.
 ~~~
 
-**`_stamp`**
+**`settings_text`**
 
 ~~~text
-_stamp(path: str) -> tuple[float, int]
+settings_text(settings: dict[str, object]) -> str
+
+Describe encoder settings briefly.
+
+Args:
+    settings: ``crf``, ``preset``, ``jobs``, ``threads``.
+
+Returns:
+    E.g. ``crf 28, faster, 2 jobs x 11 threads``.
+~~~
+
+**`stamp`**
+
+~~~text
+stamp(path: str) -> tuple[float, int]
 
 Return modification time and size of a file.
 
@@ -13735,6 +13975,68 @@ Args:
 
 Returns:
     ``(mtime, size)``; zeros if missing.
+~~~
+
+**`form_values`**
+
+~~~text
+form_values(entry: JobEntry) -> dict[str, object]
+
+Return the shrink form values of a remembered job.
+
+Args:
+    entry: The job.
+
+Returns:
+    Values by ``dest`` of the shrink form.
+~~~
+
+**`running_key`**
+
+~~~text
+running_key(self) -> str | None
+
+Return the key of the job that is running now.
+
+Returns:
+    Its :attr:`JobSpec.key`, or None if no shrink runs.
+~~~
+
+**`remove_selected`**
+
+~~~text
+remove_selected(self) -> int
+
+Forget the selected jobs after asking.
+
+Returns:
+    Number of jobs removed.
+~~~
+
+**`remove_finished`**
+
+~~~text
+remove_finished(self) -> int
+
+Forget every job with nothing left to do, after asking.
+
+Returns:
+    Number of jobs removed.
+~~~
+
+**`_remove`**
+
+~~~text
+_remove(self, chosen: list[JobEntry], question: str) -> int
+
+Remove jobs except the running one, after a yes.
+
+Args:
+    chosen: Jobs to remove.
+    question: Question for the confirmation.
+
+Returns:
+    Number of jobs removed.
 ~~~
 
 **`pick`**
@@ -13749,74 +14051,6 @@ Args:
 
 Returns:
     The result of ``on_pick``, or None without a selection.
-~~~
-
-### `JobPicker` (`mediatools.gui.jobpicker`) {.unnumbered}
-
-~~~text
-Offers the earlier shrink jobs before a shrink is started from the GUI.
-
-The GUI counterpart of a plain ``mediatools shrink`` on a terminal
-(:class:`JobChooser`): *Run* in the shrink tab opens this dialog with
-the jobs so far - from the command line or the GUI, the most recently
-active first, with progress and settings - and one button for the
-values currently in the form. *Continue* (or a double click) takes the
-selected job, *Run as in the form* the form; either way ``on_choice``
-is called once and the dialog closes. *Cancel* or closing the window
-starts nothing.
-
-Because the two buttons start different things, the dialog says it in
-words and shows the command line *Continue* would run for the selected
-line next to the one of the form.
-
-Attributes:
-    window: The dialog window.
-    jobs: The job list inside it.
-    on_choice: Receives the chosen job, or None for the form values.
-    selected: Command line of the selected job (what *Continue* runs).
-~~~
-
-**`__init__`**
-
-~~~text
-__init__(
-    self,
-    master: tk.Misc,
-    monitor: ShrinkMonitor,
-    form_line: str,
-    on_choice: Callable[[JobEntry | None], object],
-)
-
-Open the dialog.
-
-Args:
-    master: Main window.
-    monitor: Source of the job registry.
-    form_line: Command line of the current form values (shown).
-    on_choice: Called with the chosen job, or None for the form.
-~~~
-
-**`_picked`**
-
-~~~text
-_picked(self, entry: JobEntry, start: bool) -> None
-
-React to the job list: start only on *Continue* or a double click.
-
-Args:
-    entry: Selected job.
-    start: True for *Continue* or a double click.
-~~~
-
-**`choose`**
-
-~~~text
-choose(self, entry: JobEntry | None) -> None
-
-Close the dialog and hand over the choice.
-
-Args:
-    entry: The chosen job, or None for the form values.
 ~~~
 
 ### `JobRunner` (`mediatools.gui.jobrunner`) {.unnumbered}
@@ -14144,6 +14378,195 @@ __eq__(self, other)
 Return self==value.
 ~~~
 
+### `QueueList` (`mediatools.gui.queuelist`) {.unnumbered}
+
+~~~text
+Shows the running shrink job and the queue, in the order of processing.
+
+The first row is the job that runs now (``running``), the others are
+the waiting jobs (``1``, ``2`` ...). Each row shows the progress of
+that job as far as it is known (its remembered job with the same folder
+and filters), the figures in GiB, the settings and the folder with its
+filters.
+
+Buttons: *Continue* starts the selected waiting job now (it becomes
+the first one) when no shrink runs; *Add* opens the job dialog for a
+new job; *Change* opens it with the selected waiting job; *Remove*
+takes the selected waiting jobs off the queue (after a question);
+*Up* and *Down* change the order.
+
+Attributes:
+    frame: The box with list and buttons (placed by the caller).
+    jobs: The list widget.
+    monitor: Reader of the running job and of the job registry.
+    queue: The shrink queue.
+    parse: Parses ``shrink`` arguments (argparse namespace) or raises.
+    open_dialog: Opens the job dialog: ``(position or None, args or None)``.
+    confirm: Yes/no question (title, text).
+    launcher: Starts ``mediatools`` with arguments in the background.
+    message: Result of the last button.
+    signature: State of queue, registry and run when last filled.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    master: tk.Misc,
+    monitor: ShrinkMonitor,
+    parse: Callable[[list[str]], argparse.Namespace],
+    open_dialog: Callable[[int | None, list[str] | None], object] | None = None,
+    **extra,
+) -> None
+
+Build the list.
+
+Args:
+    master: Parent widget.
+    monitor: Reader of the running job and the registry.
+    parse: Parses ``shrink`` arguments.
+    open_dialog: Opens the job dialog; nothing if None.
+    **extra: ``queue`` (:class:`ShrinkQueue`, default the user's),
+        ``confirm`` (yes/no question, default a message box) and
+        ``launcher`` (default a detached process).
+~~~
+
+**`spec_of`**
+
+~~~text
+spec_of(self, args: list[str]) -> tuple[JobSpec, dict[str, object]] | None
+
+Turn queued ``shrink`` arguments into job and settings.
+
+Args:
+    args: Arguments, folder first.
+
+Returns:
+    ``(spec, settings)``, or None if they cannot be parsed.
+~~~
+
+**`figures`**
+
+~~~text
+figures(entry: JobEntry | None) -> tuple[str, str]
+
+Return progress and GiB figures of a remembered job.
+
+Args:
+    entry: The job, or None if it never ran.
+
+Returns:
+    ``(progress, done / to go)``.
+~~~
+
+**`rows`**
+
+~~~text
+rows(self) -> list[tuple[str, tuple[str, ...]]]
+
+Build the rows: the running job, then the waiting ones.
+
+Returns:
+    ``(id, values)`` per row; the id is ``running`` or the position.
+~~~
+
+**`refresh`**
+
+~~~text
+refresh(self) -> None
+
+Fill the list again if the queue, the job files or the run changed.
+~~~
+
+**`reload`**
+
+~~~text
+reload(self) -> None
+
+Fill the list now, whatever changed.
+~~~
+
+**`selected`**
+
+~~~text
+selected(self) -> list[int]
+
+Return the positions of the selected waiting jobs.
+
+Returns:
+    Positions (1 = next), ascending; the running row is left out.
+~~~
+
+**`start`**
+
+~~~text
+start(self) -> bool
+
+*Continue*: start the selected waiting job (or the first) now.
+
+Returns:
+    True if ``mediatools queue --run`` was started.
+~~~
+
+**`add`**
+
+~~~text
+add(self) -> object
+
+*Add*: open the job dialog for a new job.
+
+Returns:
+    Result of the dialog opener, or None without one.
+~~~
+
+**`change`**
+
+~~~text
+change(self) -> object
+
+*Change*: open the job dialog with the selected waiting job.
+
+Returns:
+    Result of the dialog opener, or None.
+~~~
+
+**`remove`**
+
+~~~text
+remove(self) -> int
+
+*Remove*: take the selected waiting jobs off the queue, after asking.
+
+Returns:
+    Number of jobs removed.
+~~~
+
+**`shift`**
+
+~~~text
+shift(self, step: int) -> None
+
+Move the selected waiting job one place up (-1) or down (+1).
+
+Args:
+    step: -1 or +1.
+~~~
+
+**`launch`**
+
+~~~text
+launch(args: list[str]) -> subprocess.Popen[bytes]
+
+Start mediatools in its own session, detached from the GUI.
+
+Args:
+    args: Arguments after ``mediatools``.
+
+Returns:
+    The process.
+~~~
+
 ### `SavingsPanel` (`mediatools.gui.savingspanel`) {.unnumbered}
 
 ~~~text
@@ -14309,8 +14732,13 @@ and the end of the log.
 ``mediatools reload``; the run itself continues independently of the
 GUI, which may be closed at any time.
 
-Below, the shrink jobs so far are listed, the most recently active
-first (:class:`JobList`).
+Below, the shrink queue follows in the order of processing - the
+running job first (:class:`QueueList`) - and the end of the log.
+
+The three parts - status, job list, log - are separate widgets
+(:attr:`parts`). Placed in a vertical :class:`ttk.PanedWindow` they get
+their own sashes, so each can be made larger or smaller with the mouse;
+in any other parent they are simply stacked.
 
 Attributes:
     frame: Container of the widgets (place it in the parent).
@@ -14324,7 +14752,7 @@ Attributes:
     log: Area with the end of the log.
     message: Result of the last button.
     log_path: Log file of the shown run, or None.
-    joblist: List of the shrink jobs.
+    joblist: The shrink queue (:class:`QueueList`).
 ~~~
 
 **`__init__`**
@@ -14336,7 +14764,8 @@ __init__(
     monitor: ShrinkMonitor | None = None,
     opener: Opener | None = None,
     refresh_ms: int = 2000,
-    on_pick: Callable[[JobEntry, bool], object] | None = None,
+    parse: Callable[[list[str]], argparse.Namespace] | None = None,
+    open_dialog: Callable[[int | None, list[str] | None], object] | None = None,
 )
 
 Build the dashboard and start refreshing.
@@ -14346,7 +14775,9 @@ Args:
     monitor: State reader; one for ``shrink`` if None.
     opener: Opener for the log file; ``xdg-open`` if None.
     refresh_ms: Refresh interval in milliseconds (0: no automatic refresh).
-    on_pick: Receives a selected job and True to start it.
+    parse: Parses ``shrink`` arguments (shows queued jobs with
+        their figures); without it they are shown as text.
+    open_dialog: Opens the job dialog for *Add* and *Change*.
 ~~~
 
 **`refresh`**
@@ -14355,6 +14786,28 @@ Args:
 refresh(self) -> None
 
 Read the state and show it; schedule the next refresh.
+~~~
+
+**`parts`**
+
+~~~text
+parts(self) -> list[tuple[tk.Widget, int]]
+
+Status, queue and log with their weights, for a paned window.
+~~~
+
+**`unparsed`**
+
+~~~text
+unparsed(args: list[str]) -> argparse.Namespace
+
+Parser stand-in when none is given: every queued job is shown as text.
+
+Args:
+    args: Arguments of a queued job.
+
+Raises:
+    ValueError: Always.
 ~~~
 
 **`stop`**
