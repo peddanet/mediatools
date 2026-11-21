@@ -1,6 +1,7 @@
 """Main window of the mediatools GUI."""
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -14,44 +15,48 @@ from mediatools.core.versioninfo import VersionInfo
 from mediatools.gui.appearance import Appearance
 from mediatools.gui.catalog import CommandCatalog
 from mediatools.gui.commandform import CommandForm
+from mediatools.gui.commandspec import CommandSpec
 from mediatools.gui.configpanel import ConfigPanel
 from mediatools.gui.consoleview import ConsoleView
 from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.filespanel import FilesPanel
 from mediatools.gui.formstore import FormStore
+from mediatools.gui.jobdialog import JobDialog
+from mediatools.gui.joblist import JobList
 from mediatools.gui.savingspanel import SavingsPanel
-from mediatools.gui.jobpicker import JobPicker
-from mediatools.gui.shrinkmonitor import ShrinkMonitor
 from mediatools.gui.shrinkpanel import ShrinkPanel
 from mediatools.gui.updatebar import UpdateBar
 from mediatools.shrink.jobregistry import JobEntry
-from mediatools.shrink.jobspec import JobSpec
 
 
 class MediaToolsApp:
     """One window with a tab per task; every command of the command line.
 
-    Tabs: *shrink* (dashboard of the running shrink and the form to start
-    one), one tab per further subcommand, *savings* (freed space per
-    session or day), *config* (editor of ``mediatools.ini``) and *files*
-    (logs, reports, plans). ``status``,
-    ``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
+    Tabs: *shrink* (dashboard of the running shrink and the queue in the
+    order of processing; the shrink form is in the job dialog opened by
+    *Add* and *Change*, :class:`JobDialog`), one tab per further
+    subcommand, *savings* (freed space per session or day), *config*
+    (editor of ``mediatools.ini``) and *files* (logs, reports, plans).
+    ``status``, ``stop`` and ``reload`` are buttons of the shrink dashboard; ``attach``
     is replaced by the dashboard. Every command runs as a child process
     with the same interpreter as the GUI; one command per tab may run at a
     time, different tabs may run at the same time.
 
     Since 1.6.0: the shrink tab lists the shrink jobs so far (selecting one
-    fills the form, *Continue* runs it), and since 1.6.2 its *Run* first
-    offers them in a dialog (:class:`JobPicker`); the menu *View* changes the font
+    fills the form, *Continue* runs it); the menu *View* changes the font
     size (Ctrl++ / Ctrl+- / Ctrl+0) and the colour scheme - the desktop's
     (default, followed live), light or dark (:class:`Appearance`); a newly
     installed release is noticed (checked every :attr:`UPDATE_SECONDS`) and
     a restart offered in a bar above the tabs.
 
+    Since 1.13.1: the queue replaces the list of earlier jobs in the shrink
+    tab; earlier jobs, the form and the queue editing are in the job
+    dialog; every part of a tab can be resized with the sashes between
+    them. ``queue`` has no tab of its own.
+
     Attributes:
         root: Tk main window.
         catalog: Subcommands read from the argument parser.
-        store: Remembered form values.
         forms: Command forms by subcommand.
         tabs: Tab of each command form by subcommand.
         consoles: Output panes of all tabs.
@@ -62,9 +67,10 @@ class MediaToolsApp:
             file (``[gui]`` settings).
         updates: Bar shown when a newer release is installed.
         restarter: Replaces the process by a new GUI (replaceable in tests).
+        jobdialog: Earlier jobs and the shrink form (:class:`JobDialog`).
     """
 
-    PANEL_COMMANDS = ("status", "stop", "reload", "config", "savings")
+    PANEL_COMMANDS = ("status", "stop", "reload", "config", "savings", "queue")
     """Subcommands covered by panels instead of a form."""
 
     UPDATE_SECONDS = 60
@@ -84,7 +90,7 @@ class MediaToolsApp:
         """
         self.root = root
         self.catalog = catalog
-        self.store = store or FormStore()
+        store = store or FormStore()
         self.ask = ask
         self.forms: dict[str, CommandForm] = {}
         self.consoles: list[ConsoleView] = []
@@ -112,15 +118,13 @@ class MediaToolsApp:
             frame = ttk.Frame(self.notebook, padding=6)
             panes = ttk.PanedWindow(frame, orient="vertical")
             panes.pack(fill="both", expand=True)
-            if spec.name == "shrink":
-                panes.add(ShrinkPanel(panes, refresh_ms=refresh_ms,
-                                      on_pick=self.pick_job).frame, weight=2)
             console = ConsoleView(panes, height=6 if spec.name == "shrink" else 12)
-            form = CommandForm(panes, spec, console, self.store, ask)
             if spec.name == "shrink":
-                form.chooser = self.choose_shrink_run
-            panes.add(form.frame, weight=1)
-            panes.add(console.frame, weight=2)
+                form = self._shrink_tab(panes, spec, console, (store, ask), refresh_ms)
+            else:
+                form = CommandForm(panes, spec, console, store, ask)
+                panes.add(form.frame, weight=1)
+            panes.add(console.frame, weight=1 if spec.name == "shrink" else 2)
             self.forms[spec.name] = form
             self.tabs[spec.name] = frame
             self.consoles.append(console)
@@ -132,6 +136,54 @@ class MediaToolsApp:
         if refresh_ms:
             root.after(self.UPDATE_SECONDS * 1000, self.check_update)
             self.appearance.watch()
+
+    def _shrink_tab(self, panes: ttk.PanedWindow, spec: CommandSpec, console: ConsoleView,
+                    store_ask: tuple[FormStore, Callable[[str, str], bool]],
+                    refresh_ms: int) -> CommandForm:
+        """Fill the shrink tab: status, queue and log; the form lives in the job dialog.
+
+        Args:
+            panes: The tab's paned window.
+            spec: The shrink command.
+            console: Console of the tab.
+            store_ask: Remembered form values and the yes/no question.
+            refresh_ms: Refresh interval of the panel.
+
+        Returns:
+            The shrink form (in :attr:`jobdialog`).
+        """
+        parse = self.parse_shrink
+        panel = ShrinkPanel(panes, refresh_ms=refresh_ms, parse=parse,
+                            open_dialog=self.open_job_dialog)
+        for part, weight in panel.parts:
+            panes.add(part, weight=weight)
+        self.jobdialog = JobDialog(self.root, spec, console, parse, store=store_ask[0],
+                                   ask=store_ask[1],
+                                   on_change=panel.joblist.reload)
+        return self.jobdialog.form
+
+    def parse_shrink(self, args: list[str]) -> argparse.Namespace:
+        """Parse ``shrink`` arguments with the parser of the command line.
+
+        Args:
+            args: Arguments, folder first.
+
+        Returns:
+            The parsed options.
+
+        Raises:
+            SystemExit: If they are not valid (as argparse does).
+        """
+        return self.catalog.parser.parse_args(["shrink", *args])
+
+    def open_job_dialog(self, position: int | None, args: list[str] | None) -> None:
+        """Open the job dialog (*Add* and *Change* of the shrink tab).
+
+        Args:
+            position: Waiting job to change, or None for a new job.
+            args: Its arguments, or None.
+        """
+        self.jobdialog.open(position, args)
 
     def _menu(self) -> None:
         """Build the menu bar."""
@@ -228,22 +280,9 @@ class MediaToolsApp:
             entry: The job.
 
         Returns:
-            Values by ``dest`` of the shrink form.
+            Values by ``dest`` of the shrink form (:meth:`JobList.form_values`).
         """
-        spec = entry.spec
-        newer = spec.as_dict()["newer_than"]
-        jobs = entry.settings.get("jobs")
-        return {"path": spec.root, "crf": str(entry.settings.get("crf") or 28),
-                "preset": str(entry.settings.get("preset") or ""),
-                "order": str(entry.settings.get("order") or "largest"),
-                "jobs": "" if jobs in (None, 1) else str(jobs),
-                "threads": str(entry.settings.get("threads") or ""),
-                "ext": ",".join(ext.lstrip(".") for ext in sorted(spec.extensions)),
-                "min_seconds": f"{spec.min_seconds:g}",
-                "min_size": JobSpec.size_text(spec.min_size) if spec.min_size else "",
-                "newer_than": str(newer or ""),
-                "retry_failed": bool(entry.settings.get("retry_failed")),
-                "keep_copies": bool(entry.settings.get("keep_copies"))}
+        return JobList.form_values(entry)
 
     def pick_job(self, entry: JobEntry, start: bool = False) -> bool:
         """Fill the shrink form with a job; optionally run it.
@@ -262,34 +301,6 @@ class MediaToolsApp:
             if dest in form.variables:
                 form.set_value(dest, value)
         return form.start() if start else True
-
-    def choose_shrink_run(self) -> bool:
-        """*Run* of the shrink tab: offer the earlier jobs first (:class:`JobPicker`).
-
-        Without any remembered job the form runs at once.
-
-        Returns:
-            True if the shrink was started now; False while the dialog is open.
-        """
-        form = self.forms["shrink"]
-        monitor = ShrinkMonitor()
-        if not monitor.registry().entries():
-            return form.start()
-        JobPicker(self.root, monitor, form.line.get(), self.run_choice)
-        return False
-
-    def run_choice(self, entry: JobEntry | None) -> bool:
-        """Start the shrink chosen in the dialog.
-
-        Args:
-            entry: An earlier job (fills the form first), or None for the form.
-
-        Returns:
-            True if the shrink was started.
-        """
-        if entry is not None:
-            return self.pick_job(entry, start=True)
-        return self.forms["shrink"].start()
 
     def check_update(self) -> None:
         """Check for a newly installed release; show the bar a little later."""

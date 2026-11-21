@@ -321,8 +321,9 @@ loops.
 | `DesktopEntry`, `Opener` | menu entry (`.desktop`) with check and repair, `xdg-open` |
 | `Appearance` | ttk style on `clam`, font scale and scheme `auto`/light/dark (`[gui]`), follows the desktop |
 | `SystemLook` | scheme and accent colour of the desktop from the XDG settings portal (`gdbus`) |
-| `JobList` | list of the shrink jobs with progress; selection fills the shrink form |
-| `JobPicker` | dialog of *Run* in the shrink tab: continue an earlier job or run the form |
+| `JobList` | list of the shrink jobs with progress, scrollable; selection fills the shrink form; *Remove*, *Remove finished* (`JobRegistry.remove`) |
+| `QueueList` | the shrink queue in the shrink tab: running job first, then the waiting jobs with progress; *Continue*, *Add*, *Change*, *Remove*, *Up*, *Down* (since 1.13.1) |
+| `JobDialog` | window with every job so far (`JobList`) and the shrink form; adds to the queue, changes a waiting job (`ShrinkQueue.replace`) (since 1.13.1) |
 | `UpdateBar` | notices a newer installed release, offers a restart |
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
