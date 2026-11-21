@@ -1077,6 +1077,66 @@ extrapolated. The console
 shows the first 20 groups; the report file has all of them with a `level`
 column, and the folders of the levels as comment lines (`# L1 <folder>`).
 
+## Proposed jobs
+
+~~~bash
+mediatools estimate --up 2 --suggest 5             # propose up to 5 shrink jobs
+mediatools estimate --up 2 --suggest 5 --queue     # ... and put them into the queue
+~~~
+
+`shrink` selects by folder and playing time, not by bit rate, so a
+proposed job is "folder of level `Lk` with `--min-seconds s`": it takes
+every group of that level and the levels inside it whose length band
+starts at `s` or later. Of all such combinations the one that frees the
+most per hour (cautious time) comes first; its groups are taken, the rest
+is ranked again. Run in this order, each job finds the earlier ones done.
+A job that would free less than 1 GiB is not proposed.
+
+~~~text
+proposed shrink jobs, the most space per hour first:
+  1. shrink L1 --min-seconds 120   1641 files    207.1 GiB freed in 1 d 9 h  (6.3 GiB/h; total 207.1 GiB in 1 d 9 h)
+  2. shrink L3 --min-seconds 1800    87 files     45.4 GiB freed in 15 h ...
+~~~
+
+With `--queue` the jobs go into the shrink queue (see `queue`) with the
+settings of the most recently active shrink job (CRF, preset, `--jobs`,
+`--threads`); `--retry-failed` and `--keep-copies` are not taken over.
+
+# queue
+
+Shrink jobs that run one after the other, in list order.
+
+~~~bash
+mediatools queue                                           # list
+mediatools queue --add "~/Videos --min-seconds 120 --jobs 2 --threads 11"
+mediatools queue --add "~/Videos --min-seconds 0" --note "short ones" --first
+mediatools queue --move 3 --to 1                           # job 3 becomes the next
+mediatools queue --remove 2
+mediatools queue --clear
+mediatools queue --run                                     # start the first job now
+~~~
+
+| Option | Meaning |
+|---|---|
+| `--add "ARGS"` | arguments of `mediatools shrink` as one text, folder first; checked like a `shrink` command line, the folder is stored as an absolute path |
+| `--note TEXT`, `--first` | with `--add`: a note in the list; put the job first |
+| `--remove N`, `--move N --to M`, `--clear` | change the list (positions start at 1) |
+| `--run` | start the first job when no shrink runs; if one runs, the job stays first |
+
+**How it runs.** When a shrink job ends normally - done, or done with
+failed files - it takes the first queued job and continues with it in the
+same background process (watch it with `attach`, as before). A declined
+start does not continue the queue. `mediatools stop` ends the current job
+and **pauses** the queue: nothing starts by itself until `queue --run` or
+another shrink job ends normally. `mediatools status` shows how many jobs
+wait. The queue is `<state>/shrink_queue.json` (mode 600).
+
+Jobs whose folders overlap are no problem: a later job skips every video
+an earlier one has shrunk (shrink databases), so the order of the queue is
+the order in which the work is done. The job list counts a video for every
+remembered job that includes it, so the progress of a sub-folder job grows
+while a job on its parent folder shrinks its videos.
+
 # progress
 
 ~~~bash

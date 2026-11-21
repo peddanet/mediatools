@@ -251,21 +251,6 @@ Returns:
     if another shrink run is still active.
 ~~~
 
-**`_switch_release`**
-
-~~~text
-_switch_release(restart: SelfRestart, run: RunLog) -> int
-
-Replace this process by the installed release (see :class:`SelfRestart`).
-
-Args:
-    restart: Command line and log of the new process.
-    run: Log of this run; closed before the switch.
-
-Returns:
-    1 - only if the new process could not be started.
-~~~
-
 **`cmd_reload`**
 
 ~~~text
@@ -371,6 +356,20 @@ Returns:
 
 Raises:
     SystemExit: If the duration range is invalid.
+~~~
+
+**`_cmd_queue`**
+
+~~~text
+_cmd_queue(self, args: argparse.Namespace) -> int
+
+Run ``mediatools queue`` (see :class:`QueueCommand`).
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    Exit code of :meth:`QueueCommand.run`.
 ~~~
 
 **`_cmd_estimate`**
@@ -2464,7 +2463,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.12.0') -> None
+__init__(self, control: RunControl, installed: str = '1.13.0') -> None
 
 Remember the job and the installed release.
 
@@ -2590,6 +2589,21 @@ Ask the installed release for its version.
 Returns:
     Version string, e.g. ``1.2.11``, or None if it does not start or
     answers unexpectedly (the reason is in :attr:`last_error`).
+~~~
+
+**`switch`**
+
+~~~text
+switch(self, run: RunLog) -> int
+
+Replace this process by the installed release, logging the switch.
+
+Args:
+    run: :class:`RunLog` of the running command; closed before the
+        switch.
+
+Returns:
+    1 - only if the new process could not be started.
 ~~~
 
 **`execute`**
@@ -2736,7 +2750,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.12.0')
+__init__(self, package_dir: str | None = None, version: str = '1.13.0')
 
 Locate the imported package.
 
@@ -3511,10 +3525,45 @@ Plan once over the outermost level, group by level and report.
 
 Args:
     args: Parsed arguments (``up``, ``up_to``, ``overhead``, ``ext``,
-        ``probe_jobs``).
+        ``probe_jobs``, ``suggest``, ``queue``).
 
 Returns:
     0.
+~~~
+
+**`report_jobs`**
+
+~~~text
+report_jobs(self, jobs: list[SuggestedJob], uncertain: bool) -> None
+
+Log the proposed jobs with running totals.
+
+Args:
+    jobs: Proposed jobs, best first.
+    uncertain: True if times are ranges (fixed part extrapolated).
+~~~
+
+**`enqueue`**
+
+~~~text
+enqueue(
+    self,
+    jobs: list[SuggestedJob],
+    levels: list[str],
+    extensions: frozenset,
+) -> None
+
+Put the proposed jobs into the shrink queue, in their order.
+
+The settings (CRF, preset, parallel jobs, threads) are those of the
+most recently active shrink job, so the queued jobs run as the user
+usually runs them; options that change what is selected
+(``--retry-failed``, ``--keep-copies``) are not taken over.
+
+Args:
+    jobs: Proposed jobs, best first.
+    levels: Folders of the levels, innermost first.
+    extensions: Extensions of the estimate.
 ~~~
 
 **`report`**
@@ -3903,13 +3952,21 @@ Args:
 **`finished_file`**
 
 ~~~text
-finished_file(self, spec: JobSpec, size: int) -> None
+finished_file(self, spec: JobSpec, size: int, row: LedgerRow | None = None) -> None
 
-Take one finished (or skipped) video off the job's remainder.
+Take one finished (or skipped) video off the remainder of every job it belongs to.
+
+The running job loses it in any case. Every other remembered job
+whose folder and filters include the video (:meth:`JobSpec.matches`)
+loses it as well - e.g. a job on a sub-folder when a job on the
+parent folder shrinks a video there; without this its remainder
+would stay as it was at its last plan.
 
 Args:
     spec: The running job.
     size: Its source size in bytes.
+    row: The video with its path, length and modification time, or
+        None to update only the running job.
 ~~~
 
 **`entries`**
@@ -4157,6 +4214,162 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+### `JobSuggester` (`mediatools.shrink.jobsuggester`) {.unnumbered}
+
+~~~text
+Turns the groups of an estimate into an ordered list of shrink jobs.
+
+``shrink`` can filter by folder and playing time (``--min-seconds``),
+not by bit rate, so a job is "folder of level ``k`` with
+``--min-seconds s``". It takes every group not taken yet whose level is
+``k`` or inside it and whose length band starts at ``s`` or later (a
+folder contains the levels inside it; videos already shrunk are skipped
+by ``shrink`` anyway). Videos of unknown length count only for
+``--min-seconds 0``.
+
+The list is built greedily: of all combinations of level and
+``--min-seconds``, the one that frees the most per hour (cautious time)
+comes first; its groups are taken; the rest is ranked again - until the
+limit is reached or no job would free at least :attr:`MIN_BYTES`. Since
+the jobs run in this order, each one finds the earlier ones done.
+
+Attributes:
+    potential: The estimate.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, potential: ShrinkPotential) -> None
+
+Bind the suggester to an estimate.
+
+Args:
+    potential: Grouped videos.
+~~~
+
+**`low`**
+
+~~~text
+low(self, group: PotentialGroup) -> float
+
+Return the start of a group's length band (0 for unknown length).
+
+Args:
+    group: The group.
+
+Returns:
+    Seconds.
+~~~
+
+**`level`**
+
+~~~text
+level(group: PotentialGroup) -> int
+
+Return a group's level number.
+
+Args:
+    group: The group.
+
+Returns:
+    1 for ``L1`` and so on.
+~~~
+
+**`suggest`**
+
+~~~text
+suggest(self, limit: int) -> list[SuggestedJob]
+
+Return up to ``limit`` jobs, best first.
+
+Args:
+    limit: Maximum number of jobs.
+
+Returns:
+    The jobs with what each is expected to take in.
+~~~
+
+**`total`**
+
+~~~text
+total(level: int, low: int, groups: list[PotentialGroup]) -> SuggestedJob
+
+Sum up groups into one job.
+
+Args:
+    level: Level number.
+    low: ``--min-seconds``.
+    groups: Groups it takes.
+
+Returns:
+    The job.
+~~~
+
+### `SuggestedJob` (`mediatools.shrink.jobsuggester`) {.unnumbered}
+
+~~~text
+One proposed ``shrink`` run.
+
+Attributes:
+    level: Level number (1 = the given folder of the estimate).
+    min_seconds: Value for ``--min-seconds``.
+    files: Videos it is expected to encode.
+    size: Their size in bytes.
+    saved: Bytes expected to be freed.
+    seconds: Expected wall-clock seconds (cautious).
+    seconds_low: Expected wall-clock seconds (optimistic).
+~~~
+
+**`per_hour`**
+
+~~~text
+per_hour(self) -> float
+
+Bytes freed per hour (cautious).
+~~~
+
+**`__replace__`**
+
+~~~text
+__replace__(self, **changes)
+
+
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    level: int,
+    min_seconds: int,
+    files: int = 0,
+    size: int = 0,
+    saved: float = 0.0,
+    seconds: float = 0.0,
+    seconds_low: float = 0.0,
+) -> None
+
+Initialize self.  See help(type(self)) for accurate signature.
+~~~
+
+**`__repr__`**
+
+~~~text
+__repr__(self)
+
+Return repr(self).
+~~~
+
+**`__eq__`**
+
+~~~text
+__eq__(self, other)
+
+Return self==value.
 ~~~
 
 ### `ReplaceJournal` (`mediatools.shrink.journal`) {.unnumbered}
@@ -5353,6 +5566,115 @@ Returns:
     Always 0.
 ~~~
 
+### `QueueCommand` (`mediatools.shrink.queuecommand`) {.unnumbered}
+
+~~~text
+Lists and changes the shrink queue and starts it.
+
+Without options the queue is listed. ``--add`` takes the arguments of
+``mediatools shrink`` as one text (folder first, e.g. ``"~/Videos
+--min-seconds 120 --jobs 2"``); they are checked with the parser of
+``shrink`` before they are stored, and the folder is stored as an
+absolute path. ``--remove``, ``--move``/``--to`` and ``--clear`` change
+the list; ``--run`` starts the first job when no shrink runs. Every
+change prints the list afterwards.
+
+Attributes:
+    queue: The queue.
+    validate: Checks shrink arguments (raises :class:`SystemExit` on an
+        error, as argparse does).
+    start: Runs ``mediatools shrink`` with arguments and returns its
+        exit code.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(
+    self,
+    queue: ShrinkQueue,
+    validate: Callable[[list[str]], object],
+    start: Callable[[list[str]], int],
+) -> None
+
+Wire the command.
+
+Args:
+    queue: The queue.
+    validate: Checks shrink arguments.
+    start: Runs ``mediatools shrink`` with arguments.
+~~~
+
+**`add_parser`**
+
+~~~text
+add_parser(sub: argparse._SubParsersAction) -> None
+
+Define the subcommand.
+
+Args:
+    sub: Sub-parser collection of the main parser.
+~~~
+
+**`run`**
+
+~~~text
+run(self, args: argparse.Namespace) -> int
+
+Carry out the options and print the queue.
+
+Args:
+    args: Parsed arguments.
+
+Returns:
+    0; 2 for invalid input; for ``--run`` the exit code of the
+    started job (3 if another shrink runs, the job stays first).
+~~~
+
+**`change`**
+
+~~~text
+change(self, args: argparse.Namespace) -> None
+
+Apply ``--add``, ``--remove``, ``--move`` and ``--clear``.
+
+Args:
+    args: Parsed arguments.
+
+Raises:
+    ValueError: For invalid input.
+~~~
+
+**`checked`**
+
+~~~text
+checked(self, text: str) -> list[str]
+
+Check shrink arguments and make the folder absolute.
+
+Args:
+    text: Arguments as one text, folder first.
+
+Returns:
+    The arguments with an absolute folder.
+
+Raises:
+    ValueError: If they are not valid for ``shrink`` or the folder
+        is missing.
+~~~
+
+**`run_first`**
+
+~~~text
+run_first(self) -> int
+
+Start the first job of the queue.
+
+Returns:
+    Exit code of the job; 0 if the queue is empty; 3 if another
+    shrink runs (the job is put back first).
+~~~
+
 ### `ResultTable` (`mediatools.shrink.resulttable`) {.unnumbered}
 
 ~~~text
@@ -5900,8 +6222,9 @@ Attributes:
     control: Stop requests from ``mediatools stop``, or None.
     databases: Open databases per directory.
     flags: ``stop`` (finish the current file, then stop), ``abort``
-        (stop the current file at once) and ``restart`` (switch to the
-        installed release before the next file).
+        (stop the current file at once), ``restart`` (switch to the
+        installed release before the next file) and ``declined`` (the
+        user did not confirm the start; a queue does not continue).
     display: Progress display of the encode phase.
     stats: Counters ``shrunk``, ``hevc``, ``skipped``, ``short``,
         ``failed``, ``broken``, ``failed_before`` (left out: recorded as
@@ -6050,12 +6373,14 @@ Args:
 **`_job_progress`**
 
 ~~~text
-_job_progress(self, size: int) -> None
+_job_progress(self, size: int, path: str | None = None) -> None
 
-Take a finished or skipped video off the job's remainder.
+Take a finished or skipped video off the remainder of the jobs it belongs to.
 
 Args:
     size: Its source size.
+    path: The video, so that other remembered jobs that include it
+        are updated too (see :meth:`JobRegistry.finished_file`).
 ~~~
 
 **`_slots`**
@@ -6419,6 +6744,219 @@ Args:
 _finish(self) -> None
 
 Log the summary.
+~~~
+
+### `ShrinkQueue` (`mediatools.shrink.shrinkqueue`) {.unnumbered}
+
+~~~text
+A list of ``shrink`` command lines that run one after the other.
+
+The queue is a JSON file in the state folder (mode 600; it holds paths
+of the collection). Each entry is the argument list of one ``mediatools
+shrink`` run (folder first, then options) with a note and the time it
+was added. Entries are added by ``mediatools queue --add`` or by
+``mediatools estimate --suggest N --queue`` and run in list order.
+
+**How it runs.** A shrink job that ends normally - done, or done with
+failed files (exit codes 0 and 2), not declined - takes the first entry
+and replaces its own process with it (:meth:`continue_after`,
+``os.execv``), so the next job runs in the same background process.
+``mediatools stop`` (exit code 1) ends the current job and leaves the
+queue as it is: it *pauses*. ``mediatools queue --run`` starts the
+first entry when no shrink runs.
+
+Attributes:
+    path: Location of the JSON file.
+    python: Interpreter for the next job (the running one).
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, path: str, python: str | None = None) -> None
+
+Bind the queue to its file.
+
+Args:
+    path: Location of the JSON file.
+    python: Interpreter for the next job; the running one if None.
+~~~
+
+**`default`**
+
+~~~text
+default(cls) -> ShrinkQueue
+
+Return the queue of this user.
+
+Returns:
+    ``<state>/shrink_queue.json``.
+~~~
+
+**`entries`**
+
+~~~text
+entries(self) -> list[dict]
+
+Read the entries.
+
+Returns:
+    Entries with ``args`` (list), ``note`` and ``added``; empty if
+    the file is missing or cannot be read.
+~~~
+
+**`_save`**
+
+~~~text
+_save(self, entries: list[dict]) -> None
+
+Write the entries atomically with mode 600.
+
+Args:
+    entries: New content.
+~~~
+
+**`add`**
+
+~~~text
+add(self, args: list[str], note: str = '', front: bool = False) -> int
+
+Append (or put first) one job.
+
+Args:
+    args: Arguments of ``mediatools shrink`` (folder first).
+    note: Free text shown in the list.
+    front: Put it first instead of last.
+
+Returns:
+    Its position (1 = next).
+~~~
+
+**`remove`**
+
+~~~text
+remove(self, number: int) -> dict
+
+Remove one job.
+
+Args:
+    number: Position, 1 = next.
+
+Returns:
+    The removed entry.
+
+Raises:
+    ValueError: If there is no job at that position.
+~~~
+
+**`move`**
+
+~~~text
+move(self, number: int, to: int) -> None
+
+Move a job to another position.
+
+Args:
+    number: Current position, 1 = next.
+    to: New position (clipped to the list).
+
+Raises:
+    ValueError: If there is no job at ``number``.
+~~~
+
+**`_check`**
+
+~~~text
+_check(number: int, entries: list[dict]) -> None
+
+Raise if a position does not exist.
+
+Args:
+    number: Position, 1 = next.
+    entries: The list.
+
+Raises:
+    ValueError: If the position is not in the list.
+~~~
+
+**`clear`**
+
+~~~text
+clear(self) -> int
+
+Remove every job.
+
+Returns:
+    Number of jobs removed.
+~~~
+
+**`pop`**
+
+~~~text
+pop(self) -> dict | None
+
+Take the next job off the queue.
+
+Returns:
+    The entry, or None if the queue is empty.
+~~~
+
+**`lines`**
+
+~~~text
+lines(self) -> list[str]
+
+Describe the queue.
+
+Returns:
+    One line per job, ``1. mediatools shrink ...  (note)``, or a
+    line saying it is empty.
+~~~
+
+**`summary`**
+
+~~~text
+summary(self) -> list[str]
+
+Return one status line about the queue, or none if it is empty.
+
+Returns:
+    ``["queue: N job(s) waiting - 'mediatools queue' lists them"]``
+    or ``[]``.
+~~~
+
+**`command`**
+
+~~~text
+command(self, args: list[str]) -> list[str]
+
+Build the command line of the next job.
+
+Args:
+    args: Arguments of ``mediatools shrink`` from the queue.
+
+Returns:
+    Argument vector for :func:`os.execv`: the job already runs in
+    the background, so ``--foreground``; it was confirmed when it
+    was queued, so ``-y``.
+~~~
+
+**`continue_after`**
+
+~~~text
+continue_after(self, code: int, declined: bool, run: RunLog) -> int
+
+Start the next queued job in this process, if the last one ended normally.
+
+Args:
+    code: Exit code of the job that ended.
+    declined: True if the user declined to start it.
+    run: :class:`RunLog` of the job that ended (closed before the
+        switch).
+
+Returns:
+    ``code`` if nothing follows; 1 only if the next job could not be
+    started (it is put back first).
 ~~~
 
 ### `ShrinkState` (`mediatools.shrink.shrinkstate`) {.unnumbered}
