@@ -5,6 +5,31 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-11-21
+
+### Changed
+- GUI, shrink tab: the queue replaces the list of earlier jobs - the
+  running job first, then the waiting jobs in the order of processing,
+  each with folder, options and progress; buttons *Continue* (start the
+  selected waiting job now), *Add*, *Change*, *Remove*, *Up*, *Down*. The
+  shrink form left the tab.
+- New job dialog (*Add*, *Change*): every shrink job so far with *Add to
+  queue*, *Remove* and *Remove finished*, and the shrink form with folder
+  chooser and every option (*Run*, *Add to queue*, *Save changes* for a
+  waiting job). The dialog of *Run* (`JobPicker`) is gone; the queue has
+  no tab of its own any more.
+- Every part of the shrink tab (state, queue, log, output) is separated
+  by a sash and can be resized; the lists scroll and the arrow keys work
+  once a list has the focus.
+
+### Added
+- `JobRegistry.remove`, `ShrinkQueue.replace`; `queue --add` drops
+  `--foreground` and `-y`.
+
+### Documentation
+- Handbook: new screenshot of the shrink tab, new screenshot of the job
+  dialog; text of the shrink tab and the job dialog.
+
 ## [1.13.0] - 2026-11-21
 
 ### Added

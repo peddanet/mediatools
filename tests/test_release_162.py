@@ -10,7 +10,6 @@ from mediatools.gui.app import MediaToolsApp
 from mediatools.gui.catalog import CommandCatalog
 from mediatools.gui.consoleview import ConsoleView
 from mediatools.gui.formstore import FormStore
-from mediatools.gui.jobpicker import JobPicker
 from mediatools.gui.shrinkmonitor import ShrinkMonitor
 from mediatools.gui.shrinkpanel import ShrinkPanel
 from mediatools.shrink.encoder import HevcEncoder
@@ -119,8 +118,9 @@ def test_jobs_are_taken_from_old_logs(tmp_path: Path) -> None:
     assert planned.planned and planned.todo_bytes == 5000
 
 
-def test_run_offers_the_jobs_first(root: tk.Tk, tmp_path: Path, datadir: Path) -> None:
-    """Run in the shrink tab opens the dialog; its buttons start the choice.
+def test_run_in_the_job_dialog_starts_at_once(root: tk.Tk, tmp_path: Path,
+                                              datadir: Path) -> None:
+    """Since 1.13.1 *Run* of the shrink form (job dialog) starts directly; jobs fill it.
 
     Args:
         root: Main window (fixture).
@@ -133,22 +133,11 @@ def test_run_offers_the_jobs_first(root: tk.Tk, tmp_path: Path, datadir: Path) -
     form = app.forms["shrink"]
     started: list[str] = []
     form.console.run = lambda args, shown: started.append(shown) or True
-    assert form.run() and len(started) == 1                      # no jobs: runs at once
     ShrinkMonitor().registry().planned(JobSpec("/m/c"), {"crf": 24}, 10, 1)
-    assert not form.run() and len(started) == 1                  # dialog is open
-    dialogs = [child for child in root.winfo_children() if isinstance(child, tk.Toplevel)]
-    assert len(dialogs) == 1
-    assert app.run_choice(None) and len(started) == 2
-    assert app.run_choice(JobEntry(JobSpec("/m/c"), {"crf": 24, "jobs": 2, "threads": 11}))
+    assert form.run() and len(started) == 1
+    assert app.pick_job(JobEntry(JobSpec("/m/c"), {"crf": 24, "jobs": 2, "threads": 11}),
+                        start=True)
     assert "--crf 24" in started[-1] and "--threads 11" in started[-1]
-    chosen: list[object] = []
-    picker = JobPicker(root, ShrinkMonitor(), "mediatools shrink", chosen.append)
-    rows = picker.jobs.jobs.get_children()
-    picker.jobs.jobs.selection_set(rows[0])
-    root.update()
-    assert not chosen                                            # selecting alone starts nothing
-    picker.jobs.pick(True)
-    assert isinstance(chosen[0], JobEntry) and not picker.window.winfo_exists()
 
 
 def test_explicit_threads_are_remembered() -> None:
