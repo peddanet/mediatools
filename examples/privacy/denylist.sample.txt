@@ -1,0 +1,9 @@
+# Deny list of tools/privacy_scan.py - SAMPLE with invented terms.
+# Copy to ~/.config/mediatools/privacy/denylist.txt (CONTRIBUTING.md,
+# "Local files of a developer"), then replace the terms by your own.
+# One term per line; '#' starts a comment; at least 3 characters.
+# A term matches whole words only and ignores case. Never commit the
+# real list: it would reveal what it protects.
+loremfolder
+ipsumcollection
+dolorsitamet

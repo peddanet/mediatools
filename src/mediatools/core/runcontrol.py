@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import time
 
@@ -251,6 +252,25 @@ class RunControl:
             return None
         with open(self.stop_file, "w", encoding="utf-8") as handle:
             handle.write(f"stop requested at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        return pid
+
+    def request_abort(self) -> int | None:
+        """Abort the running job now (SIGTERM, like a closed terminal).
+
+        The job stops its encodes at once and deletes their partial output;
+        the originals stay untouched, and a replacement that already began
+        is completed first (:meth:`Shrinker.on_signal`).
+
+        Returns:
+            PID of the job that was signalled, or None if none runs.
+        """
+        pid = self.active_pid()
+        if pid is None:
+            return None
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return None
         return pid
 
     def request_restart(self) -> int | None:

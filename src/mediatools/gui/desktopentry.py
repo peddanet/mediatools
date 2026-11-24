@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import string
 import sys
 
 
@@ -23,13 +24,18 @@ class DesktopEntry:
     (:meth:`problems`, :meth:`repair`), because some launchers or clean-up
     tools drop entries and a moved program would leave a dead one.
 
+    Entry and icons are real files of the package (``mediatools/data``:
+    ``mediatools.desktop.in`` with the placeholders ``$program`` and
+    ``$window_class``, the icons), copied - never generated from strings.
+
     Attributes:
         path: Location of the ``.desktop`` file.
         program: Program started by the entry.
         icons: Icon theme folder (``.../icons/hicolor``).
     """
 
-    ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons")
+    ICON_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    TEMPLATE = os.path.join(ICON_DIR, "mediatools.desktop.in")
     ICONS = (("mediatools.svg", os.path.join("scalable", "apps", "mediatools.svg")),
              ("mediatools-256.png", os.path.join("256x256", "apps", "mediatools.png")))
     WINDOW_CLASS = "Mediatools"
@@ -103,15 +109,9 @@ class DesktopEntry:
             A Desktop Entry of type Application.
         """
         program = self.program.replace("\\", "\\\\").replace('"', '\\"')
-        return ("[Desktop Entry]\n"
-                "Type=Application\n"
-                "Name=mediatools\n"
-                "Comment=Shrink, review, flatten and back up media collections\n"
-                f'Exec="{program}" gui\n'
-                "Icon=mediatools\n"
-                f"StartupWMClass={self.WINDOW_CLASS}\n"
-                "Terminal=false\n"
-                "Categories=AudioVideo;Utility;\n")
+        with open(self.TEMPLATE, encoding="utf-8") as handle:
+            return string.Template(handle.read()).substitute(program=program,
+                                                             window_class=self.WINDOW_CLASS)
 
     def install(self) -> str:
         """Write the entry and copy the icons.

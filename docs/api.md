@@ -283,9 +283,12 @@ Returns:
 **`cmd_stop`**
 
 ~~~text
-cmd_stop(_args: argparse.Namespace) -> int
+cmd_stop(args: argparse.Namespace) -> int
 
-Run ``mediatools stop``: request a stop of the running shrink.
+Run ``mediatools stop``: request a stop of the running shrink (queue job: paused).
+
+Args:
+    args: Parsed arguments (``--now``: abort the current file).
 
 Returns:
     0 if a running shrink was asked to stop, 1 if none runs.
@@ -2013,14 +2016,6 @@ Attributes:
     freed: Returns the bytes freed so far in all sessions, or None.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -2394,6 +2389,21 @@ Returns:
     stop file is left behind that would stop the next run).
 ~~~
 
+**`request_abort`**
+
+~~~text
+request_abort(self) -> int | None
+
+Abort the running job now (SIGTERM, like a closed terminal).
+
+The job stops its encodes at once and deletes their partial output;
+the originals stay untouched, and a replacement that already began
+is completed first (:meth:`Shrinker.on_signal`).
+
+Returns:
+    PID of the job that was signalled, or None if none runs.
+~~~
+
 **`request_restart`**
 
 ~~~text
@@ -2487,7 +2497,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.14.0') -> None
+__init__(self, control: RunControl, installed: str = '1.14.1') -> None
 
 Remember the job and the installed release.
 
@@ -2723,14 +2733,6 @@ Attributes:
     last: Monotonic time of the last update.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -2774,7 +2776,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.14.0')
+__init__(self, package_dir: str | None = None, version: str = '1.14.1')
 
 Locate the imported package.
 
@@ -3668,14 +3670,6 @@ Attributes:
     took: Wall-clock seconds spent on the file.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -3827,14 +3821,6 @@ Return the progress as text.
 
 Returns:
     E.g. ``37.2 %``, or ``not planned yet`` for a job from an old log.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -4194,22 +4180,6 @@ Returns:
     True if the file is part of the job's set.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -4255,6 +4225,14 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
 ~~~
 
 ### `JobSuggester` (`mediatools.shrink.jobsuggester`) {.unnumbered}
@@ -4370,14 +4348,6 @@ Attributes:
 per_hour(self) -> float
 
 Bytes freed per hour (cautious).
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -4603,14 +4573,6 @@ Args:
     row: Ledger entry.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -4715,14 +4677,6 @@ Args:
 
 Returns:
     The entry, or None for a comment or a damaged line.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -4912,22 +4866,6 @@ Raises:
         negative or ``jobs`` below 1.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -4979,6 +4917,14 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
 ~~~
 
 ### `ShrinkPlanner` (`mediatools.shrink.planner`) {.unnumbered}
@@ -5303,14 +5249,6 @@ Expected encoding time in wall-clock seconds (optimistic variant).
 per_hour(self) -> float
 
 Bytes freed per hour of encoding (cautious variant).
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -5975,14 +5913,6 @@ Args:
     when: Time the file was finished.
     src: Source bytes.
     out: Output bytes.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -6808,6 +6738,16 @@ and replaces its own process with it (:meth:`continue_after`,
 queue as it is: it *pauses*. ``mediatools queue --run`` starts the
 first entry when no shrink runs.
 
+**Paused jobs.** A started job is taken off the list,
+but kept in ``<queue file>.current`` until it ends. If it does not end
+normally - stopped by the user (``mediatools stop``, with or without
+``--now``), or ended by an error - it goes back to the list as first
+entry, marked *paused* (after *Stop, then next*: second, behind the
+job that starts now). The user decides: *Continue* goes on where it
+stopped (the directory databases skip the finished files), *Remove*
+drops it. A job left in the record by a crash is put back the same way
+by :meth:`recover`, as soon as no shrink runs.
+
 Attributes:
     path: Location of the JSON file.
     python: Interpreter for the next job (the running one).
@@ -6960,6 +6900,86 @@ Returns:
     The entry, or None if the queue is empty.
 ~~~
 
+**`current_file`**
+
+~~~text
+current_file(self) -> str
+
+Record of the job that runs now (taken off the list).
+
+Returns:
+    ``<queue file>.current``.
+~~~
+
+**`_write_current`**
+
+~~~text
+_write_current(self, entry: dict) -> None
+
+Remember the started job atomically (mode 600).
+
+The process ID is stored with it: the job runs in this process
+(``queue --run`` and the switch to the next job keep the PID), so
+:meth:`recover` can tell a running job from one left by a crash.
+
+Args:
+    entry: The entry taken off the list.
+~~~
+
+**`take_current`**
+
+~~~text
+take_current(self) -> dict | None
+
+Read and forget the record of the started job.
+
+Returns:
+    The entry, or None if there is none (or it cannot be read).
+~~~
+
+**`put_back`**
+
+~~~text
+put_back(self, entry: dict, position: int = 1) -> int
+
+Return a job that did not end normally to the list, marked paused.
+
+Args:
+    entry: The entry of the job.
+    position: Place in the list, 1 = next.
+
+Returns:
+    Its position.
+~~~
+
+**`recover`**
+
+~~~text
+recover(self) -> bool
+
+Put back a job whose record a crash left behind.
+
+The record is left alone while the process that took the job is
+alive (it runs the job, or is about to start it).
+
+Returns:
+    True if a job was put back.
+~~~
+
+**`_alive`**
+
+~~~text
+_alive(pid: object) -> bool
+
+Tell whether a process ID belongs to a living process.
+
+Args:
+    pid: Process ID from the record (anything else counts as dead).
+
+Returns:
+    True if the process exists.
+~~~
+
 **`lines`**
 
 ~~~text
@@ -7037,6 +7057,8 @@ Start the next queued job in this process, if the last one ended normally.
 
 A stop by the user ends the queue - unless *Stop, then next* asked
 for the next job (:meth:`next_after_stop`); the marker is used once.
+A job from the queue that did not end normally goes back to the
+list, marked paused (:meth:`put_back`).
 
 Args:
     code: Exit code of the job that ended.
@@ -7078,14 +7100,6 @@ Attributes:
         before the replacement (for the ledger).
 ~~~
 
-**`__annotate_func__`**
-
-~~~text
-__annotate_func__(format)
-
-
-~~~
-
 ### `RunningEncode` (`mediatools.shrink.slottable`) {.unnumbered}
 
 ~~~text
@@ -7102,14 +7116,6 @@ Attributes:
     started: Monotonic start time.
     cell: ``[name, encoded fraction, size]`` for the display; the
         worker thread updates the fraction.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -8391,14 +8397,6 @@ Returns:
     ``method`` was written by mediatools 1.7.0 (method 1).
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -8905,14 +8903,6 @@ Args:
 
 Returns:
     The result, or None if there is none.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -9881,14 +9871,6 @@ Returns:
     The item.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -10812,14 +10794,6 @@ Returns:
     The reconstructed plan.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -10858,14 +10832,6 @@ Attributes:
     source: Absolute path of the source file.
     level: Naming level 0..3 of the link name.
     note: Free text, e.g. the reason for ``skip``.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**
@@ -11661,22 +11627,6 @@ Returns:
     Absolute path of the mirrored source inside ``base``.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
-**`__hash__`**
-
-~~~text
-__hash__(self)
-
-Return hash(self).
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -11723,6 +11673,14 @@ Implement setattr(self, name, value).
 __delattr__(self, name)
 
 Implement delattr(self, name).
+~~~
+
+**`__hash__`**
+
+~~~text
+__hash__(self)
+
+Return hash(self).
 ~~~
 
 ### `Snapshotter` (`mediatools.snapshot.snapshotter`) {.unnumbered}
@@ -12196,7 +12154,7 @@ Returns:
 ~~~text
 render(self) -> str
 
-Build the unit file.
+Build the unit file from ``mediatools/data/mediatools-snapshot.service.in``.
 
 Returns:
     Content of the service file.
@@ -13274,14 +13232,6 @@ Returns:
     ``--migrate``, else True.
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -13568,6 +13518,10 @@ request is remembered (``[gui] desktop_entry = yes``); the GUI start and
 ``mediatools update`` then put back a missing or outdated entry
 (:meth:`problems`, :meth:`repair`), because some launchers or clean-up
 tools drop entries and a moved program would leave a dead one.
+
+Entry and icons are real files of the package (``mediatools/data``:
+``mediatools.desktop.in`` with the placeholders ``$program`` and
+``$window_class``, the icons), copied - never generated from strings.
 
 Attributes:
     path: Location of the ``.desktop`` file.
@@ -14394,14 +14348,6 @@ Returns:
     default of the command line as text (empty if none).
 ~~~
 
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
-~~~
-
 **`__init__`**
 
 ~~~text
@@ -14442,7 +14388,9 @@ Return self==value.
 Shows the running shrink job and the queue, in the order of processing.
 
 The first row is the job that runs now (``running``), the others are
-the waiting jobs (``1``, ``2`` ...). Each row shows the progress of
+the waiting jobs (``1``, ``2`` ...); a job that was stopped or aborted
+is back among them as ``1 paused`` (:meth:`ShrinkQueue.put_back`) and
+goes on with *Continue* or leaves with *Remove*. Each row shows the progress of
 that job as far as it is known (its remembered job with the same folder
 and filters), the figures in GiB, the settings and the folder with its
 filters.
@@ -14779,6 +14727,17 @@ Returns:
     Message for the GUI.
 ~~~
 
+**`abort`**
+
+~~~text
+abort(self) -> str
+
+Abort the running shrink at once.
+
+Returns:
+    Message for the GUI.
+~~~
+
 **`reload`**
 
 ~~~text
@@ -14799,8 +14758,10 @@ It refreshes itself every :attr:`refresh_ms` milliseconds: process and
 release (``mediatools status``), the progress lines with a progress toolbar,
 the space read, written and freed in this session and in all sessions,
 and the end of the log.
-*Stop* and *Reload* make the same requests as ``mediatools stop`` and
-``mediatools reload``; the run itself continues independently of the
+*Stop after current file*, *Abort now* (after a question) and *Reload*
+make the same requests as ``mediatools stop``, ``mediatools stop --now``
+and ``mediatools reload``; a stopped or aborted job from the queue goes
+back to the queue, paused; the run itself continues independently of the
 GUI, which may be closed at any time.
 
 Below, the shrink queue follows in the order of processing - the
@@ -14889,6 +14850,17 @@ stop(self) -> None
 Request a stop after the current file (the queue does not go on).
 ~~~
 
+**`abort`**
+
+~~~text
+abort(self) -> None
+
+Abort the current file at once, after a question (the queue does not go on).
+
+The encode time of the current file is lost; the job stays in the
+queue, paused, if it came from there.
+~~~
+
 **`reload`**
 
 ~~~text
@@ -14934,14 +14906,6 @@ Attributes:
     job: Root and options of the running job (from its log), or empty.
     overall: Space line: read, written and freed in this (or the last)
         session and in all sessions.
-~~~
-
-**`__replace__`**
-
-~~~text
-__replace__(self, **changes)
-
-
 ~~~
 
 **`__init__`**

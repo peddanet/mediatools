@@ -16,6 +16,8 @@ import tkinter as tk
 
 import pytest
 
+from conftest import CHILD_TIMEOUT
+
 from test_gui_logic import write_run
 from test_release_1131 import parse
 from test_gui_tk import fixture_root  # noqa: F401  pylint: disable=unused-import
@@ -55,7 +57,7 @@ def fixture_world(tmp_path: Path) -> dict[str, Path]:
     for args in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "x"],
                  ["tag", "v1.14.0"]):
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
-                        *args], cwd=repo, check=True, capture_output=True)
+                        *args], cwd=repo, check=True, capture_output=True, timeout=CHILD_TIMEOUT)
     pip = tmp_path / "fake-pip.sh"
     pip.write_text(FAKE_PIP)
     pip.chmod(0o755)
@@ -247,7 +249,7 @@ def test_check_activates_the_project_venv(tmp_path: Path) -> None:
     (project / ".venv" / "bin" / "activate").write_text('export VIRTUAL_ENV="$PWD/.venv"\n')
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
     res = subprocess.run(["bash", "tools/check.sh", "--fast"], cwd=project, env=env,
-                         capture_output=True, text=True, check=False)
+                         capture_output=True, text=True, check=False, timeout=CHILD_TIMEOUT)
     assert res.returncode == 2
     assert "venv: .venv (activated for this check)" in res.stdout
     assert "missing tool: pycodestyle" in res.stderr and ".venv/bin/pip install" in res.stderr

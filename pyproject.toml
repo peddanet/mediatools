@@ -37,7 +37,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "mediatools.update" = ["*.sh"]
-"mediatools.gui" = ["icons/*.svg", "icons/*.png"]
+"mediatools" = ["data/*.svg", "data/*.png", "data/*.in"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

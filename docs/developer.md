@@ -417,6 +417,7 @@ Invariants:
 <cache>/triage_durations.tsv          DurationCache    path TAB size TAB mtime_ns TAB seconds
 <cache>/shrink_codecs.tsv             CodecCache       path TAB size TAB mtime_ns TAB codec
 <state>/state/shrink_queue.json.next  ShrinkQueue      marker of "Stop, then next" (used once)
+<state>/state/shrink_queue.json.current ShrinkQueue    entry of the running queue job + "pid" (put back if it does not end normally)
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <root>/_broken/manifest.jsonl         Quarantine       one JSON object per video: number, kind, names
                                                        [[original, quarantined], ...], assessment,
@@ -516,9 +517,17 @@ pipeline. Everything runs as normal user; no root privileges are needed.
 A full run requires ffmpeg, ffprobe, rsync, rsnapshot and Tk for Python
 (`python3-tk`): without them the integration and GUI tests would be
 skipped and the coverage would drop, so the script stops with an
-installation hint instead. The GUI tests need a display; without
-`DISPLAY` the script restarts itself under `xvfb-run` (package `xvfb`), a
-virtual X server that draws into memory.
+installation hint instead. The GUI tests need a display; the script
+always restarts itself under `xvfb-run` (package `xvfb`), a virtual X
+server that draws into memory - also when a desktop is running, because
+**tests never touch the real desktop or session** (dev-conventions
+handover v8): `tests/conftest.py` gives the run its own
+`XDG_RUNTIME_DIR` (temporary folder) and a `WAYLAND_DISPLAY` name that
+does not exist, drops `DISPLAY` unless `tools/check.sh` set up Xvfb
+(`MEDIATOOLS_XVFB=1`), and gives every test its own data folders
+(`MEDIATOOLS_HOME`, `XDG_*_HOME`). Every wait for a child process has a
+time limit (`CHILD_TIMEOUT`, 300 s): on timeout the child is killed and
+the test fails with its output instead of blocking the run.
 
 ~~~bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # once: development venv
@@ -536,7 +545,7 @@ Nothing is created or installed by the script.
 
 | No. | Gate     | Tool        | Pass criterion                                     |
 |-----|----------|-------------|----------------------------------------------------|
-| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits; refuses (exit code 2) while lists of the layout before 1.5.0 exist |
+| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits, identities; every identity address no-reply; fails (exit code 2) without local terms (skipped only in CI) and while lists of the layout before 1.5.0 exist |
 | 0   | shell    | shellcheck  | no finding in `install.sh`, `tools/*.sh`, the hook and the update script |
 | 1   | format   | pycodestyle | PEP 8 layout, max line length 100                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
@@ -552,8 +561,22 @@ repository; they come from the deny list
 `MEDIATOOLS_HOME` set: `$MEDIATOOLS_HOME/privacy_denylist.txt`) and from the
 unit directory names below `[collection] root`.
 Matching ignores case and whole words only (`cat` does not match `concatenate`);
-terms shorter than three characters are ignored. Without local terms the
-gate is skipped, which keeps CI neutral.
+terms shorter than three characters are ignored.
+
+**Without local terms the gate fails** (exit code 2): a scan without terms
+checks nothing, and a green run must not claim a check that did not
+happen (also in a sandbox without lists). Only in CI (`CI=true`, set by
+GitHub Actions), which has no local list by design, it is skipped and
+says so. Samples of both lists are in `examples/privacy/`
+(CONTRIBUTING.md, "Local files of a developer").
+
+**Identities.** Author and committer of every commit and the tagger of
+every annotated tag are searched for the terms, and every e-mail address
+must be a no-reply address (`*@users.noreply.github.com`,
+`noreply@github.com`, `noreply@anthropic.com`) or stand alone on a line of
+the allow list. A finding names the commit or tag and shows the address
+masked (`p***@g***.com`). Reason: commits made with a private global git
+identity put the address into the public history.
 
 Ordinary words can be on the deny list and still be needed in technical
 text. Instead of rewording, such uses are permitted by **allowed phrases**

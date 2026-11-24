@@ -321,7 +321,7 @@ class BarrierEncoder(FakeEncoder):
         try:
             if len(self.calls) < self.barrier.parties and not self.barrier.broken:
                 try:
-                    self.barrier.wait()
+                    self.barrier.wait(timeout=60)
                 except threading.BrokenBarrierError:
                     pass
             time.sleep(0.05)

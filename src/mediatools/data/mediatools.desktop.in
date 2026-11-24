@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=mediatools
+Comment=Shrink, review, flatten and back up media collections
+Exec="$program" gui
+Icon=mediatools
+StartupWMClass=$window_class
+Terminal=false
+Categories=AudioVideo;Utility;

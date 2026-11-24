@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_file
+from conftest import CHILD_TIMEOUT, make_file
 
 SPEC = importlib.util.spec_from_file_location(
     "privacy_scan", Path(__file__).resolve().parent.parent / "tools" / "privacy_scan.py")
@@ -18,17 +18,21 @@ SPEC.loader.exec_module(privacy_scan)
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
 
-def git_repo(path: Path, message: str) -> None:
+NO_REPLY = "1+t@users.noreply.github.com"
+
+
+def git_repo(path: Path, message: str, email: str = NO_REPLY) -> None:
     """Create a repository with one commit of all files below ``path``.
 
     Args:
         path: Repository root (files must exist).
         message: Commit message.
+        email: Address of author and committer.
     """
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": email,
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": email}
     for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", message]):
-        subprocess.run(["git", "-C", str(path), *args], check=True, env=env)
+        subprocess.run(["git", "-C", str(path), *args], check=True, env=env, timeout=CHILD_TIMEOUT)
 
 
 @needs_git
@@ -56,16 +60,72 @@ def test_finds_terms_in_files_paths_and_messages(tmp_path: Path,
 
 
 @needs_git
-def test_clean_and_skipped(tmp_path: Path) -> None:
-    """A clean repository passes; without terms the scan is skipped.
+def test_clean_and_without_terms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                 capsys: pytest.CaptureFixture) -> None:
+    """A clean repository passes; without terms the scan fails, in CI it is skipped.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Environment patcher (fixture).
+        capsys: Output capture (fixture).
+    """
+    make_file(tmp_path / "a.txt", b"nothing to see\n")
+    git_repo(tmp_path, "initial")
+    assert privacy_scan.PrivacyScan(str(tmp_path), ["hidden"]).run() == 0
+    monkeypatch.delenv("CI", raising=False)
+    assert privacy_scan.PrivacyScan(str(tmp_path), []).run() == 2
+    assert "FAILED: no local terms" in capsys.readouterr().err
+    monkeypatch.setenv("CI", "true")
+    assert privacy_scan.PrivacyScan(str(tmp_path), []).run() == 0
+    assert "skipped in CI" in capsys.readouterr().out
+
+
+@needs_git
+def test_identities_need_no_reply_addresses(tmp_path: Path,
+                                            capsys: pytest.CaptureFixture) -> None:
+    """Author, committer and tagger: terms are found, private addresses refused (masked).
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        capsys: Output capture (fixture).
+    """
+    make_file(tmp_path / "a.txt", b"nothing to see\n")
+    git_repo(tmp_path, "initial", email="someone@private-mail.example")
+    env = {**os.environ, "GIT_COMMITTER_NAME": "Hiddenname", "GIT_COMMITTER_EMAIL": NO_REPLY}
+    subprocess.run(["git", "-C", str(tmp_path), "tag", "-a", "v1", "-m", "v1"], check=True,
+                   env=env, timeout=CHILD_TIMEOUT)
+    subprocess.run(["git", "-C", str(tmp_path), "tag", "light"], check=True, env=env,
+                   timeout=CHILD_TIMEOUT)
+    scan = privacy_scan.PrivacyScan(str(tmp_path), ["hiddenname"])
+    assert scan.run() == 1
+    found = dict(scan.findings)
+    assert found["commit " + scan.findings[0][0].split()[1] + " author"] \
+        == "not a no-reply address: s***@p***.example"
+    assert any(loc.startswith("tag v1 tagger name") for loc, _t in scan.findings)
+    assert not any("light" in loc for loc, _t in scan.findings)     # no tagger
+    assert "someone@" not in capsys.readouterr().out
+    allowed = privacy_scan.PrivacyScan(str(tmp_path), ["unrelated"],
+                                       ["someone@private-mail.example"])
+    assert allowed.run() == 0
+    assert privacy_scan.PrivacyScan.mask("x@localhost") == "x***@***"
+
+
+@needs_git
+def test_no_reply_login_is_not_a_finding(tmp_path: Path) -> None:
+    """The login in a no-reply identity may be a deny-list term; another name is searched.
 
     Args:
         tmp_path: Temporary directory (fixture).
     """
     make_file(tmp_path / "a.txt", b"nothing to see\n")
-    git_repo(tmp_path, "initial")
-    assert privacy_scan.PrivacyScan(str(tmp_path), ["hidden"]).run() == 0
-    assert privacy_scan.PrivacyScan(str(tmp_path), []).run() == 0
+    git_repo(tmp_path, "initial")                         # name t, address 1+t@...
+    assert privacy_scan.PrivacyScan(str(tmp_path), ["ttt", "users"]).run() == 0
+    env = {**os.environ, "GIT_AUTHOR_NAME": "Hiddenname", "GIT_AUTHOR_EMAIL": NO_REPLY,
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": NO_REPLY}
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env=env, timeout=CHILD_TIMEOUT)
+    scan = privacy_scan.PrivacyScan(str(tmp_path), ["hiddenname"])
+    assert scan.run() == 1 and scan.findings[0][0].endswith("author name:1")
 
 
 def test_local_terms_from_denylist_and_collection(datadir: Path, tmp_path: Path) -> None:

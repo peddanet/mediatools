@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import CHILD_TIMEOUT
+
 INSTALL = str(Path(__file__).resolve().parents[1] / "install.sh")
 
 
@@ -16,7 +18,7 @@ def git(*args: str, cwd: Path) -> None:
         cwd: Working directory.
     """
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-                   cwd=cwd, check=True, capture_output=True)
+                   cwd=cwd, check=True, capture_output=True, timeout=CHILD_TIMEOUT)
 
 
 def run_install(origin: Path, home: Path, *args: str) -> subprocess.CompletedProcess:
@@ -33,7 +35,7 @@ def run_install(origin: Path, home: Path, *args: str) -> subprocess.CompletedPro
     env = dict(os.environ, HOME=str(home), MEDIATOOLS_REPO=f"file://{origin}",
                MEDIATOOLS_HOME=str(home / "data"), BIN_DIR=str(home / "bin"))
     return subprocess.run(["bash", INSTALL, *args], env=env, capture_output=True, text=True,
-                          check=False)
+                          check=False, timeout=CHILD_TIMEOUT)
 
 
 @pytest.fixture(name="repo")

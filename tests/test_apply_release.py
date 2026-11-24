@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import CHILD_TIMEOUT
+
 from test_release_tools import FAKE_GH
 from mediatools.cli import Cli
 from mediatools.update import ReleaseUpdater
@@ -45,7 +47,7 @@ def git(*args: str, cwd: Path) -> str:
     """
     return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                            *args], cwd=cwd, check=True, capture_output=True,
-                          text=True).stdout.strip()
+                          text=True, timeout=CHILD_TIMEOUT).stdout.strip()
 
 
 @pytest.fixture(name="setup")
