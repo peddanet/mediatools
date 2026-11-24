@@ -21,6 +21,12 @@
 # Usage: tools/check.sh [--fast]
 #   --fast  skip the test gate (used for quick checks while editing)
 #
+# Each tree is checked in full once: after a full green run the tree of the
+# working copy, the Python version and a hash of the installed packages are
+# stored in .git/checked-trees; for a known key only privacy and shell run
+# again (the privacy scan also reads commit messages and tags). CHECK_FULL=1
+# forces a full run; CI (CI=true) always runs in full.
+#
 # Runs as a normal user; needs no root privileges.
 
 set -euo pipefail
@@ -89,8 +95,38 @@ if (( FAST == 0 )); then
     fi
 fi
 
+# Each tree is checked in full once (dev-conventions templates/check-cache.sh,
+# block 1): key = tree of the working copy + Python version + installed packages.
+# (deviation from the template: an unpacked archive without .git must not
+# end the script here - then nothing is cached)
+CHECKED="$(git rev-parse --git-dir 2>/dev/null || echo .git)/checked-trees"
+check_key() {
+    local idx tree
+    idx="$(mktemp)"
+    cp "$(git rev-parse --git-dir)/index" "$idx" 2>/dev/null || true
+    tree="$(GIT_INDEX_FILE="$idx" git add -A >/dev/null 2>&1 \
+            && GIT_INDEX_FILE="$idx" git write-tree)" || tree=""
+    rm -f "$idx"
+    [[ -n "$tree" ]] || return 1
+    printf '%s py%s deps-%s\n' "$tree" \
+        "$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')" \
+        "$(python3 -m pip list --format=freeze 2>/dev/null | sha256sum | cut -c1-12)"
+}
+KEY=""
+if [[ "${CI:-}" != "true" && "${CHECK_FULL:-0}" != "1" ]]; then
+    KEY="$(check_key)" || KEY=""
+fi
+
 gate privacy  python3 tools/privacy_scan.py
 gate shell    shellcheck install.sh tools/*.sh .githooks/pre-push src/mediatools/update/*.sh
+
+# check cache, block 2: a tree that passed all gates before skips the rest
+if [[ -n "$KEY" && -f "$CHECKED" ]] && grep -qxF "$KEY" "$CHECKED"; then
+    printf '\nThis tree passed all gates before (%s).\n' "${KEY%% *}"
+    printf 'format, lint, types, security and tests skipped - CHECK_FULL=1 forces them.\n'
+    printf '\nAll quality gates passed.\n'
+    exit 0
+fi
 gate format   pycodestyle --max-line-length=100 src tests tools
 gate lint     pylint --fail-under=10 src tests tools
 gate types    mypy
@@ -98,6 +134,11 @@ gate security bandit -q -c pyproject.toml -r src
 if (( FAST == 0 )); then
     gate tests python3 -m pytest -q -p no:cacheprovider \
         --cov=mediatools --cov-report=term
+    # check cache, block 3: remember this fully checked tree (last 50)
+    if [[ -n "$KEY" ]]; then
+        { [[ -f "$CHECKED" ]] && tail -n 49 "$CHECKED"; echo "$KEY"; } > "$CHECKED.tmp"
+        mv "$CHECKED.tmp" "$CHECKED"
+    fi
 fi
 
 printf '\nAll quality gates passed.\n'

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
+TIMEOUT = 300   # seconds per child process: a hanging script fails the test instead of the run
 CHANGELOG = """# Changelog
 
 ## [Unreleased]
@@ -53,7 +54,7 @@ if cmd == ["pr", "merge"]:
     pr = prs[int(args[2]) - 1]
     with tempfile.TemporaryDirectory() as tmp:
         def run(*command):
-            subprocess.run(command, cwd=tmp, check=True, capture_output=True)
+            subprocess.run(command, cwd=tmp, check=True, capture_output=True, timeout=300)
         run("git", "clone", "-q", origin, ".")
         run("git", "checkout", "-q", pr["base"])
         run("git", "merge", "-q", "--no-ff", "origin/" + pr["head"], "-m", opt("--subject"))
@@ -85,7 +86,7 @@ def sh(cwd: Path, env: dict[str, str], *args: str, stdin: str = "",
         The finished process.
     """
     return subprocess.run(list(args), cwd=cwd, env=env, input=stdin, text=True,
-                          capture_output=True, check=check)
+                          capture_output=True, check=check, timeout=TIMEOUT)
 
 
 @pytest.fixture(name="repo")

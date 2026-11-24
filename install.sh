@@ -19,12 +19,15 @@
 #     (e.g. a shrink); then it stays and the next run removes it,
 #   * the old link is first pointed to the new release (so it keeps working
 #     until ~/.local/bin is in PATH, which Ubuntu adds at the next login);
-#     a later run removes it once ~/.local/bin is in PATH,
-#   * the systemd user unit of the snapshot trigger is rewritten to the new
-#     link if it named the old one.
+#     a later run removes it once ~/.local/bin is in PATH and neither the
+#     menu entry nor the systemd unit names it any more,
+#   * the menu entry (~/.local/share/applications/mediatools.desktop) and
+#     the systemd user unit of the snapshot trigger are rewritten to the new
+#     link if they named the old one.
 #
 # Runs as a normal user and writes only below the data folder, BIN_DIR,
-# ~/scripts (old layout) and ~/.config/systemd/user (unit rewrite). Needs
+# ~/scripts (old layout), the menu entry and ~/.config/systemd/user (unit
+# rewrite). Needs
 # git, python3 >= 3.12 with the venv module (Debian/Ubuntu package
 # python3-venv) and network access to GitHub and PyPI (build backend).
 # PIP_INSTALL_CMD replaces the pip step (tests): called with VENV and TAG.
@@ -41,6 +44,7 @@ OLD_DIR="$HOME/scripts/mediatools.d"
 OLD_VENV="$OLD_DIR/venv"
 OLD_LINK="$HOME/scripts/mediatools"
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/mediatools-snapshot.service"
+DESKTOP="$xdg_data/applications/mediatools.desktop"
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 
@@ -122,7 +126,8 @@ if [ -z "${MEDIATOOLS_HOME:-}" ] && [ "$OLD_VENV" != "$VENV" ]; then
     if [ "$target" = "$OLD_VENV/bin/mediatools" ]; then
       ln -sfn "$VENV/bin/mediatools" "$OLD_LINK"
       echo "old link now points to the new release: $OLD_LINK"
-    elif [ "$target" = "$VENV/bin/mediatools" ] && in_path "$BIN_DIR"; then
+    elif [ "$target" = "$VENV/bin/mediatools" ] && in_path "$BIN_DIR" \
+        && ! grep -qsF "$OLD_LINK" "$UNIT" "$DESKTOP"; then
       rm -f -- "$OLD_LINK"
       echo "removed the old link (the command is $LINK now): $OLD_LINK"
     fi
@@ -136,6 +141,10 @@ if [ -z "${MEDIATOOLS_HOME:-}" ] && [ "$OLD_VENV" != "$VENV" ]; then
       echo "removed the old venv: $OLD_VENV"
       rmdir -- "$OLD_DIR" 2>/dev/null && echo "removed the empty folder: $OLD_DIR"
     fi
+  fi
+  if [ -f "$DESKTOP" ] && grep -qF "Exec=\"$OLD_LINK\" " "$DESKTOP"; then
+    sed -i "s#^Exec=\"$OLD_LINK\" #Exec=\"$LINK\" #" "$DESKTOP"
+    echo "menu entry now starts $LINK: $DESKTOP"
   fi
   if [ -f "$UNIT" ] && grep -qF "ExecStart=$OLD_LINK " "$UNIT"; then
     sed -i "s#^ExecStart=$OLD_LINK #ExecStart=$LINK #" "$UNIT"

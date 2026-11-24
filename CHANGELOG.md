@@ -5,6 +5,23 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-11-25
+
+### Added
+- `tools/check.sh` checks each tree in full once: after a full green run
+  the key (working-copy tree, Python version, installed packages) is kept
+  in `.git/checked-trees`; a known tree runs only privacy and shell.
+  `CHECK_FULL=1` forces a full run, CI always runs in full
+  (dev-conventions `templates/check-cache.sh`).
+
+### Fixed
+- `install.sh` points the menu entry to the new link when it named the
+  old one, and removes the old link only when neither the menu entry nor
+  the systemd unit names it any more.
+- The GUI start keeps an existing menu entry current also without
+  `[gui] desktop_entry = yes`, so the entry never starts a program that is
+  gone.
+
 ## [1.15.0] - 2026-11-24
 
 ### Added
