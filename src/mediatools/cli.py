@@ -114,8 +114,11 @@ class Cli:
                                       "release after its current file; returns at once")
         sub.add_parser("status", help="show whether a shrink runs, with which release, "
                                       "whether it is current, and its log")
-        sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
-                                    "after its current file; returns at once")
+        cmd = sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
+                                          "after its current file; returns at once")
+        cmd.add_argument("--now", action="store_true",
+                         help="abort the current file at once (its partial output is deleted, "
+                              "the original stays); a queued job stays in the queue, paused")
         cmd = sub.add_parser("update", help="install a newer release, then apply and release "
                                             "delivered patch archives from the download folder")
         cmd.add_argument("--list", action="store_true",
@@ -578,14 +581,29 @@ class Cli:
         return 0 if control.active_pid() is not None else 1
 
     @staticmethod
-    def cmd_stop(_args: argparse.Namespace) -> int:
+    def cmd_stop(args: argparse.Namespace) -> int:
         """Run ``mediatools stop``: request a stop of the running shrink.
+
+        A job started from the queue goes back to it, marked paused
+        (:meth:`ShrinkQueue.continue_after`).
+
+        Args:
+            args: Parsed arguments (``--now``: abort the current file).
 
         Returns:
             0 if a running shrink was asked to stop, 1 if none runs.
         """
         ShrinkQueue.default().next_after_stop(False)     # a plain stop ends the queue
-        pid = RunControl("shrink").request_stop()
+        control = RunControl("shrink")
+        if getattr(args, "now", False):
+            pid = control.request_abort()
+            if pid is None:
+                print("no shrink run is active - nothing to abort")
+                return 1
+            print(f"abort requested: shrink (pid {pid}) deletes the partial output of its "
+                  f"current file and ends; the original stays")
+            return 0
+        pid = control.request_stop()
         if pid is None:
             print("no shrink run is active - nothing to stop")
             return 1

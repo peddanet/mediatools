@@ -23,7 +23,9 @@ class QueueList:
     """Shows the running shrink job and the queue, in the order of processing.
 
     The first row is the job that runs now (``running``), the others are
-    the waiting jobs (``1``, ``2`` ...). Each row shows the progress of
+    the waiting jobs (``1``, ``2`` ...); a job that was stopped or aborted
+    is back among them as ``1 paused`` (:meth:`ShrinkQueue.put_back`) and
+    goes on with *Continue* or leaves with *Remove*. Each row shows the progress of
     that job as far as it is known (its remembered job with the same folder
     and filters), the figures in GiB, the settings and the folder with its
     filters.
@@ -150,6 +152,7 @@ class QueueList:
         Returns:
             ``(id, values)`` per row; the id is ``running`` or the position.
         """
+        self.queue.recover()
         known = {entry.spec.key: entry for entry in self.monitor.registry().entries()}
         result: list[tuple[str, tuple[str, ...]]] = []
         if self.monitor.control.active_pid() is not None:
@@ -161,12 +164,13 @@ class QueueList:
                                            found[0].label())))
         for number, queued in enumerate(self.queue.entries(), 1):
             parsed = self.spec_of(queued["args"])
+            place = f"{number} paused" if queued.get("paused") else str(number)
             if parsed is None:
-                result.append((str(number), (str(number), "?", "-", "-",
+                result.append((str(number), (place, "?", "-", "-",
                                              shlex.join(queued["args"]))))
                 continue
             note = f"   ({queued['note']})" if queued.get("note") else ""
-            result.append((str(number), (str(number), *self.figures(known.get(parsed[0].key)),
+            result.append((str(number), (place, *self.figures(known.get(parsed[0].key)),
                                          JobList.settings_text(parsed[1]),
                                          parsed[0].label() + note)))
         return result

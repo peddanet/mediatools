@@ -543,10 +543,10 @@ folder, options and progress. Next to it:
 | Button | Effect |
 |---|---|
 | *Continue* | starts the selected waiting job (or the first) now, when no shrink runs |
-| *Stop, then next* | the running job stops after its current file, then the selected waiting job (or the first) starts (since 1.14.0) |
+| *Stop, then next* | the running job stops after its current file, then the selected waiting job (or the first) starts (since 1.14.0); the stopped job waits behind it, paused |
 | *Add* | opens the job dialog for a new job |
 | *Change* (or a double click) | opens the job dialog with the selected waiting job |
-| *Remove* | takes the selected waiting jobs off the queue (asks first) |
+| *Remove* | takes the selected waiting jobs off the queue (asks first); also a paused job |
 | *Up*, *Down* | change the order |
 
 The **job dialog** lists every shrink job so far. Selecting one fills the
@@ -867,6 +867,7 @@ sqlite3 -readonly -header -column ~/Pictures/collection/A/Videos/shrink.db \
 | Event | Behaviour |
 |---|---|
 | `mediatools stop` in any terminal | the current file is finished, validated, copied and recorded; then the run stops |
+| `mediatools stop --now`, GUI *Abort now* | the same as SIGTERM: ffmpeg is stopped at once, its partial output is deleted, the original stays untouched; the time spent on that file is lost |
 | terminal closed (background mode, the default) | nothing - the run has its own session and continues |
 | Ctrl+C (or Ctrl+Z) once, `--foreground` | the same as `mediatools stop` |
 | Ctrl+C a second time, SIGTERM, SIGHUP (terminal of a `--foreground` run closed) | ffmpeg is stopped at once; its partial output is deleted; the original stays untouched |
@@ -909,6 +910,12 @@ depend on keyboard focus:
 mediatools stop
 # stop requested: shrink (pid 12345) finishes its current file and ends
 ~~~
+
+`mediatools stop --now` aborts the current file instead (SIGTERM to the
+run): its partial output is deleted, the original stays untouched, a
+replacement that has already begun is completed first. The GUI button
+*Abort now* does the same after a question. A job from the queue stays in
+the queue either way (see "Paused jobs" below).
 
 The command checks that a shrink run is alive (PID file
 `state/shrink.pid` in the data directory), creates `state/shrink.stop` and
@@ -1184,6 +1191,19 @@ start does not continue the queue. `mediatools stop` ends the current job
 and **pauses** the queue: nothing starts by itself until `queue --run` or
 another shrink job ends normally. `mediatools status` shows how many jobs
 wait. The queue is `<state>/shrink_queue.json` (mode 600).
+
+**Paused jobs.** A job that does not end normally is not lost: stopped
+(`mediatools stop`, with or without `--now`, GUI *Stop after current file*
+or *Abort now*) or ended by an error, it goes back to the queue as first
+entry, marked *paused* (list: `1. mediatools shrink ...   (paused
+2026-11-24 20:15)`, GUI: `1 paused`). After *Stop, then next* it waits
+behind the job that starts. You decide what happens to it: *Continue*
+(`queue --run`) goes on where it stopped - the shrink databases skip every
+finished video, and the new plan also takes videos added since - and
+*Remove* (`queue --remove 1`) drops it. While a job runs it is kept in
+`<state>/shrink_queue.json.current` with the process ID; if a crash left
+that record behind, the next `mediatools queue` or the GUI puts the job
+back as paused entry.
 
 Jobs whose folders overlap are no problem: a later job skips every video
 an earlier one has shrunk (shrink databases), so the order of the queue is
@@ -1839,11 +1859,11 @@ of its own: every action is a command of the command line, run as a child
 process, or a request file that the command line uses as well (stop,
 reload). Command line and window therefore always behave the same.
 
-![The shrink tab: state of the run, progress and space; the queue in the order of processing with Continue, Stop then next, Add, Change, Remove, Up, Down; log end; output pane - each part resizable](img/gui_shrink.png){width=100%}
+![The shrink tab: state of the run, progress and space; Stop after current file, Abort now, Reload, Refresh, Open log; the queue in the order of processing with Continue, Stop then next, Add, Change, Remove, Up, Down; log end; output pane - each part resizable](img/gui_shrink.png){width=100%}
 
 | Tab | Content |
 |---|---|
-| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop*, *Reload*, *Open log*; the queue in the order of processing (running job first) with *Continue*, *Stop, then next*, *Add*, *Change*, *Remove*, *Up*, *Down*; log end; output pane - every part resizable. *Add*/*Change* open the job dialog: all jobs so far and the shrink form |
+| shrink | state of the running shrink (`status`), progress lines and bar, space of the session and in total, *Stop after current file*, *Abort now*, *Reload*, *Open log*; the queue in the order of processing (running job first) with *Continue*, *Stop, then next*, *Add*, *Change*, *Remove*, *Up*, *Down*; log end; output pane - every part resizable. *Add*/*Change* open the job dialog: all jobs so far and the shrink form |
 | savings | freed space per session or per day, newest first, and the total |
 | update, progress, triage, flatten, sync, rename-db, snapshot | form with every option, command line, *Run*, *Preview*, output pane |
 | config | editor of `mediatools.ini` (checked before saving) and the effective values |
@@ -1979,6 +1999,7 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
+| `test_queue_pause.py` | stopped, aborted, failed or crashed queue job back as paused entry; *Stop, then next* order; `stop --now` (SIGTERM) |
 | `test_release_1213.py` | workflow triggers and Python matrix |
 | `test_release_1215.py` | `mediatools status`: advice per version pair, last version line counts, pending reload/stop, missing log, source checkout, exit codes |
 | `test_background.py` | background mode (fork, new session, console file), status file, `mediatools attach` and its Ctrl+C |

@@ -77,6 +77,8 @@ class QueueCommand:
             0; 2 for invalid input; for ``--run`` the exit code of the
             started job (3 if another shrink runs, the job stays first).
         """
+        if self.queue.recover():
+            print("queue: a job left by an interrupted run is back as first entry (paused)")
         try:
             self.change(args)
         except ValueError as err:
@@ -152,6 +154,7 @@ class QueueCommand:
         print(f"starting: mediatools shrink {shlex.join(entry['args'])}")
         code = self.start([*entry["args"], "-y"])
         if code == 3:
+            self.queue.take_current()
             self.queue.add(entry["args"], entry.get("note", ""), front=True)
             print("the job stays first in the queue; it starts when the running job ends")
         return code

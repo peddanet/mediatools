@@ -19,8 +19,10 @@ class ShrinkPanel:
     release (``mediatools status``), the progress lines with a progress toolbar,
     the space read, written and freed in this session and in all sessions,
     and the end of the log.
-    *Stop* and *Reload* make the same requests as ``mediatools stop`` and
-    ``mediatools reload``; the run itself continues independently of the
+    *Stop after current file*, *Abort now* (after a question) and *Reload*
+    make the same requests as ``mediatools stop``, ``mediatools stop --now``
+    and ``mediatools reload``; a stopped or aborted job from the queue goes
+    back to the queue, paused; the run itself continues independently of the
     GUI, which may be closed at any time.
 
     Below, the shrink queue follows in the order of processing - the
@@ -81,6 +83,7 @@ class ShrinkPanel:
         buttons = ttk.Frame(self.frame)
         buttons.pack(fill="x", pady=4)
         ttk.Button(buttons, text="Stop after current file", command=self.stop).pack(side="left")
+        ttk.Button(buttons, text="Abort now", command=self.abort).pack(side="left", padx=(4, 0))
         ttk.Button(buttons, text="Reload installed release",
                    command=self.reload).pack(side="left", padx=4)
         ttk.Button(buttons, text="Refresh", command=self.refresh).pack(side="left")
@@ -131,6 +134,20 @@ class ShrinkPanel:
         """Request a stop after the current file (the queue does not go on)."""
         self.joblist.queue.next_after_stop(False)
         self.message.set(self.monitor.stop())
+
+    def abort(self) -> None:
+        """Abort the current file at once, after a question (the queue does not go on).
+
+        The encode time of the current file is lost; the job stays in the
+        queue, paused, if it came from there.
+        """
+        if not self.joblist.confirm("Abort now",
+                            "Abort the current file now?\n\nIts partial output is deleted, "
+                            "the original stays untouched; the time spent on this file is "
+                            "lost. A job from the queue stays in the queue, paused."):
+            return
+        self.joblist.queue.next_after_stop(False)
+        self.message.set(self.monitor.abort())
 
     def reload(self) -> None:
         """Request a switch to the installed release."""

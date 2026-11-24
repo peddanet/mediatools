@@ -417,6 +417,7 @@ Invariants:
 <cache>/triage_durations.tsv          DurationCache    path TAB size TAB mtime_ns TAB seconds
 <cache>/shrink_codecs.tsv             CodecCache       path TAB size TAB mtime_ns TAB codec
 <state>/state/shrink_queue.json.next  ShrinkQueue      marker of "Stop, then next" (used once)
+<state>/state/shrink_queue.json.current ShrinkQueue    entry of the running queue job + "pid" (put back if it does not end normally)
 <data>/state/sync_targets.json        TargetPicker     {source: target}
 <root>/_broken/manifest.jsonl         Quarantine       one JSON object per video: number, kind, names
                                                        [[original, quarantined], ...], assessment,

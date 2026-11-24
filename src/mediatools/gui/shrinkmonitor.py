@@ -154,6 +154,18 @@ class ShrinkMonitor:
             return "no shrink run is active - nothing to stop"
         return f"stop requested: shrink (pid {pid}) finishes its current file and ends"
 
+    def abort(self) -> str:
+        """Abort the running shrink at once.
+
+        Returns:
+            Message for the GUI.
+        """
+        pid = self.control.request_abort()
+        if pid is None:
+            return "no shrink run is active - nothing to abort"
+        return (f"abort requested: shrink (pid {pid}) deletes the partial output of its "
+                f"current file and ends; the original stays")
+
     def reload(self) -> str:
         """Ask the running shrink to switch to the installed release.
 

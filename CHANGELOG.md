@@ -5,6 +5,17 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Added
+- `mediatools stop --now` and the GUI button *Abort now* (after a
+  question): abort the current file at once; its partial output is
+  deleted, the original stays untouched.
+
+### Fixed
+- A stopped or aborted queue job no longer disappears: it goes back to the
+  queue as first entry, marked *paused* (after *Stop, then next* behind the
+  job that starts); *Continue* goes on with it, *Remove* drops it. A job
+  ended by an error or left by a crash comes back the same way.
+
 ## [1.14.1] - 2026-11-21
 
 ### Changed
