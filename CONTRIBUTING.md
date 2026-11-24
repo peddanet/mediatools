@@ -71,7 +71,7 @@ handbook, [Data directory](docs/handbook.md#data-directory) (XDG layout:
 | `~/.config/mediatools/privacy/denylist.txt` | you (mode 600) | `examples/privacy/denylist.sample.txt` | privacy gate: terms that must not appear; **without terms the gate fails** |
 | `~/.config/mediatools/privacy/allowlist.txt` | you (mode 600) | `examples/privacy/allowlist.sample.txt` | privacy gate: allowed phrases, and addresses accepted in git identities |
 | `.venv/` in the clone | `python3 -m venv .venv` (in `.gitignore`) | - | development tools; `tools/check.sh` activates it |
-| `.git/config` (`core.hooksPath`, `user.name`, `user.email`) | `git config` | - | pre-push hook; no-reply identity `peddanet` / `2825623+peddanet@users.noreply.github.com` |
+| `.git/config` (`core.hooksPath`, `user.name`, `user.email`) | `git config` | - | pre-push hook; identity = your GitHub login and its no-reply address |
 | `~/.local/state/mediatools/`, `~/.local/share/mediatools/`, `~/.cache/mediatools/` | mediatools while it runs | - (tests use temporary folders) | logs, state, kept data, caches |
 
 Create the privacy lists once from the samples, then replace the invented
@@ -86,11 +86,13 @@ mkdir -p ~/.config/mediatools/privacy && \
 ~~~
 
 Set the no-reply identity once per clone (normal user; writes only
-`.git/config`):
+`.git/config`). `<login>` is your GitHub login, `<id>+<login>@users.noreply.github.com`
+the address GitHub shows under Settings > Emails ("Keep my email address
+private"):
 
 ~~~bash
-git config user.name peddanet && \
-    git config user.email 2825623+peddanet@users.noreply.github.com
+git config user.name '<login>' && \
+    git config user.email '<id>+<login>@users.noreply.github.com'
 ~~~
 
 ## Integrating and releasing (`tools/release.sh`)

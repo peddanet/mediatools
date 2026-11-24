@@ -110,6 +110,24 @@ def test_identities_need_no_reply_addresses(tmp_path: Path,
     assert privacy_scan.PrivacyScan.mask("x@localhost") == "x***@***"
 
 
+@needs_git
+def test_no_reply_login_is_not_a_finding(tmp_path: Path) -> None:
+    """The login in a no-reply identity may be a deny-list term; another name is searched.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+    """
+    make_file(tmp_path / "a.txt", b"nothing to see\n")
+    git_repo(tmp_path, "initial")                         # name t, address 1+t@...
+    assert privacy_scan.PrivacyScan(str(tmp_path), ["ttt", "users"]).run() == 0
+    env = {**os.environ, "GIT_AUTHOR_NAME": "Hiddenname", "GIT_AUTHOR_EMAIL": NO_REPLY,
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": NO_REPLY}
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env=env, timeout=CHILD_TIMEOUT)
+    scan = privacy_scan.PrivacyScan(str(tmp_path), ["hiddenname"])
+    assert scan.run() == 1 and scan.findings[0][0].endswith("author name:1")
+
+
 def test_local_terms_from_denylist_and_collection(datadir: Path, tmp_path: Path) -> None:
     """Terms come from the deny list and the collection's unit names.
 

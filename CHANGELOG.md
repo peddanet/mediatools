@@ -24,7 +24,9 @@ All notable changes are documented here. Versions follow
 - Privacy gate: fails without local terms (exit 2; only CI skips it) and
   checks the identities - author, committer and tagger are searched for
   the terms, and every address must be a no-reply address or stand alone
-  in the allow list; findings show the address masked (handover v8).
+  in the allow list; findings show the address masked (handover v8). A
+  no-reply address and a name equal to its login are not searched for
+  terms (they are the prescribed public identity).
 - Tests never touch the real desktop: `tools/check.sh` always runs them on
   Xvfb, `conftest.py` sets its own runtime folder, Wayland name and data
   folders; every wait for a child process has a time limit.

@@ -27,7 +27,9 @@ Every e-mail address of an identity must be a no-reply address
 ``noreply@anthropic.com``) or stand on its own line in the allow list:
 commits made with a private global git identity would put a real address
 into a public history (dev-conventions handover v8). Findings name the
-commit or tag and show the address masked.
+commit or tag and show the address masked. A no-reply address and a name
+equal to its login are not searched for terms: they are the public
+pseudonym the conventions prescribe.
 
 **A gate must never pass because its input is missing:** without any local
 term the scan fails (exit 2). Only in CI (``CI=true``, always set by GitHub
@@ -241,8 +243,8 @@ class PrivacyScan:
             replaced, e.g. ``p***@g***.com``.
         """
         local, _, domain = address.partition("@")
-        name, _, top = domain.rpartition(".")
-        return f"{local[:1]}***@{name[:1]}***.{top}" if name else f"{local[:1]}***@***"
+        name, _, suffix = domain.rpartition(".")
+        return f"{local[:1]}***@{name[:1]}***.{suffix}" if name else f"{local[:1]}***@***"
 
     def identities(self) -> list[tuple[str, str, str]]:
         """List the identities of the history.
@@ -267,11 +269,23 @@ class PrivacyScan:
         return result
 
     def check_identities(self) -> None:
-        """Search names and addresses for terms; demand no-reply addresses."""
+        """Search names and addresses for terms; demand no-reply addresses.
+
+        A no-reply address is a pseudonym GitHub publishes for the account
+        (``<id>+<login>@users.noreply.github.com``); it and a name equal to
+        its login are the identity the conventions prescribe, so they are
+        not searched for terms (a deny list may hold the login to keep it
+        out of files).
+        """
         for location, name, address in self.identities():
+            if NO_REPLY.match(address):
+                login = address.split("@", 1)[0].rpartition("+")[2].lower()
+                if name.strip().lower() != login:
+                    self._search(f"{location} name", name)
+                continue
             self._search(f"{location} name", name)
             self._search(f"{location} e-mail", address)
-            if not (NO_REPLY.match(address) or address.lower() in self.allowed_addresses):
+            if address.lower() not in self.allowed_addresses:
                 self.findings.append((location, f"not a no-reply address: {self.mask(address)}"))
 
     def run(self) -> int:
