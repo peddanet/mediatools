@@ -153,7 +153,9 @@ only what an earlier `install.sh` created:
   working until `~/.local/bin` is in `PATH` (Ubuntu adds it at login if
   the folder exists then, so a first installation needs one logout and
   login); a later run removes the old link once `~/.local/bin` is in
-  `PATH`,
+  `PATH` and neither the menu entry nor the systemd unit names it,
+* the menu entry (`~/.local/share/applications/mediatools.desktop`) is
+  pointed to the new link, so it does not start a program that is gone,
 * the systemd user unit of the snapshot trigger is rewritten to the new
   link and the user units are reloaded.
 
@@ -1969,7 +1971,10 @@ Since 1.6.0 the wish is remembered (`[gui] desktop_entry = yes`; the
 remove command sets `no`). The GUI start and `mediatools update` then put
 back the entry and its icons when they are missing or outdated, e.g.
 after a clean-up of `~/.local/share/applications` or a restore of the
-home folder without it. `mediatools where` shows the state:
+home folder without it. An entry that exists is kept current also without
+that setting: an outdated one would start a program that may be gone (a
+menu entry that does nothing); a missing entry is only created when
+wanted. `mediatools where` shows the state:
 
 ~~~text
 application menu entry: ~/.local/share/applications/mediatools.desktop: ok
@@ -2003,6 +2008,8 @@ instead of opening windows on the desktop.
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |
+| `test_menu_entry_current.py` | `install.sh` points the menu entry to the new link and keeps the old link while entry or unit name it; the GUI start keeps an existing entry current |
+| `test_check_cache.py` | `check.sh` checks a tree in full once; `CHECK_FULL=1`, CI or a change run in full; no cache without `.git` |
 | `test_queue_pause.py` | stopped, aborted, failed or crashed queue job back as paused entry; *Stop, then next* order; `stop --now` (SIGTERM) |
 | `test_release_1213.py` | workflow triggers and Python matrix |
 | `test_release_1215.py` | `mediatools status`: advice per version pair, last version line counts, pending reload/stop, missing log, source checkout, exit codes |

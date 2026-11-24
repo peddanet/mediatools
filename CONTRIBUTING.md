@@ -39,6 +39,15 @@ tools/check.sh                          # all gates
 tools/check.sh --fast                   # without tests, while editing
 ~~~
 
+**Each tree is checked in full once.** After a full green run
+`tools/check.sh` remembers the tree of the working copy (uncommitted and
+untracked files included), the Python version and a hash of the installed
+packages in `.git/checked-trees`; for a known key only `privacy` and
+`shell` run again and the script says what it skipped. `release.sh` and
+the pre-push hook call it several times for the same code, so a release
+needs two full runs instead of five. `CHECK_FULL=1 tools/check.sh` forces
+a full run; CI always runs in full.
+
 `tools/check.sh` activates the development venv itself for its own run
 (an active venv first, else `.venv` in the project, else the older
 `~/.venvs/mediatools`); the terminal stays as it was, no `source` needed.
@@ -71,6 +80,7 @@ handbook, [Data directory](docs/handbook.md#data-directory) (XDG layout:
 | `~/.config/mediatools/privacy/denylist.txt` | you (mode 600) | `examples/privacy/denylist.sample.txt` | privacy gate: terms that must not appear; **without terms the gate fails** |
 | `~/.config/mediatools/privacy/allowlist.txt` | you (mode 600) | `examples/privacy/allowlist.sample.txt` | privacy gate: allowed phrases, and addresses accepted in git identities |
 | `.venv/` in the clone | `python3 -m venv .venv` (in `.gitignore`) | - | development tools; `tools/check.sh` activates it |
+| `.git/checked-trees` | `tools/check.sh` after a full green run (last 50) | - | check cache: a tree is checked in full once |
 | `.git/config` (`core.hooksPath`, `user.name`, `user.email`) | `git config` | - | pre-push hook; identity = your GitHub login and its no-reply address |
 | `~/.local/state/mediatools/`, `~/.local/share/mediatools/`, `~/.cache/mediatools/` | mediatools while it runs | - (tests use temporary folders) | logs, state, kept data, caches |
 
