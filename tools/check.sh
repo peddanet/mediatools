@@ -14,8 +14,9 @@
 #   5. tests    pytest with branch coverage, threshold in pyproject.toml
 #
 # The tests of the GUI need Tk for Python (package python3-tk) and a
-# display; without DISPLAY the script restarts itself under xvfb-run
-# (package xvfb), a virtual display without a window.
+# display; the script always restarts itself under xvfb-run (package
+# xvfb), a virtual display without a window, so no test touches the real
+# desktop - also when one is running.
 #
 # Usage: tools/check.sh [--fast]
 #   --fast  skip the test gate (used for quick checks while editing)
@@ -74,8 +75,9 @@ if (( FAST == 0 )); then
         command -v "$tool" >/dev/null || missing+=("$tool")
     done
     python3 -c 'import tkinter' 2>/dev/null || missing+=("python3-tk")
-    if [[ -z "${DISPLAY:-}" ]]; then
-        if command -v xvfb-run >/dev/null && [[ -z "${MEDIATOOLS_XVFB:-}" ]]; then
+    # the tests always run on a virtual display, never on the real desktop
+    if [[ "${MEDIATOOLS_XVFB:-}" != 1 ]]; then
+        if command -v xvfb-run >/dev/null; then
             exec env MEDIATOOLS_XVFB=1 xvfb-run -a "$0" "$@"
         fi
         missing+=("xvfb")

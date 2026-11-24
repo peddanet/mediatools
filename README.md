@@ -327,7 +327,7 @@ mediatools shrink [PATH] [--order largest|smallest|path] [--min-seconds S] [--fo
 mediatools shrink                 # on a terminal: list the earlier jobs and continue one
 mediatools attach        # (alias: front) watch a shrink running in the background
 mediatools update        # apply delivered release patches from ~/Downloads, then install
-mediatools stop          # ask it to finish its current file and end
+mediatools stop          # ask it to finish its current file and end (--now: abort it at once)
 mediatools status        # running? which release, current or not, which log
 ```
 
@@ -392,7 +392,8 @@ ends - no wrapper command is needed.
 
 | Key | Effect |
 |---|---|
-| `mediatools stop` (any terminal) | finish the current file, record it, stop |
+| `mediatools stop` (any terminal) | finish the current file, record it, stop; a queued job stays in the queue, paused |
+| `mediatools stop --now` (any terminal) | abort the current file at once - partial output deleted, original untouched; a queued job stays, paused |
 | terminal closed | nothing - the run continues in the background; `mediatools attach` shows it again |
 | Ctrl+C in `mediatools attach` | leaves the view only; the run continues |
 | Ctrl+C once (`--foreground` only) | the same as `mediatools stop` |
@@ -774,6 +775,9 @@ python3 tools/gen_docs.py                # UML class diagrams + API reference
 `tools/check.sh` activates `.venv` itself for its run; to call
 `mediatools` from the clone, activate it in the terminal
 (`source .venv/bin/activate`).
+
+Local files of a developer (configuration, privacy lists, no-reply git
+identity) and their samples in `examples/`: [CONTRIBUTING.md](CONTRIBUTING.md#local-files-of-a-developer).
 
 Inside the development venv `mediatools` runs the code of the clone, and
 `mediatools --version` says so: `mediatools 1.2.0 (source checkout

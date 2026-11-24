@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import CHILD_TIMEOUT
+
 from test_shrink_run import FakeEncoder, build, videos
 from mediatools.cli import Cli
 from mediatools.core.runcontrol import RunControl
@@ -19,7 +21,7 @@ def dead_pid() -> int:
         PID that no living process uses (just reaped).
     """
     child = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
-                           check=True, capture_output=True, text=True)
+                           check=True, capture_output=True, text=True, timeout=CHILD_TIMEOUT)
     return int(child.stdout)
 
 

@@ -1,0 +1,8 @@
+# Allow list of tools/privacy_scan.py - SAMPLE with invented phrases.
+# Copy to ~/.config/mediatools/privacy/allowlist.txt next to the deny list.
+# One phrase per line; a deny-list term inside an allowed phrase is
+# permitted there, e.g. the term "level" inside "sea level".
+lorem ipsum generator
+# An e-mail address alone on its line is accepted in commit and tag
+# identities although it is no no-reply address (avoid; handover v8):
+# someone@example.invalid

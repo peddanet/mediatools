@@ -46,13 +46,54 @@ tools/check.sh --fast                   # without tests, while editing
 
 | Gate     | Tool         | Pass criterion                                  |
 |----------|--------------|-------------------------------------------------|
-| privacy  | privacy_scan | no locally listed term in files, paths, commit messages; refuses while old lists exist |
+| privacy  | privacy_scan | no locally listed term in files, paths, commit messages, author/committer/tagger; every identity address no-reply (or in the allow list); **fails without local terms** (skipped only in CI); refuses while old lists exist |
 | shell    | shellcheck   | no finding in any shell script                  |
 | format   | pycodestyle  | no finding, max line length 100                 |
 | lint     | pylint       | 10.00/10 incl. Google-style docstring checks    |
 | types    | mypy         | no error (`check_untyped_defs`)                 |
 | security | bandit       | no finding (B404/B603 justified in pyproject)   |
 | tests    | pytest       | all pass, no resource leak, branch coverage >= 90 % |
+
+## Local files of a developer
+
+A fresh clone is enough to develop, test, release and install: every file
+the program needs at run time lies in the repository (icons and the
+templates of the menu entry and of the systemd unit in
+`src/mediatools/data/`, package data). Only private files stay outside;
+each has a sample with invented content in `examples/`, kept in step with
+the code by `tests/test_examples.py`. The folders are explained in the
+handbook, [Data directory](docs/handbook.md#data-directory) (XDG layout:
+`~/.config`, `~/.local/state`, `~/.local/share`, `~/.cache`).
+
+| Path on the machine | Written by | Sample in the repository | Needed for |
+|---|---|---|---|
+| `~/.config/mediatools/mediatools.ini` | first start of `mediatools`, `mediatools config --set` | `examples/config.ini.sample` (= built-in template) | settings; `[collection] root` also gives the privacy scan its folder names |
+| `~/.config/mediatools/privacy/denylist.txt` | you (mode 600) | `examples/privacy/denylist.sample.txt` | privacy gate: terms that must not appear; **without terms the gate fails** |
+| `~/.config/mediatools/privacy/allowlist.txt` | you (mode 600) | `examples/privacy/allowlist.sample.txt` | privacy gate: allowed phrases, and addresses accepted in git identities |
+| `.venv/` in the clone | `python3 -m venv .venv` (in `.gitignore`) | - | development tools; `tools/check.sh` activates it |
+| `.git/config` (`core.hooksPath`, `user.name`, `user.email`) | `git config` | - | pre-push hook; identity = your GitHub login and its no-reply address |
+| `~/.local/state/mediatools/`, `~/.local/share/mediatools/`, `~/.cache/mediatools/` | mediatools while it runs | - (tests use temporary folders) | logs, state, kept data, caches |
+
+Create the privacy lists once from the samples, then replace the invented
+terms by your own (normal user; `-n` never overwrites an existing list,
+`chmod 600` because the lists themselves are private):
+
+~~~bash
+mkdir -p ~/.config/mediatools/privacy && \
+    cp -n examples/privacy/denylist.sample.txt ~/.config/mediatools/privacy/denylist.txt && \
+    cp -n examples/privacy/allowlist.sample.txt ~/.config/mediatools/privacy/allowlist.txt && \
+    chmod 600 ~/.config/mediatools/privacy/denylist.txt ~/.config/mediatools/privacy/allowlist.txt
+~~~
+
+Set the no-reply identity once per clone (normal user; writes only
+`.git/config`). `<login>` is your GitHub login, `<id>+<login>@users.noreply.github.com`
+the address GitHub shows under Settings > Emails ("Keep my email address
+private"):
+
+~~~bash
+git config user.name '<login>' && \
+    git config user.email '<id>+<login>@users.noreply.github.com'
+~~~
 
 ## Integrating and releasing (`tools/release.sh`)
 

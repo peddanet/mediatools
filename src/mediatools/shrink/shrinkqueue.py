@@ -28,6 +28,16 @@ class ShrinkQueue:
     queue as it is: it *pauses*. ``mediatools queue --run`` starts the
     first entry when no shrink runs.
 
+    **Paused jobs.** A started job is taken off the list,
+    but kept in ``<queue file>.current`` until it ends. If it does not end
+    normally - stopped by the user (``mediatools stop``, with or without
+    ``--now``), or ended by an error - it goes back to the list as first
+    entry, marked *paused* (after *Stop, then next*: second, behind the
+    job that starts now). The user decides: *Continue* goes on where it
+    stopped (the directory databases skip the finished files), *Remove*
+    drops it. A job left in the record by a crash is put back the same way
+    by :meth:`recover`, as soon as no shrink runs.
+
     Attributes:
         path: Location of the JSON file.
         python: Interpreter for the next job (the running one).
@@ -191,7 +201,109 @@ class ShrinkQueue:
             return None
         entry = entries.pop(0)
         self._save(entries)
+        self._write_current(entry)
         return entry
+
+    @property
+    def current_file(self) -> str:
+        """Record of the job that runs now (taken off the list).
+
+        Returns:
+            ``<queue file>.current``.
+        """
+        return self.path + ".current"
+
+    def _write_current(self, entry: dict) -> None:
+        """Remember the started job atomically (mode 600).
+
+        The process ID is stored with it: the job runs in this process
+        (``queue --run`` and the switch to the next job keep the PID), so
+        :meth:`recover` can tell a running job from one left by a crash.
+
+        Args:
+            entry: The entry taken off the list.
+        """
+        tmp = f"{self.current_file}.{os.getpid()}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as handle:
+            json.dump({**entry, "pid": os.getpid()}, handle, ensure_ascii=False)
+        os.replace(tmp, self.current_file)
+
+    def take_current(self) -> dict | None:
+        """Read and forget the record of the started job.
+
+        Returns:
+            The entry, or None if there is none (or it cannot be read).
+        """
+        try:
+            with open(self.current_file, encoding="utf-8", errors="surrogateescape") as handle:
+                entry = json.load(handle)
+        except (OSError, ValueError):
+            entry = None
+        if os.path.exists(self.current_file):
+            os.remove(self.current_file)
+        return entry if isinstance(entry, dict) and isinstance(entry.get("args"), list) \
+            else None
+
+    def put_back(self, entry: dict, position: int = 1) -> int:
+        """Return a job that did not end normally to the list, marked paused.
+
+        Args:
+            entry: The entry of the job.
+            position: Place in the list, 1 = next.
+
+        Returns:
+            Its position.
+        """
+        entries = self.entries()
+        paused = {key: value for key, value in entry.items() if key != "pid"}
+        paused["paused"] = time.strftime("%Y-%m-%d %H:%M")
+        place = max(0, min(position - 1, len(entries)))
+        entries.insert(place, paused)
+        self._save(entries)
+        return place + 1
+
+    def recover(self) -> bool:
+        """Put back a job whose record a crash left behind.
+
+        The record is left alone while the process that took the job is
+        alive (it runs the job, or is about to start it).
+
+        Returns:
+            True if a job was put back.
+        """
+        try:
+            with open(self.current_file, encoding="utf-8", errors="surrogateescape") as handle:
+                pid = json.load(handle).get("pid")
+        except (OSError, ValueError, AttributeError):
+            pid = None
+        if not os.path.exists(self.current_file) or self._alive(pid):
+            return False
+        entry = self.take_current()
+        if entry is None:
+            return False
+        self.put_back(entry)
+        return True
+
+    @staticmethod
+    def _alive(pid: object) -> bool:
+        """Tell whether a process ID belongs to a living process.
+
+        Args:
+            pid: Process ID from the record (anything else counts as dead).
+
+        Returns:
+            True if the process exists.
+        """
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)                      # signal 0: existence check only
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def lines(self) -> list[str]:
         """Describe the queue.
@@ -204,6 +316,7 @@ class ShrinkQueue:
         if not entries:
             return ["queue: empty"]
         return [f"{number}. mediatools shrink {shlex.join(entry['args'])}"
+                + (f"   (paused {entry['paused']})" if entry.get("paused") else "")
                 + (f"   ({entry['note']})" if entry.get("note") else "")
                 for number, entry in enumerate(entries, 1)]
 
@@ -258,6 +371,8 @@ class ShrinkQueue:
 
         A stop by the user ends the queue - unless *Stop, then next* asked
         for the next job (:meth:`next_after_stop`); the marker is used once.
+        A job from the queue that did not end normally goes back to the
+        list, marked paused (:meth:`put_back`).
 
         Args:
             code: Exit code of the job that ended.
@@ -272,7 +387,12 @@ class ShrinkQueue:
         """
         go_on = stopped and os.path.exists(self.next_file)
         self.next_after_stop(False)
-        if declined or (code not in self.CONTINUE and not go_on):
+        current = self.take_current()
+        if current is not None and (stopped or code not in self.CONTINUE):
+            waiting = bool(self.entries())
+            self.put_back(current, 2 if go_on and waiting else 1)
+            go_on = go_on and waiting        # never restart the job just stopped
+        if declined or (not go_on and (stopped or code not in self.CONTINUE)):
             return code
         entry = self.pop()
         if entry is None:
@@ -286,6 +406,7 @@ class ShrinkQueue:
         try:
             os.execv(cmd[0], cmd)
         except OSError as err:
+            self.take_current()
             self.add(entry["args"], entry.get("note", ""), front=True)
             print(f"queue: next job not started ({err}) - 'mediatools queue --run' "
                   "tries again", file=sys.stderr)

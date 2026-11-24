@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_file, make_video
+from conftest import CHILD_TIMEOUT, make_file, make_video
 from test_release_190 import MB, row
 from test_shrink_run import FakeProbe, build, videos
 from mediatools.broken.repairer import RepairEncoder
@@ -60,7 +60,7 @@ def test_probe_reads_duration_and_codec_at_once(tmp_path: Path) -> None:
     assert MediaProbe().duration_and_codec(make_file(tmp_path / "x.mp4", b"no")) == (None, None)
     audio = tmp_path / "a.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=duration=1",
-                    "-c:a", "aac", str(audio)], check=True)
+                    "-c:a", "aac", str(audio)], check=True, timeout=CHILD_TIMEOUT)
     seconds, codec = MediaProbe().duration_and_codec(str(audio))
     assert seconds is not None and codec is None
 
@@ -293,7 +293,7 @@ def rich_video(path: Path) -> str:
                     "sine=f=440:duration=2", "-f", "lavfi", "-i", "sine=f=880:duration=2",
                     "-i", str(subs), "-map", "0", "-map", "1", "-map", "2", "-map", "3",
                     "-c:v", "libx264", "-c:a", "aac", "-c:s", "mov_text", str(path)],
-                   check=True)
+                   check=True, timeout=CHILD_TIMEOUT)
     return str(path)
 
 
@@ -324,7 +324,8 @@ def test_output_that_lost_a_stream_is_rejected(tmp_path: Path) -> None:
     """
     src = rich_video(tmp_path / "rich.mp4")
     poor = str(tmp_path / "poor.mp4")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", poor], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", poor], check=True,
+                   timeout=CHILD_TIMEOUT)
     encoder = HevcEncoder(threads=2)
     assert encoder.lost_streams(src, poor) == "audio 2 -> 1, subtitle 1 -> 0"
     assert not encoder.validate(src, poor)
