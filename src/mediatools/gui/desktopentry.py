@@ -86,7 +86,12 @@ class DesktopEntry:
         return found
 
     def repair(self, wanted: bool) -> list[str]:
-        """Put back a missing or outdated entry if one is wanted.
+        """Put back a missing or outdated entry.
+
+        An entry that exists is kept current even when ``[gui]
+        desktop_entry`` is not ``yes``: it was written by mediatools, and an
+        outdated one starts a program that may no longer exist (a menu entry
+        that does nothing). A missing entry is only created when wanted.
 
         Args:
             wanted: True if the user asked for the entry (``[gui]
@@ -95,7 +100,7 @@ class DesktopEntry:
         Returns:
             The problems that were repaired; empty if nothing was done.
         """
-        if not wanted:
+        if not wanted and not os.path.isfile(self.path):
             return []
         found = [item for item in self.problems() if not item.startswith("program missing")]
         if found:

@@ -2497,7 +2497,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.14.1') -> None
+__init__(self, control: RunControl, installed: str = '1.15.0') -> None
 
 Remember the job and the installed release.
 
@@ -2776,7 +2776,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.14.1')
+__init__(self, package_dir: str | None = None, version: str = '1.15.0')
 
 Locate the imported package.
 
@@ -13569,7 +13569,12 @@ Returns:
 ~~~text
 repair(self, wanted: bool) -> list[str]
 
-Put back a missing or outdated entry if one is wanted.
+Put back a missing or outdated entry.
+
+An entry that exists is kept current even when ``[gui]
+desktop_entry`` is not ``yes``: it was written by mediatools, and an
+outdated one starts a program that may no longer exist (a menu entry
+that does nothing). A missing entry is only created when wanted.
 
 Args:
     wanted: True if the user asked for the entry (``[gui]

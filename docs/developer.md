@@ -537,6 +537,16 @@ tools/check.sh                          # all gates
 tools/check.sh --fast                   # without the test gate
 ~~~
 
+**Check cache** (dev-conventions `templates/check-cache.sh`): after a full
+green run the key *tree of the working copy + Python version + hash of the
+installed packages* is appended to `.git/checked-trees` (last 50 kept).
+The working-copy tree is computed with a temporary index (`git add -A`,
+`git write-tree`), so uncommitted and untracked files count and
+`.gitignore` is honoured. For a known key only `privacy` and `shell` run
+again - the privacy scan also reads commit messages and tags, which change
+without the tree. `CHECK_FULL=1` forces a full run, CI (`CI=true`) always
+runs in full, and without `.git` (unpacked archive) nothing is cached.
+
 `tools/check.sh` uses an active venv; otherwise it activates `.venv` of
 the project, or the older `~/.venvs/mediatools` (with a note to move it),
 for its own run only - the calling terminal is unchanged and no
