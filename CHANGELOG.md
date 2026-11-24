@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-24
+
 ### Added
 - `mediatools stop --now` and the GUI button *Abort now* (after a
   question): abort the current file at once; its partial output is
