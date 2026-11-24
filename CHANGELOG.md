@@ -9,6 +9,25 @@ All notable changes are documented here. Versions follow
 - `mediatools stop --now` and the GUI button *Abort now* (after a
   question): abort the current file at once; its partial output is
   deleted, the original stays untouched.
+- `examples/` with samples of every local file (`config.ini.sample`,
+  `privacy/denylist.sample.txt`, `privacy/allowlist.sample.txt`), kept in
+  step by tests; CONTRIBUTING.md: table "Local files of a developer" with
+  the copy commands; GitHub social preview `docs/images/social-preview.png`
+  with its SVG source (dev-conventions handover v7, repository
+  completeness).
+
+### Changed
+- Icons, menu entry and systemd unit are real files of the package
+  (`src/mediatools/data/`: `mediatools.svg`, PNGs, `mediatools.desktop.in`,
+  `mediatools-snapshot.service.in`) instead of strings in the code; the
+  written files are unchanged.
+- Privacy gate: fails without local terms (exit 2; only CI skips it) and
+  checks the identities - author, committer and tagger are searched for
+  the terms, and every address must be a no-reply address or stand alone
+  in the allow list; findings show the address masked (handover v8).
+- Tests never touch the real desktop: `tools/check.sh` always runs them on
+  Xvfb, `conftest.py` sets its own runtime folder, Wayland name and data
+  folders; every wait for a child process has a time limit.
 
 ### Fixed
 - A stopped or aborted queue job no longer disappears: it goes back to the

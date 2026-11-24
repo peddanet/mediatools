@@ -776,6 +776,9 @@ python3 tools/gen_docs.py                # UML class diagrams + API reference
 `mediatools` from the clone, activate it in the terminal
 (`source .venv/bin/activate`).
 
+Local files of a developer (configuration, privacy lists, no-reply git
+identity) and their samples in `examples/`: [CONTRIBUTING.md](CONTRIBUTING.md#local-files-of-a-developer).
+
 Inside the development venv `mediatools` runs the code of the clone, and
 `mediatools --version` says so: `mediatools 1.2.0 (source checkout
 ~/Projects/mediatools, not an installed release)`. The installed release

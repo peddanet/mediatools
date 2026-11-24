@@ -1,14 +1,41 @@
-"""Shared fixtures: isolated data directory, generated media, fake player."""
+"""Shared fixtures: isolated data directory, generated media, fake player.
+
+The tests never touch the real desktop or session (dev-conventions,
+handover v8): :func:`pytest_configure` gives the whole run its own runtime
+folder and a Wayland display name that does not exist, and keeps the X
+display only when ``tools/check.sh`` started the run on its virtual display
+(``MEDIATOOLS_XVFB=1``, Xvfb). Every test gets its own data folders
+(:func:`datadir`). Waits for child processes have a time limit
+(:data:`CHILD_TIMEOUT`).
+"""
 import gc
 import os
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+CHILD_TIMEOUT = 300           # seconds; a child that takes longer is killed, the test fails
+VIRTUAL_DISPLAY_HINT = "the Tk tests need the virtual display of tools/check.sh (Xvfb)"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Keep the whole test run away from the real desktop session.
+
+    Args:
+        config: pytest configuration (unused).
+    """
+    del config
+    os.environ["WAYLAND_DISPLAY"] = "mediatools-test-no-display"
+    os.environ["XDG_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="mediatools-test-run-")
+    if os.environ.get("MEDIATOOLS_XVFB") != "1":
+        os.environ.pop("DISPLAY", None)
+
 
 HAVE_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 HAVE_RSYNC = shutil.which("rsync") is not None
@@ -43,7 +70,7 @@ def collect_in_main_thread() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def datadir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Give every test its own temporary ``MEDIATOOLS_HOME``.
+    """Give every test its own temporary ``MEDIATOOLS_HOME`` and XDG folders.
 
     Args:
         tmp_path: Per-test temporary directory (pytest fixture).
@@ -54,6 +81,8 @@ def datadir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     home = tmp_path / "mediatools_home"
     monkeypatch.setenv("MEDIATOOLS_HOME", str(home))
+    for name in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+        monkeypatch.setenv(name, str(tmp_path / "xdg" / name.lower()))
     return home
 
 
@@ -73,7 +102,7 @@ def make_video(path: Path, seconds: int = 2, codec: str = "libx264") -> str:
            "-i", f"testsrc=duration={seconds}:size=160x120:rate=10", "-c:v", codec]
     if codec == "libx265":
         cmd += ["-x265-params", "log-level=error"]
-    subprocess.run(cmd + [str(path)], check=True)
+    subprocess.run(cmd + [str(path)], check=True, timeout=CHILD_TIMEOUT)
     return str(path)
 
 

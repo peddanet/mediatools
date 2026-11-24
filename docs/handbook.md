@@ -1978,10 +1978,13 @@ application menu entry: ~/.local/share/applications/mediatools.desktop: ok
 # Testing
 
 ~~~bash
-cd ~/Projects/mediatools
-python3 -m pytest -q
-PYTHONPATH=src:tests pylint src tests tools
+cd ~/Projects/mediatools && \
+    tools/check.sh
 ~~~
+
+`tools/check.sh` runs the tests on a virtual display (Xvfb); a plain
+`python3 -m pytest` drops the real display, so the GUI tests fail there
+instead of opening windows on the desktop.
 
 | File | Covers |
 |---|---|
@@ -1999,6 +2002,7 @@ PYTHONPATH=src:tests pylint src tests tools
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
+| `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |
 | `test_queue_pause.py` | stopped, aborted, failed or crashed queue job back as paused entry; *Stop, then next* order; `stop --now` (SIGTERM) |
 | `test_release_1213.py` | workflow triggers and Python matrix |
 | `test_release_1215.py` | `mediatools status`: advice per version pair, last version line counts, pending reload/stop, missing log, source checkout, exit codes |

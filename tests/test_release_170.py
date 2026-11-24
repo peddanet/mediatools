@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_file, needs_ffmpeg
+from conftest import CHILD_TIMEOUT, make_file, needs_ffmpeg
 from mediatools.broken import (Assessment, Assessor, BackupMirror, BackupResult,
                                BrokenCollector, BrokenFinder,
                                BrokenReview, DownloaderDatabase, Quarantine, RepairEncoder)
@@ -42,7 +42,7 @@ def video(path: Path, source: str = "testsrc", seconds: int = 10) -> str:
     spec = f"{source}{':' if '=' in source else '='}duration={seconds}:size=160x120:rate=10"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
                     "-i", spec, "-c:v", "libx264", "-movflags", "+faststart", str(path)],
-                   check=True)
+                   check=True, timeout=CHILD_TIMEOUT)
     return str(path)
 
 

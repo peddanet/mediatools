@@ -17,13 +17,25 @@ everywhere except inside an allowed phrase - e.g. the term ``level`` with
 the allowed phrase ``sea level``.
 
 Scanned are the contents of all tracked files (PDFs via ``pdftotext`` if
-installed), the tracked file paths and all commit messages. Matching
-ignores case; a term must not be part of a longer word (``cat`` does not
-match ``concatenate``). Without any local term the scan is skipped, so the
-check is neutral in CI.
+installed), the tracked file paths, all commit messages and the
+identities: author and committer of every commit, tagger of every tag.
+Matching ignores case; a term must not be part of a longer word (``cat``
+does not match ``concatenate``).
 
-Exit codes: 0 clean or skipped, 1 terms found, 2 usage error or an old
-configuration (lists in ``~/scripts/mediatools.d``) still present.
+Every e-mail address of an identity must be a no-reply address
+(``*@users.noreply.github.com``, ``noreply@github.com``,
+``noreply@anthropic.com``) or stand on its own line in the allow list:
+commits made with a private global git identity would put a real address
+into a public history (dev-conventions handover v8). Findings name the
+commit or tag and show the address masked.
+
+**A gate must never pass because its input is missing:** without any local
+term the scan fails (exit 2). Only in CI (``CI=true``, always set by GitHub
+Actions), which has no local list by design, it is skipped and says so.
+
+Exit codes: 0 clean or skipped in CI, 1 terms or private addresses found,
+2 no local terms, usage error or an old configuration (lists in
+``~/scripts/mediatools.d``) still present.
 """
 from __future__ import annotations
 
@@ -34,6 +46,8 @@ import subprocess
 import sys
 from typing import Any
 
+NO_REPLY = re.compile(r"^[^@\s]+@users\.noreply\.github\.com$|^noreply@github\.com$"
+                      r"|^noreply@anthropic\.com$", re.IGNORECASE)
 STANDARD_DIRS = {"desktop", "documents", "downloads", "music", "pictures", "public",
                  "templates", "videos", "home", "projects", "scripts"}
 MIN_LENGTH = 3
@@ -69,6 +83,7 @@ class PrivacyScan:
         self.allowed = re.compile("|".join(self._phrase(a) for a in phrases),
                                   re.IGNORECASE) if phrases else None
         self.allowed_count = len(phrases)
+        self.allowed_addresses = {a.strip().lower() for a in allowed or [] if "@" in a}
         self.findings: list[tuple[str, str]] = []
 
     @staticmethod
@@ -214,16 +229,67 @@ class PrivacyScan:
             for match in self.pattern.finditer(line):
                 self.findings.append((f"{location}:{number}", match.group(1)))
 
-    def run(self) -> int:
-        """Scan files, paths and commit messages.
+    @staticmethod
+    def mask(address: str) -> str:
+        """Hide an e-mail address except its shape.
+
+        Args:
+            address: The address.
 
         Returns:
-            0 if clean or skipped, 1 if terms were found.
+            First letter of the local part and of the domain, the rest
+            replaced, e.g. ``p***@g***.com``.
+        """
+        local, _, domain = address.partition("@")
+        name, _, top = domain.rpartition(".")
+        return f"{local[:1]}***@{name[:1]}***.{top}" if name else f"{local[:1]}***@***"
+
+    def identities(self) -> list[tuple[str, str, str]]:
+        """List the identities of the history.
+
+        Returns:
+            ``(location, name, address)`` for author and committer of every
+            commit and the tagger of every annotated tag.
+        """
+        result: list[tuple[str, str, str]] = []
+        log = self._git("log", "--all", "--format=%h%x00%an%x00%ae%x00%cn%x00%ce")
+        for line in log.splitlines():
+            parts = line.split("\0")
+            if len(parts) == 5:
+                result.append((f"commit {parts[0]} author", parts[1], parts[2]))
+                result.append((f"commit {parts[0]} committer", parts[3], parts[4]))
+        tags = self._git("for-each-ref", "refs/tags",
+                         "--format=%(refname:short)%00%(taggername)%00%(taggeremail)")
+        for line in tags.splitlines():
+            parts = line.split("\0")
+            if len(parts) == 3 and (parts[1] or parts[2]):
+                result.append((f"tag {parts[0]} tagger", parts[1], parts[2].strip("<>")))
+        return result
+
+    def check_identities(self) -> None:
+        """Search names and addresses for terms; demand no-reply addresses."""
+        for location, name, address in self.identities():
+            self._search(f"{location} name", name)
+            self._search(f"{location} e-mail", address)
+            if not (NO_REPLY.match(address) or address.lower() in self.allowed_addresses):
+                self.findings.append((location, f"not a no-reply address: {self.mask(address)}"))
+
+    def run(self) -> int:
+        """Scan files, paths, commit messages and identities.
+
+        Returns:
+            0 if clean (or skipped in CI), 1 if something was found, 2 if
+            there are no local terms outside CI.
         """
         if self.pattern is None:
-            print("privacy scan skipped: no local terms "
-                  "(privacy_denylist.txt / [collection] root)")
-            return 0
+            if os.environ.get("CI") == "true":
+                print("privacy scan skipped in CI: no local terms by design "
+                      "(the deny list exists only on the developer's machine)")
+                return 0
+            print("privacy scan FAILED: no local terms - a scan without terms checks nothing.\n"
+                  "  create the deny list from the sample (CONTRIBUTING.md, local files):\n"
+                  "  mediatools privacy   (shows where the lists belong)", file=sys.stderr)
+            return 2
         for path in self._git("ls-files", "-z").split("\0"):
             if not path:
                 continue
@@ -233,6 +299,7 @@ class PrivacyScan:
                 self._search(path, text)
         log = self._git("log", "--all", "--format=commit %h%n%B")
         self._search("commit messages", log)
+        self.check_identities()
         for location, term in self.findings:
             print(f"{location}: {term}")
         print(f"privacy scan: {len(self.terms)} term(s), {self.allowed_count} allowed phrase(s), "

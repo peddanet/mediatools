@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_file
+from conftest import CHILD_TIMEOUT, make_file
 from test_shrink_run import build, videos
 from mediatools.core.decodecheck import DecodeCheck
 from mediatools.shrink import ShrinkDatabase
@@ -21,7 +21,7 @@ def ffmpeg(*args: str) -> None:
     Args:
         *args: ffmpeg arguments after the log options.
     """
-    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", *args], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", *args], check=True, timeout=CHILD_TIMEOUT)
 
 
 @pytest.fixture(name="clips", scope="module")
@@ -46,7 +46,7 @@ def fixture_clips(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     ffmpeg("-i", good, "-c", "copy", "-encryption_scheme", "cenc-aes-ctr",
            "-encryption_key", KEY, "-encryption_kid", KID, enc)
     subprocess.run(["ffmpeg", "-v", "quiet", "-nostdin", "-y", "-i", enc, "-c", "copy",
-                    stripped], check=True)
+                    stripped], check=True, timeout=CHILD_TIMEOUT)
     return {"good": good, "encrypted": stripped}
 
 
@@ -69,7 +69,7 @@ def test_encrypted_clip_is_unusable(clips: dict[str, str]) -> None:
     """
     tags = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                            "stream=codec_tag_string", "-of", "csv=p=0", clips["encrypted"]],
-                          capture_output=True, text=True, check=True).stdout.split()
+                          capture_output=True, text=True, check=True, timeout=CHILD_TIMEOUT).stdout.split()
     assert tags == ["avc1", "mp4a"]
     errors = DecodeCheck().unusable(clips["encrypted"])
     assert errors is not None and errors >= DecodeCheck.MAX_ERRORS

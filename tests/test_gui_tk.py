@@ -8,6 +8,8 @@ from typing import Callable, Iterator
 
 import pytest
 
+from conftest import VIRTUAL_DISPLAY_HINT
+
 from test_gui_logic import write_run
 from mediatools.cli import Cli
 from mediatools.core.config import Config
@@ -55,7 +57,7 @@ def fixture_root() -> Iterator[tk.Tk]:
     Yields:
         The window; destroyed afterwards.
     """
-    assert os.environ.get("DISPLAY"), "the Tk tests need a display (tools/check.sh uses Xvfb)"
+    assert os.environ.get("DISPLAY"), VIRTUAL_DISPLAY_HINT
     window = tk.Tk()
     window.withdraw()
     yield window
