@@ -324,7 +324,8 @@ def test_output_that_lost_a_stream_is_rejected(tmp_path: Path) -> None:
     """
     src = rich_video(tmp_path / "rich.mp4")
     poor = str(tmp_path / "poor.mp4")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", poor], check=True, timeout=CHILD_TIMEOUT)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", poor], check=True,
+                   timeout=CHILD_TIMEOUT)
     encoder = HevcEncoder(threads=2)
     assert encoder.lost_streams(src, poor) == "audio 2 -> 1, subtitle 1 -> 0"
     assert not encoder.validate(src, poor)

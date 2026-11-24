@@ -21,7 +21,8 @@ def ffmpeg(*args: str) -> None:
     Args:
         *args: ffmpeg arguments after the log options.
     """
-    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", *args], check=True, timeout=CHILD_TIMEOUT)
+    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", *args], check=True,
+                   timeout=CHILD_TIMEOUT)
 
 
 @pytest.fixture(name="clips", scope="module")
@@ -69,7 +70,8 @@ def test_encrypted_clip_is_unusable(clips: dict[str, str]) -> None:
     """
     tags = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                            "stream=codec_tag_string", "-of", "csv=p=0", clips["encrypted"]],
-                          capture_output=True, text=True, check=True, timeout=CHILD_TIMEOUT).stdout.split()
+                          capture_output=True, text=True, check=True,
+                          timeout=CHILD_TIMEOUT).stdout.split()
     assert tags == ["avc1", "mp4a"]
     errors = DecodeCheck().unusable(clips["encrypted"])
     assert errors is not None and errors >= DecodeCheck.MAX_ERRORS

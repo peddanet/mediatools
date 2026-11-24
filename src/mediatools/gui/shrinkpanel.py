@@ -141,10 +141,10 @@ class ShrinkPanel:
         The encode time of the current file is lost; the job stays in the
         queue, paused, if it came from there.
         """
-        if not self.joblist.confirm("Abort now",
-                            "Abort the current file now?\n\nIts partial output is deleted, "
-                            "the original stays untouched; the time spent on this file is "
-                            "lost. A job from the queue stays in the queue, paused."):
+        question = ("Abort the current file now?\n\nIts partial output is deleted, the "
+                    "original stays untouched; the time spent on this file is lost. A job "
+                    "from the queue stays in the queue, paused.")
+        if not self.joblist.confirm("Abort now", question):
             return
         self.joblist.queue.next_after_stop(False)
         self.message.set(self.monitor.abort())

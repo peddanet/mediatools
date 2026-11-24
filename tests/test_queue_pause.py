@@ -183,8 +183,8 @@ def test_request_abort_sends_sigterm(datadir: Path) -> None:
         try:
             os.makedirs(os.path.dirname(control.pid_file), exist_ok=True)
             Path(control.pid_file).write_text(f"{child.pid}\n", encoding="utf-8")
-            assert ShrinkMonitor(control).abort().startswith(f"abort requested: shrink (pid "
-                                                            f"{child.pid})")
+            message = ShrinkMonitor(control).abort()
+            assert message.startswith(f"abort requested: shrink (pid {child.pid})")
             assert child.wait(10) == -signal.SIGTERM
         finally:
             child.kill()

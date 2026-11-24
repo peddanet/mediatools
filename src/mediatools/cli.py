@@ -31,6 +31,7 @@ from mediatools.core.progressbase import ProgressBase
 from mediatools.flatten import FlatPlan, Flattener
 from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.launcher import GuiLauncher
+from mediatools.gui.shrinkmonitor import ShrinkMonitor
 from mediatools.shrink import (DatabaseRenamer, HevcEncoder, ProgressReport, Shrinker,
                                ShrinkOptions)
 from mediatools.shrink.jobchooser import JobChooser
@@ -117,8 +118,7 @@ class Cli:
         cmd = sub.add_parser("stop", help="ask a running shrink (in another terminal) to stop "
                                           "after its current file; returns at once")
         cmd.add_argument("--now", action="store_true",
-                         help="abort the current file at once (its partial output is deleted, "
-                              "the original stays); a queued job stays in the queue, paused")
+                         help="abort the current file at once (partial output deleted)")
         cmd = sub.add_parser("update", help="install a newer release, then apply and release "
                                             "delivered patch archives from the download folder")
         cmd.add_argument("--list", action="store_true",
@@ -582,10 +582,7 @@ class Cli:
 
     @staticmethod
     def cmd_stop(args: argparse.Namespace) -> int:
-        """Run ``mediatools stop``: request a stop of the running shrink.
-
-        A job started from the queue goes back to it, marked paused
-        (:meth:`ShrinkQueue.continue_after`).
+        """Run ``mediatools stop``: request a stop of the running shrink (queue job: paused).
 
         Args:
             args: Parsed arguments (``--now``: abort the current file).
@@ -594,21 +591,9 @@ class Cli:
             0 if a running shrink was asked to stop, 1 if none runs.
         """
         ShrinkQueue.default().next_after_stop(False)     # a plain stop ends the queue
-        control = RunControl("shrink")
-        if getattr(args, "now", False):
-            pid = control.request_abort()
-            if pid is None:
-                print("no shrink run is active - nothing to abort")
-                return 1
-            print(f"abort requested: shrink (pid {pid}) deletes the partial output of its "
-                  f"current file and ends; the original stays")
-            return 0
-        pid = control.request_stop()
-        if pid is None:
-            print("no shrink run is active - nothing to stop")
-            return 1
-        print(f"stop requested: shrink (pid {pid}) finishes its current file and ends")
-        return 0
+        monitor = ShrinkMonitor(RunControl("shrink"))
+        print(message := monitor.abort() if getattr(args, "now", False) else monitor.stop())
+        return 1 if message.startswith("no shrink run is active") else 0
 
     @staticmethod
     def cmd_attach(_args: argparse.Namespace) -> int:
