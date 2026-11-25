@@ -19,6 +19,11 @@ All notable changes are documented here. Versions follow
   name, and identical files are offered once. Such files are listed as
   *applied* or *old copy* and removed at the end.
 
+### Changed
+- The time in the plan line "to encode: ..." is marked "(at plan time)":
+  it is computed once and does not follow the run, unlike the ETA of the
+  progress display.
+
 ## [1.15.2] - 2026-11-25
 
 ### Fixed

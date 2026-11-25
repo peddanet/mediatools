@@ -485,7 +485,7 @@ class Shrinker:
             rate: Measured speed in source bytes per second, or None.
         """
         estimate = f", about {ThroughputLog.duration_text(total / rate)} at the measured " \
-                   f"{rate / 1e6:.1f} MB/s" if rate and total else ""
+                   f"{rate / 1e6:.1f} MB/s (at plan time)" if rate and total else ""
         hevc = self.found["hevc"]
         self.log.info("already processed (database): %i | shorter than %.0f s: %i | "
                       "already HEVC, recorded without encoding: %i files, %.1f GiB",

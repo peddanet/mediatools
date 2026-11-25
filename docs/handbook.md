@@ -625,7 +625,7 @@ Before anything is encoded, the whole tree is walked once:
 ~~~text
 already processed (database): 12000 | shorter than 60 s: 1500 | already HEVC,
 recorded without encoding: 40 files, 85.0 GiB
-to encode: 6500 files, 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+to encode: 6500 files, 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s (at plan time)
 expected afterwards: about 215.6 GiB, saving about 344.4 GiB (output 38 % of the
 source, measured on 25 file(s))
 leftover work folders of aborted runs: 18 folder(s), 3 file(s), 0.4 GiB - deleted
@@ -636,7 +636,11 @@ Start encoding and REPLACE the originals? [y/N]
 The estimates use `state/shrink_throughput.json`: source bytes and encoding
 seconds (speed) and, since 1.2.1, source and output bytes of the encoded
 files (size ratio). Before the first measured file the line says "not yet
-known". During the run the measured speed of the run itself takes over.
+known". The time in the line "to encode" is computed once, when the plan
+is made, and therefore marked "(at plan time)"; it does not change. During
+the run the remaining time (ETA) of the progress display takes over: the
+bytes still to go divided by the speed of the last three hours of running
+time.
 Leftover folders are listed one by one with `-v`; answering "no" keeps
 them.
 
