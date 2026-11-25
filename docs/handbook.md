@@ -205,7 +205,9 @@ running shrink switches after its current file. **Step 2** (developers)
 looks for patch archives `mediatools-feature-<name>.tar.gz` or
 `mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`),
 asks once per archive and releases it with `tools/release.sh` of the
-clone; users never have such archives. `-y` answers the questions with
+clone; users never have such archives. Browser copies (`... (1).tar.gz`)
+and second downloads of an archive already applied are recognised by their
+content and only removed. `-y` answers the questions with
 yes. Details: `docs/developer.md`, "Applying delivered patch archives".
 
 
@@ -2017,7 +2019,7 @@ instead of opening windows on the desktop.
 | `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
-| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
+| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, copies by content and branch, applied before, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |

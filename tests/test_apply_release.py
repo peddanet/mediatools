@@ -210,6 +210,47 @@ def test_list_shows_releases_archives_and_leftovers(setup: dict[str, Path]) -> N
     assert len(list(dl.iterdir())) == 4                       # --list changes nothing
 
 
+def test_copies_are_recognised_by_content_and_branch(setup: dict[str, Path]) -> None:
+    """Same content under another name is an old copy; "...1.tar.gz" is named by its branch.
+
+    Args:
+        setup: Paths from the fixture.
+    """
+    path = archive(setup, "x", "patch", age=120)
+    dl = setup["downloads"]
+    twin = dl / "mediatools-feature-x1.tar.gz"
+    shutil.copy2(path, twin)
+    os.utime(twin, (time.time(), time.time()))             # the newest file
+    out = run(setup, "--list").stdout
+    assert out.count("pending  feature") == 1
+    assert "pending  feature  x " in out and "mediatools-feature-x1.tar.gz" in out
+    assert "old copy mediatools-feature-x.tar.gz (removed at the end)" in out
+    out = run(setup, "-y").stdout
+    assert "applied: feature/x" in out
+    assert not twin.exists() and not path.exists()
+    releases = setup["home"] / ".local/share/mediatools/releases"
+    assert (releases / "mediatools-feature-x.tar.gz").is_file()
+
+
+def test_archive_applied_before_is_not_offered_again(setup: dict[str, Path]) -> None:
+    """A second download of an archive already in the releases folder is only removed.
+
+    Args:
+        setup: Paths from the fixture.
+    """
+    path = archive(setup, "x", "patch")
+    releases = setup["home"] / ".local/share/mediatools/releases"
+    releases.mkdir(parents=True)
+    shutil.copy2(path, releases / path.name)
+    again = setup["downloads"] / "mediatools-feature-x (1).tar.gz"
+    path.rename(again)
+    out = run(setup, "-y").stdout
+    assert "patch archives:    none" in out
+    assert "applied  mediatools-feature-x (1).tar.gz (removed at the end)" in out
+    assert "no patch applied" in out and not again.exists()
+    assert "v1.2.6" not in remote_tags(setup)
+
+
 def test_feature_archive_is_released_without_questions(setup: dict[str, Path]) -> None:
     """-y applies the archive, releases it with its part and moves it to releases.
 

@@ -9,7 +9,10 @@
 #   to switch to it after its current file (mediatools reload).
 # Step 2 (developer, needs the clone): patch archives in the download folder,
 #   "mediatools-feature-<name>.tar.gz" or "mediatools-hotfix-<name>.tar.gz"
-#   (browser copies "... (1).tar.gz": the newest copy is used). Each holds
+#   (browser copies "... (1).tar.gz" or "...1.tar.gz" are recognised by the
+#   branch in their patch.info: the newest copy is used; a file with
+#   the same content as a newer one or as an archive already applied is
+#   never offered, whatever its name). Each holds
 #   the patches and patch.info (branch, base, base_tree or blob lines, tree,
 #   release = patch|minor|major|none, message). Per archive one question;
 #   then: guard (base branch equals origin and has the expected tree or
@@ -22,7 +25,8 @@
 #   Used archives move to the releases folder. Removed at the end, and shown
 #   as such: "released" - old versioned archives
 #   "mediatools-hotfix-X.Y.Z-patch.tar.gz" of versions already released;
-#   "old copy" - older copies of the same archive name.
+#   "old copy" - older copies of the same archive name or the same content;
+#   "applied" - same content as an archive in the releases folder.
 #
 # Usage (normal user; git and gh act on your clone and with your GitHub
 # login, nothing here needs root). The script ships inside the package:
@@ -130,36 +134,45 @@ newest_release() {
     | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1
 }
 
-# newest copy per archive name: lines "kind<TAB>name<TAB>path", oldest first
-scan() {
-  find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
-    | while IFS=$'\t' read -r mtime path; do
-        [[ "$(basename "$path")" =~ $OLD_RE ]] && continue
-        [[ "$(basename "$path")" =~ $NAME_RE ]] || continue
-        printf '%s\t%s\t%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$mtime" "$path"
-      done | sort -t$'\t' -k2,2 -k3,3nr | awk -F'\t' '!seen[$1 FS $2]++' \
-    | sort -t$'\t' -k3,3n | cut -f1,2,4
-}
-
-# archives no longer needed, one line "reason<TAB>path": "released" for a
-# versioned archive of a version already released, "old copy" for an older
-# copy of the same archive name (browser copy "... (1).tar.gz")
-leftovers() {
-  local released="$1"
-  find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
-    | sort -t$'\t' -k1,1nr | while IFS=$'\t' read -r _mtime path; do
-        local base; base="$(basename "$path")"
-        if [[ "$base" =~ $OLD_RE ]]; then
-          version_lt "$released" "${BASH_REMATCH[1]}" || printf 'released\t%s\n' "$path"
-        elif [[ "$base" =~ $NAME_RE ]]; then
-          key="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}"
-          if [[ " ${SEEN:-} " == *" $key "* ]]; then
-            printf 'old copy\t%s\n' "$path"
-          else
-            SEEN="${SEEN:-} $key"
-          fi
-        fi
-      done
+# every archive in the download folder, newest first, one line
+# "status<TAB>kind<TAB>name<TAB>path"; status: "pending" for the newest copy
+# of each archive name, "old copy" for an older copy of the same name or a
+# file with the same content as a newer one, "applied" for the same content
+# as an archive in the releases folder, "released" for a versioned archive
+# of a version already released ($1 = installed version)
+classify() {
+  local released="$1" applied="" seen_sums="" seen_names="" path base sum key branch
+  if [ -d "$ARCHIVE" ]; then
+    applied="$(find "$ARCHIVE" -maxdepth 1 -type f -name '*.tar.gz' -print0 \
+               | xargs -0 -r sha256sum | cut -c 1-64 | tr '\n' ' ')"
+  fi
+  while IFS=$'\t' read -r _mtime path; do
+    base="$(basename "$path")"
+    if [[ "$base" =~ $OLD_RE ]]; then
+      version_lt "$released" "${BASH_REMATCH[1]}" || printf 'released\t-\t-\t%s\n' "$path"
+      continue
+    fi
+    [[ "$base" =~ $NAME_RE ]] || continue
+    key="${BASH_REMATCH[1]}"$'\t'"${BASH_REMATCH[2]}"
+    # the branch in patch.info names the archive, not the file name the
+    # browser gave it ("... (1).tar.gz", "...1.tar.gz")
+    branch="$(tar -xzOf "$path" --wildcards '*/patch.info' 2>/dev/null \
+              | sed -n 's/^branch=//p' | head -n 1 || true)"
+    if [[ "$branch" =~ ^(feature|hotfix)/([A-Za-z0-9][A-Za-z0-9._-]*)$ ]]; then
+      key="${BASH_REMATCH[1]}"$'\t'"${BASH_REMATCH[2]}"
+    fi
+    sum="$(sha256sum -- "$path" | cut -c 1-64)"
+    if [[ " $applied " == *" $sum "* ]]; then
+      printf 'applied\t%s\t%s\n' "$key" "$path"
+    elif [[ " $seen_sums " == *" $sum "* || "$seen_names" == *$'\n'"$key"$'\n'* ]]; then
+      printf 'old copy\t%s\t%s\n' "$key" "$path"
+    else
+      printf 'pending\t%s\t%s\n' "$key" "$path"
+      seen_names="${seen_names:-$'\n'}$key"$'\n'
+    fi
+    seen_sums="$seen_sums $sum"
+  done < <(find "$DL" -maxdepth 1 -type f -name 'mediatools-*.tar.gz' -printf '%T@\t%p\n' \
+           | sort -t$'\t' -k1,1nr)
 }
 
 # -- start ---------------------------------------------------------------------
@@ -202,8 +215,16 @@ else
 fi
 
 # -- step 2: patch archives -----------------------------------------------------
-mapfile -t FOUND < <(scan)
-mapfile -t LEFTOVER < <(leftovers "$INSTALLED")
+mapfile -t CLASSES < <(classify "$INSTALLED")
+FOUND=(); LEFTOVER=()
+for (( i=${#CLASSES[@]}-1; i>=0; i-- )); do      # pending archives oldest first
+  IFS=$'\t' read -r status kind name path <<< "${CLASSES[i]}"
+  [ "$status" = pending ] && FOUND+=("$kind"$'\t'"$name"$'\t'"$path")
+done
+for line in "${CLASSES[@]}"; do
+  IFS=$'\t' read -r status _kind _name path <<< "$line"
+  [ "$status" = pending ] || LEFTOVER+=("$status"$'\t'"$path")
+done
 echo "download folder:   $DL"
 [ ${#FOUND[@]} -gt 0 ] || echo "patch archives:    none"
 for line in "${FOUND[@]}"; do
@@ -288,7 +309,7 @@ for line in "${FOUND[@]}"; do
     tools/release.sh "$release" -m "$message" --yes
   fi
   mkdir -p "$ARCHIVE"
-  mv -v -- "$path" "$ARCHIVE/$(basename "$path" | sed 's/ ([0-9]*)//')"
+  mv -v -- "$path" "$ARCHIVE/mediatools-$kind-$name.tar.gz"
   APPLIED+=("$branch")
   rm -rf "$dir"
   if [ "$release" != none ]; then

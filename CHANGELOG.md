@@ -12,6 +12,12 @@ All notable changes are documented here. Versions follow
   empty number and stopped only at "required checks of pull request #
   failed"; GitHub also refuses a merge now and then right after green
   checks.
+- `mediatools update` recognises copies of a patch archive by content and
+  by the branch in its `patch.info`: a second download of an archive
+  already applied ("... (1).tar.gz") is no longer offered and failed at
+  the base guard, a browser copy "...1.tar.gz" is no longer refused for its
+  name, and identical files are offered once. Such files are listed as
+  *applied* or *old copy* and removed at the end.
 
 ## [1.15.2] - 2026-11-25
 
