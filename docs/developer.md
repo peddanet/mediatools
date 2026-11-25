@@ -818,9 +818,10 @@ tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
    of a running shrink, status).
 
 Remote helper branches are deleted after their merge. `CHECK_CMD`,
-`INSTALL_CMD` and `RELEASE_WAIT` (seconds after a push before the checks
-are watched, default 30) replace the gate script, the installer and the
-pause; the tests use them. Merge commits (no squash, no rebase) keep every
+`INSTALL_CMD`, `RELEASE_WAIT` (seconds after a push before the checks
+are watched, default 30) and `RELEASE_RETRY_PAUSE` (seconds between the up
+to five attempts of `gh pr create` and `gh pr merge`, default 10) replace
+the gate script, the installer and the pauses; the tests use them. Merge commits (no squash, no rebase) keep every
 commit; `git log --first-parent main` lists exactly the releases.
 
 # Applying delivered patch archives

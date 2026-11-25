@@ -34,6 +34,15 @@ db = os.path.join(state, "prs.json")
 prs = json.load(open(db, encoding="utf-8")) if os.path.exists(db) else []
 def save():
     json.dump(prs, open(db, "w", encoding="utf-8"))
+def fails(what):
+    """True while FAKE_GH_FAIL_<WHAT> failures are left (one counted per call)."""
+    left = int(os.environ.get("FAKE_GH_FAIL_" + what.upper(), "0"))
+    counter = os.path.join(state, "failed-" + what)
+    done = int(open(counter, encoding="utf-8").read()) if os.path.exists(counter) else 0
+    if done >= left:
+        return False
+    open(counter, "w", encoding="utf-8").write(str(done + 1))
+    return True
 cmd = args[:2]
 if cmd == ["auth", "status"]:
     sys.exit(0)
@@ -44,6 +53,11 @@ if cmd == ["pr", "list"]:
             break
     sys.exit(0)
 if cmd == ["pr", "create"]:
+    if fails("create"):
+        if os.environ.get("FAKE_GH_CREATED_ANYWAY"):
+            prs.append({"head": opt("--head"), "base": opt("--base"), "state": "open"})
+            save()
+        sys.exit("GraphQL: Something went wrong while executing your query")
     prs.append({"head": opt("--head"), "base": opt("--base"), "state": "open"})
     save()
     print(f"https://example.invalid/pull/{len(prs)}")
@@ -51,6 +65,8 @@ if cmd == ["pr", "create"]:
 if cmd == ["pr", "checks"]:
     sys.exit(int(os.environ.get("FAKE_GH_CHECKS", "0")))
 if cmd == ["pr", "merge"]:
+    if fails("merge"):
+        sys.exit("Pull request is not mergeable: the base branch policy prohibits the merge.")
     pr = prs[int(args[2]) - 1]
     with tempfile.TemporaryDirectory() as tmp:
         def run(*command):
@@ -114,7 +130,7 @@ def fixture_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     env = dict(os.environ)
     env.update(HOME=str(home), GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.org",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.org",
-               GIT_CONFIG_NOSYSTEM="1", CHECK_CMD="true", RELEASE_WAIT="0",
+               GIT_CONFIG_NOSYSTEM="1", CHECK_CMD="true", RELEASE_WAIT="0", RELEASE_RETRY_PAUSE="0",
                INSTALL_CMD=str(installer), FAKE_GH_DIR=str(state),
                FAKE_GH_ORIGIN=str(origin), PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
     sh(tmp_path, env, "git", "init", "-q", "--bare", "-b", "main", str(origin))
@@ -382,6 +398,71 @@ def test_red_checks_merge_nothing(repo: tuple[Path, dict[str, str]]) -> None:
     commit(work, env, "feature/a", "develop", "a.txt")
     stopped = release(work, env | {"FAKE_GH_CHECKS": "1"}, "--merge-only", "--yes", check=False)
     assert "failed - nothing merged" in stopped.stderr
+    assert remote(work, env, "refs/heads/develop") == before
+
+
+@pytest.mark.parametrize("anyway", ["", "1"])
+def test_failed_pull_request_creation_is_retried(repo: tuple[Path, dict[str, str]],
+                                                 anyway: str) -> None:
+    """A passing server error of gh pr create is retried; a PR made anyway is reused.
+
+    Args:
+        repo: Prepared clone (fixture).
+        anyway: "1" when GitHub created the pull request despite the error.
+    """
+    work, env = repo
+    commit(work, env, "feature/a", "develop", "a.txt")
+    done = release(work, env | {"FAKE_GH_FAIL_CREATE": "2", "FAKE_GH_CREATED_ANYWAY": anyway},
+                   "--merge-only", "--yes")
+    assert "creating the pull request failed (attempt 1/5)" in done.stderr
+    assert "Pull Request #1:" in done.stdout
+    sh(work, env, "git", "cat-file", "-e", "origin/develop:a.txt")
+
+
+def test_pull_request_never_created_merges_nothing(repo: tuple[Path, dict[str, str]]) -> None:
+    """Five failed attempts stop the script before checks and merge.
+
+    Args:
+        repo: Prepared clone (fixture).
+    """
+    work, env = repo
+    before = remote(work, env, "refs/heads/develop")
+    commit(work, env, "feature/a", "develop", "a.txt")
+    stopped = release(work, env | {"FAKE_GH_FAIL_CREATE": "9"}, "--merge-only", "--yes",
+                      check=False)
+    assert stopped.returncode != 0
+    assert "no pull request for feature/a -> develop - nothing merged" in stopped.stderr
+    assert "Pull Request #:" not in stopped.stdout
+    calls = (Path(env["FAKE_GH_DIR"]) / "calls").read_text()
+    assert "pr checks" not in calls and "pr merge" not in calls
+    assert remote(work, env, "refs/heads/develop") == before
+
+
+def test_refused_merge_is_retried(repo: tuple[Path, dict[str, str]]) -> None:
+    """A merge GitHub refuses right after green checks succeeds on a later attempt.
+
+    Args:
+        repo: Prepared clone (fixture).
+    """
+    work, env = repo
+    commit(work, env, "feature/a", "develop", "a.txt")
+    done = release(work, env | {"FAKE_GH_FAIL_MERGE": "2"}, "--merge-only", "--yes")
+    assert "merging pull request #1 failed (attempt 2/5)" in done.stderr
+    sh(work, env, "git", "cat-file", "-e", "origin/develop:a.txt")
+
+
+def test_merge_refused_for_good_stops(repo: tuple[Path, dict[str, str]]) -> None:
+    """Five refused merges stop the script with a clear message.
+
+    Args:
+        repo: Prepared clone (fixture).
+    """
+    work, env = repo
+    before = remote(work, env, "refs/heads/develop")
+    commit(work, env, "feature/a", "develop", "a.txt")
+    stopped = release(work, env | {"FAKE_GH_FAIL_MERGE": "9"}, "--merge-only", "--yes",
+                      check=False)
+    assert "pull request #1 could not be merged" in stopped.stderr
     assert remote(work, env, "refs/heads/develop") == before
 
 

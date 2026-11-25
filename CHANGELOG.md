@@ -5,6 +5,14 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+- `tools/release.sh` tries `gh pr create` and `gh pr merge` up to five
+  times (`RELEASE_RETRY_PAUSE`, default 10 s, apart) and stops when no pull
+  request number results. A passing GitHub server error went on with an
+  empty number and stopped only at "required checks of pull request #
+  failed"; GitHub also refuses a merge now and then right after green
+  checks.
+
 ## [1.15.2] - 2026-11-25
 
 ### Fixed
