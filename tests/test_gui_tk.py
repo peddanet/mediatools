@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import tkinter as tk
+from tkinter import ttk
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -11,6 +12,7 @@ import pytest
 from conftest import VIRTUAL_DISPLAY_HINT
 
 from test_gui_logic import write_run
+from mediatools import __version__
 from mediatools.cli import Cli
 from mediatools.core.config import Config
 from mediatools.gui.app import MediaToolsApp
@@ -377,6 +379,10 @@ def test_app_tabs_undo_about_and_close(root: tk.Tk, tmp_path: Path,
     assert app.forms["flatten"].values()["undo"] == "/data/plans/p.json"
     assert app.notebook.tab(app.notebook.select(), "text") == "flatten"
     assert "logs and state:" in app.about_text()
+    assert root.title() == "mediatools"                    # no version for launcher and dock
+    assert any(isinstance(child, ttk.Label)
+               and str(child.cget("text")).startswith(f"mediatools {__version__}")
+               for child in root.winfo_children())
     app.about()
     app.install_desktop()
     assert shown[-1].startswith("written: ")

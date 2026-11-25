@@ -1933,6 +1933,11 @@ gdbus call --session --dest org.freedesktop.portal.Desktop \
 theme: flat surfaces, one accent colour for the selected tab, progress
 bars and the *Run* and *Continue* buttons; no extra package is needed.
 
+The window title is just "mediatools"; the running version stands in a
+line on the right below the tabs (and in *Help > About*). Launcher, dock and
+window search show the title of an open window next to the menu entry
+"mediatools", so a version there would look like a second application.
+
 Every minute the window asks the installed release for its version (in
 the background). After `mediatools update` a bar above the tabs says which
 release is installed and offers *Restart now*: the window closes (asking

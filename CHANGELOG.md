@@ -5,6 +5,12 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Changed
+- The GUI window title is "mediatools" without the version; the running
+  version stands in a line on the right below the tabs. Launcher, dock and
+  window search showed the title "mediatools 1.x.y" next to the menu entry
+  "mediatools" like a second application.
+
 ## [1.15.1] - 2026-11-25
 
 ### Added
