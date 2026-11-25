@@ -5,6 +5,22 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.2] - 2026-11-25
+
+### Fixed
+- The remaining time (ETA) of a shrink uses the speed of the recent
+  running time, read from the ledger (last three hours of encoding;
+  parallel encodes count once). Before it was the average since the start
+  of the process: a pause (stop, Ctrl+Z, planning) made it too long, it
+  hardly went down while the material changed, and every `mediatools
+  reload` made it jump.
+
+### Changed
+- The GUI window title is "mediatools" without the version; the running
+  version stands in a line on the right below the tabs. Launcher, dock and
+  window search showed the title "mediatools 1.x.y" next to the menu entry
+  "mediatools" like a second application.
+
 ## [1.15.1] - 2026-11-25
 
 ### Added

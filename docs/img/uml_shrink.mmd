@@ -312,6 +312,14 @@ classDiagram
     +checked(text)
     +run_first()
   }
+  class RecentSpeed {
+    +ledger
+    +cache
+    +init(ledger)
+    +span(row)
+    +busy(spans)
+    +rate()
+  }
   class ResultTable {
     +root
     +report
@@ -580,6 +588,8 @@ classDiagram
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   QueueCommand --> ShrinkQueue
+  RecentSpeed --> Ledger
+  RecentSpeed ..> LedgerRow
   ResultTable ..> FileResult
   SavingsLog ..> Savings
   Shrinker ..> FileResult
@@ -587,6 +597,7 @@ classDiagram
   Shrinker ..> JobRegistry
   Shrinker ..> JobSpec
   Shrinker ..> LedgerRow
+  Shrinker ..> RecentSpeed
   Shrinker --> ReplaceJournal
   Shrinker ..> RunningEncode
   Shrinker --> ShrinkDatabase

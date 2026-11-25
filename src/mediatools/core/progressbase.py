@@ -27,6 +27,9 @@ class ProgressBase:
         ratio: Measured output share (output per source byte) for the
             forecast line, or None to leave the forecast out.
         freed: Returns the bytes freed so far in all sessions, or None.
+        recent: Returns the speed of the recent running time in bytes per
+            second (from the ledger, :class:`RecentSpeed`), or None; the
+            remaining time prefers it over the average of this process.
     """
 
     read: int = 0
@@ -36,3 +39,4 @@ class ProgressBase:
     written: int = 0
     ratio: float | None = None
     freed: Callable[[], int] | None = None
+    recent: Callable[[], float | None] | None = None

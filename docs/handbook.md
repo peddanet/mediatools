@@ -582,8 +582,8 @@ table and display stay in the main thread. Two names of one file (hard
 links) are never encoded together, and a work folder is removed only when
 no encode in it runs. A stop or reload starts no further file and waits
 for the running ones; a second Ctrl+C aborts all of them (originals stay
-untouched). The ETA uses the wall-clock speed of the run and so includes
-the gain. Compare the speed with `--jobs 1` and `--jobs 2` before making a
+untouched). The ETA uses the speed of the recent running time, in which
+parallel encodes count once, and so includes the gain. Compare the speed with `--jobs 1` and `--jobs 2` before making a
 value the default in `[shrink] jobs`; memory use grows with N.
 
 ## Plan
@@ -713,7 +713,15 @@ The first line covers the job (since 1.6.0; see *Jobs and the ledger*):
 the source GiB of the job read by all runs so far, with their size after
 shrinking in brackets, and the source GiB still to go in this run's plan;
 the percentage is read / (read + to go), the ETA the GiB to go divided by
-the measured speed. Read and files done come from the ledger, so they do
+the speed of the recent **running time**: the source bytes of the newest
+finished videos over the time in which they were encoded, taken back
+until three hours of running time are covered (from the ledger). Time in
+which nothing was encoded - a stop, a crash, a suspended process
+(Ctrl+Z), the planning phase - does not count, and the speed does not
+start again after a `mediatools reload`. Earlier releases divided by
+the average since the start of the process: pauses made it too long, it
+followed a change of the material only slowly, and every reload made it
+jump. Read and files done come from the ledger, so they do
 not start at zero after a start or a `mediatools reload`, and a run on a
 subtree or with other filters counts only its own job. Files shrunk
 before the first shrink log (e.g. by older scripts) are not part of
@@ -1933,6 +1941,11 @@ gdbus call --session --dest org.freedesktop.portal.Desktop \
 theme: flat surfaces, one accent colour for the selected tab, progress
 bars and the *Run* and *Continue* buttons; no extra package is needed.
 
+The window title is just "mediatools"; the running version stands in a
+line on the right below the tabs (and in *Help > About*). Launcher, dock and
+window search show the title of an open window next to the menu entry
+"mediatools", so a version there would look like a second application.
+
 Every minute the window asks the installed release for its version (in
 the background). After `mediatools update` a bar above the tabs says which
 release is installed and offers *Restart now*: the window closes (asking
@@ -2008,6 +2021,7 @@ instead of opening windows on the desktop.
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |
+| `test_recent_speed.py` | ETA speed from the ledger: pauses do not count, parallel encodes once, three-hour window, too few files: no speed |
 | `test_menu_entry_current.py` | `install.sh` points the menu entry to the new link and keeps the old link while entry or unit name it; the GUI start keeps an existing entry current |
 | `test_check_cache.py` | `check.sh` checks a tree in full once; `CHECK_FULL=1`, CI or a change run in full; no cache without `.git` |
 | `test_queue_pause.py` | stopped, aborted, failed or crashed queue job back as paused entry; *Stop, then next* order; `stop --now` (SIGTERM) |
