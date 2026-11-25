@@ -5,6 +5,14 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+- The remaining time (ETA) of a shrink uses the speed of the recent
+  running time, read from the ledger (last three hours of encoding;
+  parallel encodes count once). Before it was the average since the start
+  of the process: a pause (stop, Ctrl+Z, planning) made it too long, it
+  hardly went down while the material changed, and every `mediatools
+  reload` made it jump.
+
 ### Changed
 - The GUI window title is "mediatools" without the version; the running
   version stands in a line on the right below the tabs. Launcher, dock and
