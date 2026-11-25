@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-11-25
+
 ### Added
 - `tools/check.sh` checks each tree in full once: after a full green run
   the key (working-copy tree, Python version, installed packages) is kept
