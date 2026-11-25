@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.3] - 2026-11-25
+
 ### Fixed
 - `tools/release.sh` tries `gh pr create` and `gh pr merge` up to five
   times (`RELEASE_RETRY_PAUSE`, default 10 s, apart) and stops when no pull
