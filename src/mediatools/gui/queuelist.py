@@ -152,7 +152,7 @@ class QueueList:
         Returns:
             ``(id, values)`` per row; the id is ``running`` or the position.
         """
-        self.queue.recover()
+        self.queue.recover(self.monitor.control.active_pid())
         known = {entry.spec.key: entry for entry in self.monitor.registry().entries()}
         result: list[tuple[str, tuple[str, ...]]] = []
         if self.monitor.control.active_pid() is not None:
