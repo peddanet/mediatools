@@ -331,6 +331,7 @@ loops.
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
 | `ShrinkPanel`, `SavingsPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, savings table, INI editor, data folder browser |
+| `LogArea` | end of the shrink log in the shrink tab: scrolls both ways, follows new lines only while it shows the end, otherwise keeps the line at its upper edge (since 1.15.4) |
 
 The GUI has no function of its own. It runs the command line as child
 processes (`JobRunner`) or makes the same request files (`RunControl`), so

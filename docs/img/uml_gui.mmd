@@ -25,6 +25,9 @@ classDiagram
     +remove_desktop()
     -_zoom_key(steps)
     +zoom(steps)
+    +window_size(root)
+    +fit_status(panes, status)
+    +layout_shrink(panes, panel)
     +job_values(entry)
     +pick_job(entry, start)
     +check_update()
@@ -255,6 +258,16 @@ classDiagram
     +problem()
     +run(install_desktop, remove_desktop)
   }
+  class LogArea {
+    +frame
+    +text
+    +follow
+    +init(master, height)
+    +scroll_y(args)
+    +scrolled()
+    +show(content)
+    +line_of(line)
+  }
   class Opener {
     +program
     +init(program)
@@ -333,12 +346,13 @@ classDiagram
     +progress
     +overall
     +meter
-    +log
     +message
     +log_path
     +joblist
+    +log_area
     +init(master, monitor, opener, refresh_ms, parse, open_dialog)
     +refresh()
+    +log()
     +parts()
     +unparsed(args)
     +stop()
@@ -415,6 +429,7 @@ classDiagram
   QueueList ..> JobList
   QueueList --> ShrinkMonitor
   ShrinkMonitor ..> ShrinkReading
+  ShrinkPanel --> LogArea
   ShrinkPanel --> Opener
   ShrinkPanel --> QueueList
   ShrinkPanel --> ShrinkMonitor
