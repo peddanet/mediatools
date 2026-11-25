@@ -61,7 +61,9 @@
 # gh, logged in (gh auth login). CHECK_CMD replaces tools/check.sh,
 # INSTALL_CMD replaces ./install.sh, RELEASE_WAIT (seconds, default 30) is
 # the pause after a push before the checks are watched (GitHub registers
-# them with a delay); the tests set them.
+# them with a delay), RELEASE_RETRY_PAUSE (seconds, default 10) the pause
+# before a failed gh pr create or gh pr merge is tried again (5 attempts);
+# the tests set them.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -73,6 +75,7 @@ CHANGELOG="CHANGELOG.md"
 CHECK_CMD="${CHECK_CMD:-tools/check.sh}"
 INSTALL_CMD="${INSTALL_CMD:-./install.sh}"
 WAIT="${RELEASE_WAIT:-30}"
+RETRY_PAUSE="${RELEASE_RETRY_PAUSE:-10}"
 
 die() { echo "release.sh: $*" >&2; exit 1; }
 tree() { git rev-parse "$1^{tree}"; }
@@ -111,15 +114,37 @@ fi
 # --- GitHub helpers ----------------------------------------------------------------
 # number of the open pull request from $1 into $2; created with title $3 if none
 pull_request() {
-    local number url
-    number="$(gh pr list --head "$1" --base "$2" --state open --json number \
-              --jq '.[0].number // empty')"
-    if [[ -z "$number" ]]; then
-        url="$(gh pr create --head "$1" --base "$2" --title "$3" \
-               --body "Created by tools/release.sh")"
-        number="${url##*/}"
-    fi
+    local number="" url attempt
+    for attempt in 1 2 3 4 5; do
+        number="$(gh pr list --head "$1" --base "$2" --state open --json number \
+                  --jq '.[0].number // empty' || true)"
+        [[ -n "$number" ]] && break
+        # GitHub answers now and then with a passing server error
+        # ("GraphQL: Something went wrong"); a pull request it created
+        # anyway is found by the list above in the next attempt
+        if url="$(gh pr create --head "$1" --base "$2" --title "$3" \
+                  --body "Created by tools/release.sh")"; then
+            number="${url##*/}"
+            break
+        fi
+        echo "creating the pull request failed (attempt $attempt/5), trying again" >&2
+        sleep "$RETRY_PAUSE"
+    done
+    [[ "$number" =~ ^[0-9]+$ ]] || die "no pull request for $1 -> $2 - nothing merged"
     echo "$number"
+}
+
+# merge pull request $1 with subject $2; GitHub needs a moment after green
+# checks before it reports the pull request as mergeable, so a refusal is
+# retried a few times before the script stops
+merge_pull_request() {
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        gh pr merge "$1" --merge --subject "$2" --body "" && return 0
+        echo "merging pull request #$1 failed (attempt $attempt/5), trying again" >&2
+        sleep "$RETRY_PAUSE"
+    done
+    die "pull request #$1 could not be merged - see GitHub; nothing else changed"
 }
 
 # wait for the required checks of pull request $1; a lost connection while
@@ -150,7 +175,7 @@ integrate() {
     number="$(pull_request "$1" "$2" "$3")"
     echo "Pull Request #$number: $1 -> $2"
     checks "$number"
-    gh pr merge "$number" --merge --subject "$3" --body ""
+    merge_pull_request "$number" "$3"
     git fetch --quiet --tags origin
     git switch --quiet "$2"
     git merge --quiet --ff-only "origin/$2"
