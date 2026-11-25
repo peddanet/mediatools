@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.2] - 2026-11-25
+
 ### Fixed
 - The remaining time (ETA) of a shrink uses the speed of the recent
   running time, read from the ledger (last three hours of encoding;
