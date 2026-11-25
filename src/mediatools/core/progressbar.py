@@ -16,8 +16,11 @@ class ProgressBar:
 
     Progress is measured in source bytes, because encoding time grows with
     file size far more than with file count. The remaining time is
-    ``remaining bytes / speed``; the speed comes from this run once two
-    files are done or 30 s have passed, before that from earlier runs
+    ``remaining bytes / speed``. The speed is that of the recent *running*
+    time when ``base.recent`` provides one (shrink: :class:`RecentSpeed`,
+    read from the ledger - pauses do not count and a release switch does
+    not reset it); otherwise the average of this process once two files
+    are done or 30 s have passed, before that from earlier runs
     (``initial_rate``).
 
     Two lines are drawn: the overall progress (:meth:`line`) and the
@@ -109,6 +112,9 @@ class ProgressBar:
         Returns:
             Bytes per second, or None if unknown.
         """
+        recent = self.base.recent() if self.base.recent is not None else None
+        if recent:
+            return recent
         elapsed = time.monotonic() - self.started
         processed = self.done_bytes + current_bytes
         if (self.done_files >= 2 or elapsed >= self.MIN_ELAPSED) and processed > 0:

@@ -97,7 +97,10 @@ class MediaToolsApp:
         self.tabs: dict[str, ttk.Frame] = {}
         self.appearance = Appearance(root, config or Config())
         self.restarter: Callable[[], None] = self._exec_gui
-        root.title(f"mediatools {VersionInfo().describe()}")
+        # no version in the title: launcher, dock and window search show the
+        # title next to the menu entry "mediatools"; the version is in the
+        # version line below the tabs (and in Help > About)
+        root.title("mediatools")
         self.icon = tk.PhotoImage(master=root, file=os.path.join(DesktopEntry.ICON_DIR,
                                                                  "mediatools-64.png"))
         root.iconphoto(True, self.icon)
@@ -112,6 +115,11 @@ class MediaToolsApp:
         self.updates = UpdateBar(root, self.restart)
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, padx=6, pady=6)
+        # version line below the tabs, on the right (the title stays "mediatools");
+        # packed after the tabs, it still gets its height: pack hands out the
+        # requested sizes first and only the rest to the expanding tabs
+        ttk.Label(root, text=f"mediatools {VersionInfo().describe()}",
+                  padding=(8, 0, 8, 4)).pack(anchor="e")
         for spec in catalog.commands():
             if spec.name in self.PANEL_COMMANDS:
                 continue

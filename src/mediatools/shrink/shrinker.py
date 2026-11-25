@@ -30,6 +30,7 @@ from mediatools.shrink.journal import ReplaceJournal
 from mediatools.shrink.ledgerrow import LedgerRow
 from mediatools.shrink.options import ShrinkOptions
 from mediatools.shrink.planner import ShrinkPlanner
+from mediatools.shrink.recentspeed import RecentSpeed
 from mediatools.shrink.shrinkstate import ShrinkState
 from mediatools.shrink.slottable import RunningEncode, SlotTable
 from mediatools.shrink.spacetally import SpaceTally
@@ -283,6 +284,8 @@ class Shrinker:
         base.after = lambda: base.written + self.state["space"].run_out
         base.ratio = self.state["throughput"].ratio()
         base.freed = self._freed_overall
+        ledger = self.state["ledger"]
+        base.recent = RecentSpeed(ledger).rate if ledger is not None else None
         self.display.base = self.state["base"]
         if self.control is not None:
             self.display.status_path = self.control.status_file
