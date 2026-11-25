@@ -242,3 +242,61 @@ def test_app_shrink_tab_has_queue_and_dialog(root: tk.Tk, tmp_path: Path,
     app.open_job_dialog(None, None)
     assert app.jobdialog.window.winfo_ismapped() or app.jobdialog.window.state() != "withdrawn"
     assert app.parse_shrink([str(tmp_path)]).path == str(tmp_path)
+
+
+def test_shrink_tab_default_division(root: tk.Tk, tmp_path: Path, datadir: Path) -> None:
+    """Status with its buttons fully visible, the queue, the console; the log gets the rest.
+
+    Args:
+        root: Main window (fixture).
+        tmp_path: Temporary directory.
+        datadir: Data directory (fixture).
+    """
+    del datadir
+    app = MediaToolsApp(root, CommandCatalog(Cli().parser),
+                        FormStore(str(tmp_path / "g.json")), ask=lambda _t, _x: True,
+                        refresh_ms=0)
+    root.geometry("1280x900")
+    root.deiconify()
+    for _round in range(5):
+        root.update()
+    panes = app.tabs["shrink"].winfo_children()[0]
+    assert isinstance(panes, ttk.PanedWindow)
+    status, _queue, log, console = (root.nametowidget(name) for name in panes.panes())
+    assert panes.sashpos(0) >= status.winfo_reqheight() - 1        # buttons not cut
+    assert log.winfo_height() > console.winfo_height() > 0
+    app.zoom(2)
+    for _round in range(5):
+        root.update()
+    assert panes.sashpos(0) >= status.winfo_reqheight() - 1
+    ttk.Label(status, text="\n".join(f"line {number}" for number in range(12))).pack()
+    status.event_generate("<<StatusHeight>>")                        # as refresh() does
+    for _round in range(5):
+        root.update()
+    assert panes.sashpos(0) >= status.winfo_reqheight() - 1          # grown with it
+    root.geometry("1280x200")
+    root.update()
+    panel = ShrinkPanel(ttk.PanedWindow(root), refresh_ms=0)
+    assert not app.layout_shrink(panes, panel)                       # too small: unchanged
+    MediaToolsApp.fit_status(ttk.PanedWindow(root), status)          # not shown: no error
+
+
+def test_window_size_follows_the_screen() -> None:
+    """Nine tenths of the screen, between 1280 x 900 and 1600 x 1200, never more than it."""
+    class Screen:                         # pylint: disable=too-few-public-methods
+        """Stand-in for the root window with a given screen size."""
+
+        def __init__(self, width: int, height: int) -> None:
+            """Remember the size.
+
+            Args:
+                width: Screen width.
+                height: Screen height.
+            """
+            self.winfo_screenwidth = lambda: width
+            self.winfo_screenheight = lambda: height
+
+    size = MediaToolsApp.window_size
+    assert size(Screen(1920, 1080)) == "1600x972"          # type: ignore[arg-type]
+    assert size(Screen(3840, 2160)) == "1600x1200"         # type: ignore[arg-type]
+    assert size(Screen(1366, 768)) == "1280x768"           # type: ignore[arg-type]

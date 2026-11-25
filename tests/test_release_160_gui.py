@@ -65,17 +65,17 @@ def test_appearance_zoom_theme_and_saving(root: tk.Tk) -> None:
     config = Config()
     look = Appearance(root, config, FakeLook())
     look.apply()
-    assert look.points() == 10 and look.style.theme_use() == "clam"
+    assert look.points() == 11 and look.style.theme_use() == "clam"
     for _step in range(30):
         look.zoom(1)
     assert look.scale == Appearance.MAX_SCALE and Config().get("gui", "scale") == "2.5"
-    assert look.zoom(0) == 1.0
+    assert look.zoom(0) == Appearance.DEFAULT_SCALE == 1.1
     assert look.set_theme("dark") == "dark" and Config().get("gui", "theme") == "dark"
     assert text.cget("background") == Appearance.PALETTES["dark"]["surface"]
     again = Appearance(root, Config(), FakeLook())
-    assert again.theme == "dark" and again.scale == 1.0
+    assert again.theme == "dark" and again.scale == 1.1
     config.set_value("gui", "scale", "huge")
-    assert Appearance(root, Config(), FakeLook()).scale == 1.0 and Appearance.clamp(0.1) == 0.8
+    assert Appearance(root, Config(), FakeLook()).scale == 1.1 and Appearance.clamp(0.1) == 0.8
 
 
 def test_job_list_fills_and_picks(root: tk.Tk, datadir: Path) -> None:
@@ -136,7 +136,7 @@ def test_app_fills_the_shrink_form_and_offers_a_restart(root: tk.Tk, tmp_path: P
     root.update()
     assert "9.9.9 is installed" in app.updates.text.get()
     app.zoom(1)
-    assert app.appearance.scale == 1.1
+    assert app.appearance.scale == 1.2
     assert app.restart() and restarted == [True]
 
 

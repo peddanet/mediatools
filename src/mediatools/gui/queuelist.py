@@ -80,7 +80,7 @@ class QueueList:
         self.jobs = ttk.Treeview(self.frame, columns=columns, show="headings", height=6,
                                  selectmode="extended")
         digit = tkfont.nametofont("TkDefaultFont", root=master).measure("0")
-        for name, title, chars, stretch in (("state", "#", 9, False),
+        for name, title, chars, stretch in (("state", "#", 11, False),
                                             ("progress", "progress", 28, False),
                                             ("done", "done / to go", 22, False),
                                             ("settings", "settings", 28, False),

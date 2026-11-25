@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import subprocess
 import sys
@@ -104,7 +105,7 @@ class MediaToolsApp:
         self.icon = tk.PhotoImage(master=root, file=os.path.join(DesktopEntry.ICON_DIR,
                                                                  "mediatools-64.png"))
         root.iconphoto(True, self.icon)
-        root.geometry("1280x900")
+        root.geometry(self.window_size(root))
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind_all("<Control-q>", lambda _event: self.close())
         for sequence, steps in (("<Control-plus>", 1), ("<Control-equal>", 1),
@@ -126,7 +127,7 @@ class MediaToolsApp:
             frame = ttk.Frame(self.notebook, padding=6)
             panes = ttk.PanedWindow(frame, orient="vertical")
             panes.pack(fill="both", expand=True)
-            console = ConsoleView(panes, height=6 if spec.name == "shrink" else 12)
+            console = ConsoleView(panes, height=3 if spec.name == "shrink" else 12)
             if spec.name == "shrink":
                 form = self._shrink_tab(panes, spec, console, (store, ask), refresh_ms)
             else:
@@ -165,6 +166,15 @@ class MediaToolsApp:
                             open_dialog=self.open_job_dialog)
         for part, weight in panel.parts:
             panes.add(part, weight=weight)
+        layout = functools.partial(self.layout_shrink, panes, panel)
+
+        def first_show(_event: tk.Event) -> None:
+            panes.unbind("<Map>")
+            self.root.after_idle(layout)
+        panes.bind("<Map>", first_show)
+        self.root.bind("<<TextSize>>", lambda _event: self.root.after_idle(layout), add="+")
+        panel.frame.bind("<<StatusHeight>>",
+                         lambda _event: self.fit_status(panes, panel.frame))
         self.jobdialog = JobDialog(self.root, spec, console, parse, store=store_ask[0],
                                    ask=store_ask[1],
                                    on_change=panel.joblist.reload)
@@ -279,6 +289,74 @@ class MediaToolsApp:
             steps: +1 larger, -1 smaller, 0 normal.
         """
         self.appearance.zoom(steps)
+        self.root.event_generate("<<TextSize>>")
+
+    @staticmethod
+    def window_size(root: tk.Tk) -> str:
+        """Return the start size of the window: nine tenths of the screen.
+
+        At least 1280 x 900 and at most 1600 x 1200, never more than the
+        screen; so the log of the shrink tab gets room on a large screen
+        (Full HD: 1600 x 972).
+
+        Args:
+            root: Tk main window.
+
+        Returns:
+            Geometry text ``WxH``.
+        """
+        width = max(1280, min(1600, root.winfo_screenwidth() * 9 // 10))
+        height = max(900, min(1200, root.winfo_screenheight() * 9 // 10))
+        return f"{min(width, root.winfo_screenwidth())}x{min(height, root.winfo_screenheight())}"
+
+    @staticmethod
+    def fit_status(panes: ttk.PanedWindow, status: tk.Misc) -> None:
+        """Keep the status part of the shrink tab at the height it needs.
+
+        A larger status moves the sashes below it down by the difference
+        (the log gives the room); a smaller one leaves them alone.
+
+        Args:
+            panes: Paned window of the shrink tab.
+            status: Its status part (first pane).
+        """
+        if not panes.winfo_ismapped():
+            return
+        panes.update_idletasks()                  # size of the new texts
+        grow = status.winfo_reqheight() - panes.sashpos(0)
+        if grow <= 0:
+            return
+        limit = panes.winfo_height()
+        for sash in (2, 1, 0):
+            panes.sashpos(sash, min(limit, panes.sashpos(sash) + grow))
+
+    def layout_shrink(self, panes: ttk.PanedWindow, panel: ShrinkPanel) -> bool:
+        """Set the default division of the shrink tab.
+
+        Status, queue and console at the height they need (all buttons
+        visible), the rest - the most - for the log. Called when the tab is
+        first shown and after a change of the text size; the sashes can
+        still be moved with the mouse.
+
+        Args:
+            panes: Paned window of the shrink tab.
+            panel: Its status part, queue and log (:class:`ShrinkPanel`).
+
+        Returns:
+            True if the sashes were set; False if the window is too small
+            (the panes keep their sizes then).
+        """
+        panes.update_idletasks()
+        total = panes.winfo_height()
+        status = panel.frame.winfo_reqheight()
+        queue = status + panel.joblist.frame.winfo_reqheight()
+        sash = max(4, int(6 * self.appearance.scale)) + 2     # see Appearance.apply
+        log_end = total - self.root.nametowidget(panes.panes()[-1]).winfo_reqheight() - sash
+        if log_end - queue < 4 * self.appearance.points():
+            return False
+        for sash, position in ((2, log_end), (1, queue), (0, status)):
+            panes.sashpos(sash, position)          # from below: no sash blocks the next
+        return True
 
     @staticmethod
     def job_values(entry: JobEntry) -> dict[str, object]:
