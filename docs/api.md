@@ -2504,7 +2504,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.15.1') -> None
+__init__(self, control: RunControl, installed: str = '1.15.2') -> None
 
 Remember the job and the installed release.
 
@@ -2783,7 +2783,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.15.1')
+__init__(self, package_dir: str | None = None, version: str = '1.15.2')
 
 Locate the imported package.
 
