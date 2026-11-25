@@ -1730,8 +1730,11 @@ Shows overall progress by bytes, files and estimated remaining time.
 
 Progress is measured in source bytes, because encoding time grows with
 file size far more than with file count. The remaining time is
-``remaining bytes / speed``; the speed comes from this run once two
-files are done or 30 s have passed, before that from earlier runs
+``remaining bytes / speed``. The speed is that of the recent *running*
+time when ``base.recent`` provides one (shrink: :class:`RecentSpeed`,
+read from the ledger - pauses do not count and a release switch does
+not reset it); otherwise the average of this process once two files
+are done or 30 s have passed, before that from earlier runs
 (``initial_rate``).
 
 Two lines are drawn: the overall progress (:meth:`line`) and the
@@ -2014,6 +2017,9 @@ Attributes:
     ratio: Measured output share (output per source byte) for the
         forecast line, or None to leave the forecast out.
     freed: Returns the bytes freed so far in all sessions, or None.
+    recent: Returns the speed of the recent running time in bytes per
+        second (from the ledger, :class:`RecentSpeed`), or None; the
+        remaining time prefers it over the average of this process.
 ~~~
 
 **`__init__`**
@@ -2028,6 +2034,7 @@ __init__(
     written: int = 0,
     ratio: float | None = None,
     freed: Callable[[], int] | None = None,
+    recent: Callable[[], float | None] | None = None,
 ) -> None
 
 Initialize self.  See help(type(self)) for accurate signature.
@@ -5654,6 +5661,80 @@ Start the first job of the queue.
 Returns:
     Exit code of the job; 0 if the queue is empty; 3 if another
     shrink runs (the job is put back first).
+~~~
+
+### `RecentSpeed` (`mediatools.shrink.recentspeed`) {.unnumbered}
+
+~~~text
+Speed for the remaining time: bytes per second of recent *running* time.
+
+Every ledger row knows when its video ended and how long it was encoded,
+i.e. the interval ``[end - took, end]``. The running time is the union of
+these intervals: parallel encodes count once, and time in which nothing
+was encoded - a stop, a crash, a suspended process (Ctrl+Z), the
+planning phase - does not count at all. The speed is the source bytes
+of the newest videos over their running time, taken back until
+:attr:`WINDOW` seconds of running time are covered.
+
+The ledger outlives the process, so the speed does not start from zero
+after a switch to a new release (``mediatools reload``), and it follows
+a change of the material within hours instead of averaging over the
+whole run.
+
+Attributes:
+    ledger: The ledger of finished videos.
+    cache: ``(ledger size, speed)`` of the last computation.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, ledger: Ledger) -> None
+
+Bind to the ledger.
+
+Args:
+    ledger: The ledger of finished videos.
+~~~
+
+**`span`**
+
+~~~text
+span(row: LedgerRow) -> tuple[float, float] | None
+
+Return the encode interval of a row in epoch seconds.
+
+Args:
+    row: A ledger row.
+
+Returns:
+    ``(start, end)``, or None for rows without an encode time.
+~~~
+
+**`busy`**
+
+~~~text
+busy(spans: list[tuple[float, float]]) -> float
+
+Return the length of the union of intervals.
+
+Args:
+    spans: ``(start, end)`` pairs in any order.
+
+Returns:
+    Seconds covered by at least one interval.
+~~~
+
+**`rate`**
+
+~~~text
+rate(self) -> float | None
+
+Return the recent speed while running.
+
+Returns:
+    Source bytes per second of running time, or None with fewer
+    than :attr:`MIN_FILES` finished videos.
 ~~~
 
 ### `ResultTable` (`mediatools.shrink.resulttable`) {.unnumbered}
