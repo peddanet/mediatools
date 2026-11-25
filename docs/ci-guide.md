@@ -255,7 +255,13 @@ tree; they are kept because the pre-push hook must never be bypassed.
 
 Every merge is announced with its pull request; the script waits
 `RELEASE_WAIT` seconds (default 30) after a push, because GitHub registers
-the checks of a new push with a delay, and then follows them:
+the checks of a new push with a delay, and then follows them. GitHub
+answers now and then with a passing server error ("GraphQL: Something went
+wrong") or refuses a merge right after green checks; `gh pr create` and
+`gh pr merge` are therefore tried up to five times, `RELEASE_RETRY_PAUSE`
+seconds (default 10) apart. A pull request GitHub created despite the error
+is found and reused; without a pull request number the script stops before
+any merge ("no pull request for ... - nothing merged").
 
 ~~~text
 Pull Request #41: release/1.14.0 -> main

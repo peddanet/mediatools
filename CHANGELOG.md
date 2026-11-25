@@ -5,6 +5,25 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+- `tools/release.sh` tries `gh pr create` and `gh pr merge` up to five
+  times (`RELEASE_RETRY_PAUSE`, default 10 s, apart) and stops when no pull
+  request number results. A passing GitHub server error went on with an
+  empty number and stopped only at "required checks of pull request #
+  failed"; GitHub also refuses a merge now and then right after green
+  checks.
+- `mediatools update` recognises copies of a patch archive by content and
+  by the branch in its `patch.info`: a second download of an archive
+  already applied ("... (1).tar.gz") is no longer offered and failed at
+  the base guard, a browser copy "...1.tar.gz" is no longer refused for its
+  name, and identical files are offered once. Such files are listed as
+  *applied* or *old copy* and removed at the end.
+
+### Changed
+- The time in the plan line "to encode: ..." is marked "(at plan time)":
+  it is computed once and does not follow the run, unlike the ETA of the
+  progress display.
+
 ## [1.15.2] - 2026-11-25
 
 ### Fixed

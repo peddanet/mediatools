@@ -205,7 +205,9 @@ running shrink switches after its current file. **Step 2** (developers)
 looks for patch archives `mediatools-feature-<name>.tar.gz` or
 `mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`),
 asks once per archive and releases it with `tools/release.sh` of the
-clone; users never have such archives. `-y` answers the questions with
+clone; users never have such archives. Browser copies (`... (1).tar.gz`)
+and second downloads of an archive already applied are recognised by their
+content and only removed. `-y` answers the questions with
 yes. Details: `docs/developer.md`, "Applying delivered patch archives".
 
 
@@ -623,7 +625,7 @@ Before anything is encoded, the whole tree is walked once:
 ~~~text
 already processed (database): 12000 | shorter than 60 s: 1500 | already HEVC,
 recorded without encoding: 40 files, 85.0 GiB
-to encode: 6500 files, 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s
+to encode: 6500 files, 560.0 GiB, about 4 d 15 h at the measured 1.5 MB/s (at plan time)
 expected afterwards: about 215.6 GiB, saving about 344.4 GiB (output 38 % of the
 source, measured on 25 file(s))
 leftover work folders of aborted runs: 18 folder(s), 3 file(s), 0.4 GiB - deleted
@@ -634,7 +636,11 @@ Start encoding and REPLACE the originals? [y/N]
 The estimates use `state/shrink_throughput.json`: source bytes and encoding
 seconds (speed) and, since 1.2.1, source and output bytes of the encoded
 files (size ratio). Before the first measured file the line says "not yet
-known". During the run the measured speed of the run itself takes over.
+known". The time in the line "to encode" is computed once, when the plan
+is made, and therefore marked "(at plan time)"; it does not change. During
+the run the remaining time (ETA) of the progress display takes over: the
+bytes still to go divided by the speed of the last three hours of running
+time.
 Leftover folders are listed one by one with `-v`; answering "no" keeps
 them.
 
@@ -2017,7 +2023,7 @@ instead of opening windows on the desktop.
 | `test_shrink_run.py` | run loop: two-stage Ctrl+C, SIGHUP, journal order, leftovers, forecast, HEVC set-aside, codec cache, cache checkpoints |
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
-| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
+| `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, copies by content and branch, applied before, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |

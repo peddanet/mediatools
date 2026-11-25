@@ -818,9 +818,10 @@ tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
    of a running shrink, status).
 
 Remote helper branches are deleted after their merge. `CHECK_CMD`,
-`INSTALL_CMD` and `RELEASE_WAIT` (seconds after a push before the checks
-are watched, default 30) replace the gate script, the installer and the
-pause; the tests use them. Merge commits (no squash, no rebase) keep every
+`INSTALL_CMD`, `RELEASE_WAIT` (seconds after a push before the checks
+are watched, default 30) and `RELEASE_RETRY_PAUSE` (seconds between the up
+to five attempts of `gh pr create` and `gh pr merge`, default 10) replace
+the gate script, the installer and the pauses; the tests use them. Merge commits (no squash, no rebase) keep every
 commit; `git log --first-parent main` lists exactly the releases.
 
 # Applying delivered patch archives
@@ -838,7 +839,7 @@ mediatools update -y         # no questions
 | Step | What happens |
 |---|---|
 | 1 newer release | installed release (`~/.local/bin/mediatools --version`, else the caller's version) against the newest tag of the repository (`git ls-remote`); newer: `./install.sh vX.Y.Z` of the clone, or without a clone pip into the venv of the running program (`MEDIATOOLS_VENV`); then `mediatools reload` |
-| 2 inventory | `mediatools-feature-<name>.tar.gz` / `mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`), newest copy per name (browser copies `... (1).tar.gz`); versioned archives of released versions are shown as *released*, older copies as *old copy*, both removed at the end; versioned archives above the installed release are *refused* (format before 1.14.0) |
+| 2 inventory | `mediatools-feature-<name>.tar.gz` / `mediatools-hotfix-<name>.tar.gz` in `~/Downloads` (`--downloads DIR`), newest copy per archive, named by the `branch` in its `patch.info` (so browser copies `... (1).tar.gz` or `...1.tar.gz` count as the same archive); versioned archives of released versions are shown as *released*, older copies and files with the same content as a newer one as *old copy*, files with the same content as an archive in the releases folder as *applied* (never offered again), all removed at the end; versioned archives above the installed release are *refused* (format before 1.14.0) |
 | 2 per archive | `patch.info` read; question; `base` branch fast-forwarded to `origin`, its tree (or the listed blobs) compared with `base_tree` (or the "before" blobs); `git switch -c <branch> <base>`; `git am`; result compared with `tree` (or the "after" blobs); `tools/release.sh <part> -m <message> --yes`, for `release=none` `--merge-only --yes`; archive to the releases folder |
 | end | archives with `release=none` are applied one after the other; the run ends after the first archive that releases, because the next one is built on its result |
 

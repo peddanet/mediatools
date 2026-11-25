@@ -403,6 +403,13 @@ def test_hevc_set_aside_in_plan_and_recorded_after_confirmation(
         assert shrinker.run(lambda: False) == 0
     assert "already HEVC, recorded without encoding: 1 files" in caplog.text
     assert "to encode: 2 files" in caplog.text
+    assert "MB/s (at plan time)" not in caplog.text            # no speed measured yet
+    ThroughputLog(str(tmp_path / "speed.json")).add(10 ** 6, 1.0)
+    caplog.clear()
+    shrinker, encoder = build(tmp_path, probe=HevcProbe({"large.mp4"}))
+    with caplog.at_level(logging.INFO, logger="test"):
+        assert shrinker.run(lambda: False) == 0
+    assert "at the measured 1.0 MB/s (at plan time)" in caplog.text
     assert not ShrinkDatabase(str(tmp_path / "c/b")).is_done(paths["large.mp4"])
     shrinker, encoder = build(tmp_path, probe=HevcProbe({"large.mp4"}))
     shrinker.display = None                          # let the run size the display
