@@ -305,7 +305,7 @@ classDiagram
     +queue
     +validate
     +start
-    +init(queue, validate, start)
+    +init(queue, validate, start, running)
     +add_parser(sub)
     +run(args)
     +change(args)
@@ -437,7 +437,7 @@ classDiagram
     -_write_current(entry)
     +take_current()
     +put_back(entry, position)
-    +recover()
+    +recover(running)
     -_alive(pid)
     +lines()
     +summary()

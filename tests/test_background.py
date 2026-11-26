@@ -63,6 +63,7 @@ def test_detach_continues_in_new_session(datadir: Path, tmp_path: Path) -> None:
     parent = subprocess.run([sys.executable, "-c", CHILD, "/x/run.log", str(marker)],
                             capture_output=True, text=True, env=env, check=True, timeout=30)
     assert time.monotonic() - started < 5
+    assert RunControl("job").active_pid() not in (None, parent.returncode)  # child registered
     assert "before detach" in parent.stdout
     assert "job continues in the background" in parent.stdout
     assert "mediatools attach" in parent.stdout and "/x/run.log" in parent.stdout

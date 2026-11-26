@@ -263,15 +263,24 @@ class ShrinkQueue:
         self._save(entries)
         return place + 1
 
-    def recover(self) -> bool:
+    def recover(self, running: int | None = None) -> bool:
         """Put back a job whose record a crash left behind.
 
         The record is left alone while the process that took the job is
-        alive (it runs the job, or is about to start it).
+        alive (it is about to start the job), and while a shrink runs:
+        the job moves into the background with a new process ID
+        (:meth:`RunControl.detach`), so the ID in the record belongs to the
+        ended starter, although its job still runs.
+
+        Args:
+            running: PID of the running shrink (:meth:`RunControl.active_pid`),
+                or None if none runs.
 
         Returns:
             True if a job was put back.
         """
+        if running is not None:
+            return False
         try:
             with open(self.current_file, encoding="utf-8", errors="surrogateescape") as handle:
                 pid = json.load(handle).get("pid")

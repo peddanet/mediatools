@@ -5,6 +5,29 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.4] - 2026-11-26
+
+### Fixed
+- A job started with *Continue* showed up twice in the GUI, as running and
+  as "1 paused": the job moves into the background with a new process ID,
+  and the refresh took the ID of the ended starter for a crash. The queue
+  now leaves the record alone while a shrink runs, and the starter ends
+  only after the background process has registered. The duplicate would
+  have been started again after the run.
+- Log area of the shrink tab: it scrolls sideways as well (no wrapping),
+  follows new lines only while it shows the end, and otherwise stays at the
+  line the user scrolled to. An area that was too small at the first fill
+  stayed at the beginning for good.
+
+### Changed
+- Shrink tab: status (with all buttons), queue and output pane get the
+  height they need, the log the rest; again after a change of the text
+  size, and the status part grows when a run starts. The output pane of
+  the tab shows 3 lines instead of 6; the window opens at nine tenths of
+  the screen (1280 x 900 to 1600 x 1200).
+- Default text size 1.1 (11 pt) instead of 1.0; *Normal size* (Ctrl+0)
+  returns to it. A `scale` already saved in `mediatools.ini` stays.
+
 ## [1.15.3] - 2026-11-25
 
 ### Fixed

@@ -69,9 +69,9 @@ exclude = newShrinkedFiles/
 max_deletions = 500
 
 [gui]
-# Text size of the window (1.0 = 10 pt; 0.8 to 2.5). Ctrl++ / Ctrl+- / Ctrl+0
-# in the window change it and save it here.
-scale = 1.0
+# Text size of the window (1.0 = 10 pt; 0.8 to 2.5; default 1.1 = 11 pt).
+# Ctrl++ / Ctrl+- / Ctrl+0 in the window change it and save it here.
+scale = 1.1
 # Colour scheme: auto (follow the desktop, also its accent colour), light
 # or dark (menu View).
 theme = auto
