@@ -5,8 +5,9 @@ import argparse
 import os
 import tkinter as tk
 from collections.abc import Callable
-from tkinter import scrolledtext, ttk
+from tkinter import ttk
 
+from mediatools.gui.logarea import LogArea
 from mediatools.gui.opener import Opener
 from mediatools.gui.queuelist import QueueList
 from mediatools.gui.shrinkmonitor import ShrinkMonitor
@@ -31,7 +32,9 @@ class ShrinkPanel:
     The three parts - status, job list, log - are separate widgets
     (:attr:`parts`). Placed in a vertical :class:`ttk.PanedWindow` they get
     their own sashes, so each can be made larger or smaller with the mouse;
-    in any other parent they are simply stacked.
+    in any other parent they are simply stacked. After each refresh the
+    status part sends ``<<StatusHeight>>``: it grows when a run starts, and
+    the window keeps its pane large enough for the buttons.
 
     Attributes:
         frame: Container of the widgets (place it in the parent).
@@ -42,10 +45,10 @@ class ShrinkPanel:
         progress: Text of the progress lines.
         overall: Text of the overall space line.
         meter: Progress toolbar (percent of the run).
-        log: Area with the end of the log.
         message: Result of the last button.
         log_path: Log file of the shown run, or None.
         joblist: The shrink queue (:class:`QueueList`).
+        log_area: The end of the log (:class:`LogArea`).
     """
 
     def __init__(self, master: tk.Misc, monitor: ShrinkMonitor | None = None,
@@ -90,8 +93,7 @@ class ShrinkPanel:
         ttk.Button(buttons, text="Open log", command=self.open_log).pack(side="left", padx=4)
         ttk.Label(buttons, textvariable=self.message).pack(side="left", padx=8)
         self.joblist = QueueList(master, self.monitor, parse or self.unparsed, open_dialog)
-        self.log = scrolledtext.ScrolledText(master, height=4, font="TkFixedFont",
-                                             wrap="none", state="disabled")
+        self.log_area = LogArea(master)
         if not isinstance(master, ttk.PanedWindow):
             for widget, weight in self.parts:
                 widget.pack(fill="both", expand=bool(weight))
@@ -110,13 +112,19 @@ class ShrinkPanel:
         self.log_path = state.log_path
         self.show_log("\n".join(self.monitor.tail(state.log_path)))
         self.joblist.refresh()
+        self.frame.event_generate("<<StatusHeight>>")
         if self.refresh_ms:
             self.frame.after(self.refresh_ms, self.refresh)
 
     @property
+    def log(self) -> tk.Text:
+        """The text widget of the log area."""
+        return self.log_area.text
+
+    @property
     def parts(self) -> list[tuple[tk.Widget, int]]:
         """Status, queue and log with their weights, for a paned window."""
-        return [(self.frame, 0), (self.joblist.frame, 1), (self.log, 1)]
+        return [(self.frame, 0), (self.joblist.frame, 1), (self.log_area.frame, 1)]
 
     @staticmethod
     def unparsed(args: list[str]) -> argparse.Namespace:
@@ -156,24 +164,10 @@ class ShrinkPanel:
     def show_log(self, text: str) -> None:
         """Show the end of the log without taking the scroll position away.
 
-        The text is replaced only when it changed. If the view showed the
-        end, it follows the new end; otherwise it keeps its position, so the
-        log can be read while the run goes on.
-
         Args:
-            text: Last lines of the log.
+            text: Last lines of the log (see :meth:`LogArea.show`).
         """
-        if self.log.get("1.0", "end-1c") == text:
-            return
-        first, last = self.log.yview()
-        self.log.configure(state="normal")
-        self.log.delete("1.0", "end")
-        self.log.insert("1.0", text)
-        if last >= 0.999:
-            self.log.see("end")
-        else:
-            self.log.yview_moveto(first)
-        self.log.configure(state="disabled")
+        self.log_area.show(text)
 
     def open_log(self) -> None:
         """Open the log of the run in the desktop's viewer."""

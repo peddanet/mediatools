@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import select
 import signal
 import sys
 import time
@@ -53,6 +54,7 @@ class RunControl:
     """
 
     POLL_SECONDS = 2.0
+    DETACH_WAIT = 10.0
 
     def __init__(self, name: str, data: DataDir | None = None, background: bool = False,
                  inhibitor: SleepInhibitor | None = None, log_path: str | None = None):
@@ -116,16 +118,25 @@ class RunControl:
         closing the window sends it no SIGHUP), reads from /dev/null,
         writes its terminal output to :attr:`console_file` and registers
         its own PID.
+
+        The parent waits (at most :attr:`DETACH_WAIT` seconds) until the
+        child has registered: in between the PID file would name the
+        ended parent, and a reader such as :meth:`ShrinkQueue.recover`
+        would take the running job for one left by a crash.
         """
         sys.stdout.flush()
         sys.stderr.flush()
+        ready, told = os.pipe()
         pid = os.fork()
         if pid:
+            os.close(told)
+            self._wait_for_child(ready)
             print(f"{self.name} continues in the background (pid {pid}); the terminal "
                   f"may be closed.\n  watch: mediatools attach   (Ctrl+C leaves the view)\n"
                   f"  stop:  mediatools stop     (after the current file)\n"
                   f"  log:   {self.log_path or '-'}", flush=True)
             os._exit(0)                          # pylint: disable=protected-access
+        os.close(ready)
         os.setsid()
         null = os.open(os.devnull, os.O_RDONLY)
         console = os.open(self.console_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -135,6 +146,23 @@ class RunControl:
         os.close(null)
         os.close(console)
         self._register()
+        os.write(told, b"1")
+        os.close(told)
+
+    def _wait_for_child(self, ready: int) -> None:
+        """Wait until the background process has registered (or ended).
+
+        Args:
+            ready: Read end of the pipe the child writes to once registered.
+        """
+        deadline = time.monotonic() + self.DETACH_WAIT
+        try:
+            while time.monotonic() < deadline:
+                readable, _, _ = select.select([ready], [], [], 0.1)
+                if readable:
+                    return                       # a byte, or EOF if the child ended
+        finally:
+            os.close(ready)
 
     def finish(self) -> None:
         """Unregister the current process and release the sleep lock."""

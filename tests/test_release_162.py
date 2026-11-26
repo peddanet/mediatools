@@ -63,13 +63,66 @@ def test_shrink_log_keeps_its_position(root: tk.Tk) -> None:
     root.update()
     assert panel.log.yview()[1] >= 0.999                        # starts at the end
     panel.log.yview_moveto(0.5)
+    panel.log_area.scrolled()                                            # the user scrolled
     root.update()
-    panel.show_log(lines(301))
+    upper = panel.log.get("@0,0 linestart", "@0,0 lineend")
+    panel.show_log("\n".join(f"line {number}" for number in range(1, 302)))
     root.update()
+    assert panel.log.get("@0,0 linestart", "@0,0 lineend") == upper  # same line up there
     first = panel.log.yview()[0]
-    assert 0.4 < first < 0.6
-    panel.show_log(lines(301))                                  # unchanged: untouched
+    panel.show_log("\n".join(f"line {number}" for number in range(1, 302)))  # unchanged
     assert panel.log.yview()[0] == first
+    panel.log.yview_moveto(1.0)
+    panel.log_area.scrolled()                                            # back at the end: follows
+    panel.show_log(lines(400))
+    root.update()
+    assert panel.log.yview()[1] >= 0.999
+
+
+def test_log_follows_although_it_started_too_small(root: tk.Tk) -> None:
+    """A log area too small at the first fill still follows the end later.
+
+    Up to 1.15.3 the view of a nearly closed area reported "not at the
+    end", and the log stayed at its beginning even when made larger.
+
+    Args:
+        root: Main window (fixture).
+    """
+    root.deiconify()
+    root.geometry("600x60")
+    panel = ShrinkPanel(root, refresh_ms=0)
+    root.update()
+    panel.show_log(lines(300))
+    root.update()
+    root.geometry("600x900")
+    root.update()
+    panel.show_log(lines(310))
+    root.update()
+    assert panel.log.yview()[1] >= 0.999
+    assert "line 309" in panel.log.get(f"@0,{panel.log.winfo_height() - 4}", "end")
+
+
+def test_log_scrolls_sideways_and_keeps_it(root: tk.Tk) -> None:
+    """Long lines are not wrapped; the horizontal position survives a refresh.
+
+    Args:
+        root: Main window (fixture).
+    """
+    root.deiconify()
+    root.geometry("400x400")
+    panel = ShrinkPanel(root, refresh_ms=0)
+    root.update()
+    wide = "\n".join(f"line {number} " + "x" * 400 for number in range(50))
+    panel.show_log(wide)
+    root.update()
+    assert panel.log.cget("wrap") == "none" and panel.log.xview()[1] < 1.0
+    panel.log.xview_moveto(0.5)
+    root.update()
+    panel.show_log(wide + "\nline 50")
+    root.update()
+    assert panel.log.xview()[0] > 0.4
+    assert panel.log_area.line_of("line 3 " + "x" * 400) == "4.0"
+    assert panel.log_area.line_of("line 3") == "" and panel.log_area.line_of("") == ""
 
 
 def write_log(folder: Path, name: str, text: str) -> None:

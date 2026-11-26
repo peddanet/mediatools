@@ -150,6 +150,33 @@ def test_recover_only_a_dead_record(tmp_path: Path) -> None:
     assert ShrinkQueue._alive("x") is False            # pylint: disable=protected-access
 
 
+def test_no_recover_while_a_shrink_runs(tmp_path: Path) -> None:
+    """The record of a job that went into the background is not taken for a crash.
+
+    ``queue --run`` takes the job (record with its own PID), the job forks
+    into the background and the starter ends: the PID in the record is
+    dead although the job runs. While a shrink is registered as running the
+    record stays; only when no shrink runs it comes back as paused.
+
+    Args:
+        tmp_path: Temporary directory.
+    """
+    queue = ShrinkQueue(str(tmp_path / "q.json"))
+    queue.add(["/a"])
+    started(queue, pid=DEAD_PID)
+    assert not queue.recover(running=os.getpid())
+    assert queue.entries() == [] and os.path.exists(queue.current_file)
+    assert queue.recover(running=None) and queue.entries()[0]["args"] == ["/a"]
+    queue.clear()
+    queue.add(["/b"])
+    started(queue, pid=DEAD_PID)
+    command = QueueCommand(queue, lambda _a: None, lambda _a: 0, os.getpid)
+    base = {"add": None, "note": "", "first": False, "remove": None, "move": None,
+            "to": None, "clear": False, "run": False}
+    assert command.run(argparse.Namespace(**base)) == 0
+    assert os.path.exists(queue.current_file)           # running: left alone
+
+
 def test_queue_command_recovers_and_run_three_keeps_order(tmp_path: Path,
                                                           capsys: pytest.CaptureFixture) -> None:
     """``queue`` puts a crashed job back; a refused start leaves no record.

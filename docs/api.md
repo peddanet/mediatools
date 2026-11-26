@@ -2286,6 +2286,22 @@ child. The child starts a new session (no controlling terminal, so
 closing the window sends it no SIGHUP), reads from /dev/null,
 writes its terminal output to :attr:`console_file` and registers
 its own PID.
+
+The parent waits (at most :attr:`DETACH_WAIT` seconds) until the
+child has registered: in between the PID file would name the
+ended parent, and a reader such as :meth:`ShrinkQueue.recover`
+would take the running job for one left by a crash.
+~~~
+
+**`_wait_for_child`**
+
+~~~text
+_wait_for_child(self, ready: int) -> None
+
+Wait until the background process has registered (or ended).
+
+Args:
+    ready: Read end of the pipe the child writes to once registered.
 ~~~
 
 **`finish`**
@@ -2504,7 +2520,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.15.2') -> None
+__init__(self, control: RunControl, installed: str = '1.15.3') -> None
 
 Remember the job and the installed release.
 
@@ -2783,7 +2799,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.15.2')
+__init__(self, package_dir: str | None = None, version: str = '1.15.3')
 
 Locate the imported package.
 
@@ -5583,6 +5599,7 @@ __init__(
     queue: ShrinkQueue,
     validate: Callable[[list[str]], object],
     start: Callable[[list[str]], int],
+    running: Callable[[], int | None] | None = None,
 ) -> None
 
 Wire the command.
@@ -5591,6 +5608,8 @@ Args:
     queue: The queue.
     validate: Checks shrink arguments.
     start: Runs ``mediatools shrink`` with arguments.
+    running: Returns the PID of the running shrink or None (see
+        :meth:`ShrinkQueue.recover`); the shrink's PID file if None.
 ~~~
 
 **`add_parser`**
@@ -7036,12 +7055,19 @@ Returns:
 **`recover`**
 
 ~~~text
-recover(self) -> bool
+recover(self, running: int | None = None) -> bool
 
 Put back a job whose record a crash left behind.
 
 The record is left alone while the process that took the job is
-alive (it runs the job, or is about to start it).
+alive (it is about to start the job), and while a shrink runs:
+the job moves into the background with a new process ID
+(:meth:`RunControl.detach`), so the ID in the record belongs to the
+ended starter, although its job still runs.
+
+Args:
+    running: PID of the running shrink (:meth:`RunControl.active_pid`),
+        or None if none runs.
 
 Returns:
     True if a job was put back.
@@ -12514,6 +12540,60 @@ Args:
     steps: +1 larger, -1 smaller, 0 normal.
 ~~~
 
+**`window_size`**
+
+~~~text
+window_size(root: tk.Tk) -> str
+
+Return the start size of the window: nine tenths of the screen.
+
+At least 1280 x 900 and at most 1600 x 1200, never more than the
+screen; so the log of the shrink tab gets room on a large screen
+(Full HD: 1600 x 972).
+
+Args:
+    root: Tk main window.
+
+Returns:
+    Geometry text ``WxH``.
+~~~
+
+**`fit_status`**
+
+~~~text
+fit_status(panes: ttk.PanedWindow, status: tk.Misc) -> None
+
+Keep the status part of the shrink tab at the height it needs.
+
+A larger status moves the sashes below it down by the difference
+(the log gives the room); a smaller one leaves them alone.
+
+Args:
+    panes: Paned window of the shrink tab.
+    status: Its status part (first pane).
+~~~
+
+**`layout_shrink`**
+
+~~~text
+layout_shrink(self, panes: ttk.PanedWindow, panel: ShrinkPanel) -> bool
+
+Set the default division of the shrink tab.
+
+Status, queue and console at the height they need (all buttons
+visible), the rest - the most - for the log. Called when the tab is
+first shown and after a change of the text size; the sashes can
+still be moved with the mouse.
+
+Args:
+    panes: Paned window of the shrink tab.
+    panel: Its status part, queue and log (:class:`ShrinkPanel`).
+
+Returns:
+    True if the sashes were set; False if the window is too small
+    (the panes keep their sizes then).
+~~~
+
 **`job_values`**
 
 ~~~text
@@ -12622,7 +12702,8 @@ widgets (text areas, menus) are coloured as well. No extra package is
 needed.
 
 The settings live in ``[gui]`` of ``mediatools.ini``: ``scale``
-(1.0 = 10 pt; :attr:`MIN_SCALE` to :attr:`MAX_SCALE`) and ``theme``
+(1.0 = 10 pt, default :attr:`DEFAULT_SCALE`; :attr:`MIN_SCALE` to
+:attr:`MAX_SCALE`) and ``theme``
 (``auto``, ``light`` or ``dark``). :meth:`zoom` and :meth:`set_theme`
 apply a change at once and save it.
 
@@ -12834,7 +12915,7 @@ zoom(self, steps: int) -> float
 Change the font scale and save it.
 
 Args:
-    steps: +1 larger, -1 smaller, 0 back to 1.0.
+    steps: +1 larger, -1 smaller, 0 back to :attr:`DEFAULT_SCALE`.
 
 Returns:
     The new scale.
@@ -14332,6 +14413,81 @@ Returns:
     Process exit code.
 ~~~
 
+### `LogArea` (`mediatools.gui.logarea`) {.unnumbered}
+
+~~~text
+Shows the last lines of a log that is still being written.
+
+Long lines are not wrapped; a vertical and a horizontal scrollbar move
+the view. While the view shows the end it follows new lines; after the
+user scrolled up it stays at the line at its upper edge, and the
+horizontal position stays as well. Whether it follows is decided by the
+user's last scroll (:meth:`scrolled`), not by the view at refresh time:
+an area too small to show a line reported "not at the end" and stayed at
+the beginning for good (up to mediatools 1.15.3).
+
+Attributes:
+    frame: Container of text and scrollbars (place it in the parent).
+    text: The text widget.
+    follow: True while the view follows new lines.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, master: tk.Misc, height: int = 4) -> None
+
+Build the area.
+
+Args:
+    master: Parent widget.
+    height: Height in lines.
+~~~
+
+**`scroll_y`**
+
+~~~text
+scroll_y(self, *args: str) -> None
+
+Vertical scrollbar: move the view, then note where the user left it.
+
+Args:
+    *args: Arguments of the scrollbar for :meth:`tk.Text.yview`.
+~~~
+
+**`scrolled`**
+
+~~~text
+scrolled(self) -> None
+
+Remember after a scroll by the user whether the view shows the end.
+~~~
+
+**`show`**
+
+~~~text
+show(self, content: str) -> None
+
+Replace the text if it changed, keeping the view as described above.
+
+Args:
+    content: Last lines of the log.
+~~~
+
+**`line_of`**
+
+~~~text
+line_of(self, line: str) -> str
+
+Find a whole line.
+
+Args:
+    line: Text of the line (empty: nothing to find).
+
+Returns:
+    Index of the first line with exactly this text, or "".
+~~~
+
 ### `Opener` (`mediatools.gui.opener`) {.unnumbered}
 
 ~~~text
@@ -14856,7 +15012,9 @@ running job first (:class:`QueueList`) - and the end of the log.
 The three parts - status, job list, log - are separate widgets
 (:attr:`parts`). Placed in a vertical :class:`ttk.PanedWindow` they get
 their own sashes, so each can be made larger or smaller with the mouse;
-in any other parent they are simply stacked.
+in any other parent they are simply stacked. After each refresh the
+status part sends ``<<StatusHeight>>``: it grows when a run starts, and
+the window keeps its pane large enough for the buttons.
 
 Attributes:
     frame: Container of the widgets (place it in the parent).
@@ -14867,10 +15025,10 @@ Attributes:
     progress: Text of the progress lines.
     overall: Text of the overall space line.
     meter: Progress toolbar (percent of the run).
-    log: Area with the end of the log.
     message: Result of the last button.
     log_path: Log file of the shown run, or None.
     joblist: The shrink queue (:class:`QueueList`).
+    log_area: The end of the log (:class:`LogArea`).
 ~~~
 
 **`__init__`**
@@ -14904,6 +15062,14 @@ Args:
 refresh(self) -> None
 
 Read the state and show it; schedule the next refresh.
+~~~
+
+**`log`**
+
+~~~text
+log(self) -> tk.Text
+
+The text widget of the log area.
 ~~~
 
 **`parts`**
@@ -14962,12 +15128,8 @@ show_log(self, text: str) -> None
 
 Show the end of the log without taking the scroll position away.
 
-The text is replaced only when it changed. If the view showed the
-end, it follows the new end; otherwise it keeps its position, so the
-log can be read while the run goes on.
-
 Args:
-    text: Last lines of the log.
+    text: Last lines of the log (see :meth:`LogArea.show`).
 ~~~
 
 **`open_log`**

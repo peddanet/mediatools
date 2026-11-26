@@ -1219,7 +1219,10 @@ finished video, and the new plan also takes videos added since - and
 *Remove* (`queue --remove 1`) drops it. While a job runs it is kept in
 `<state>/shrink_queue.json.current` with the process ID; if a crash left
 that record behind, the next `mediatools queue` or the GUI puts the job
-back as paused entry.
+back as paused entry - but only while no shrink runs: the job moves into
+the background with a new process ID, so the ID in the record belongs to
+the ended starter (up to 1.15.3 the GUI therefore showed a job started
+with *Continue* a second time, as `1 paused`).
 
 Jobs whose folders overlap are no problem: a later job skips every video
 an earlier one has shrunk (shrink databases), so the order of the queue is
@@ -1887,6 +1890,17 @@ reload). Command line and window therefore always behave the same.
 
 ![The job dialog (Add, Change): every shrink job so far above, the shrink form with folder chooser and all options below; here changing waiting job 2](img/gui_jobs.png){width=100%}
 
+**Division of the shrink tab.** When the window opens, and after a change
+of the text size, status, queue and output pane get the height they need -
+all buttons visible - and the log the rest. The status part grows with it
+when a run starts. Every sash can be moved with the mouse. The window opens
+at nine tenths of the screen (at least 1280 x 900, at most 1600 x 1200).
+
+**Log area.** Long lines are not wrapped: the area scrolls in both
+directions. While it shows the end it follows new lines; scrolled up, it
+stays at the line at its upper edge, and the horizontal position stays as
+well. Scrolling back to the end makes it follow again.
+
 `status`, `stop` and `reload` are buttons of the shrink tab; `attach` is
 replaced by the tab itself; `config --init/--path/--set` are covered by the
 editor.
@@ -1927,7 +1941,7 @@ closed, after a question.
 Menu *View*: *Larger text* (Ctrl++), *Smaller text* (Ctrl+-), *Normal
 size* (Ctrl+0) and the scheme: *Scheme of the desktop*, *Light scheme*,
 *Dark scheme*. The change applies at once and is saved in `[gui] scale`
-(0.8 to 2.5; 1.0 = 10 pt) and `[gui] theme` (`auto`, `light`, `dark`) of
+(0.8 to 2.5; 1.0 = 10 pt; default and *Normal size* 1.1 = 11 pt) and `[gui] theme` (`auto`, `light`, `dark`) of
 `mediatools.ini`.
 
 `auto` (default since 1.6.1) follows the desktop: every 3 s the window

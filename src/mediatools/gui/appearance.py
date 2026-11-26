@@ -22,7 +22,8 @@ class Appearance:
     needed.
 
     The settings live in ``[gui]`` of ``mediatools.ini``: ``scale``
-    (1.0 = 10 pt; :attr:`MIN_SCALE` to :attr:`MAX_SCALE`) and ``theme``
+    (1.0 = 10 pt, default :attr:`DEFAULT_SCALE`; :attr:`MIN_SCALE` to
+    :attr:`MAX_SCALE`) and ``theme``
     (``auto``, ``light`` or ``dark``). :meth:`zoom` and :meth:`set_theme`
     apply a change at once and save it.
 
@@ -46,6 +47,7 @@ class Appearance:
     """
 
     BASE_POINTS = 10
+    DEFAULT_SCALE = 1.1
     MIN_SCALE = 0.8
     MAX_SCALE = 2.5
     STEP = 0.1
@@ -73,7 +75,7 @@ class Appearance:
         """
         self.root = root
         self.config = config
-        self.scale = self.clamp(self._number("scale", 1.0))
+        self.scale = self.clamp(self._number("scale", self.DEFAULT_SCALE))
         theme = config.get("gui", "theme") if config else ""
         self.theme = theme if theme in self.THEMES else "auto"
         self.style = ttk.Style(root)
@@ -312,12 +314,13 @@ class Appearance:
         """Change the font scale and save it.
 
         Args:
-            steps: +1 larger, -1 smaller, 0 back to 1.0.
+            steps: +1 larger, -1 smaller, 0 back to :attr:`DEFAULT_SCALE`.
 
         Returns:
             The new scale.
         """
-        self.scale = 1.0 if steps == 0 else self.clamp(self.scale + steps * self.STEP)
+        self.scale = (self.DEFAULT_SCALE if steps == 0
+                      else self.clamp(self.scale + steps * self.STEP))
         self.apply()
         self.save("scale", f"{self.scale:.1f}")
         return self.scale

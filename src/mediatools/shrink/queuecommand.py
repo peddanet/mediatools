@@ -6,6 +6,7 @@ import os
 import shlex
 from collections.abc import Callable
 
+from mediatools.core.runcontrol import RunControl
 from mediatools.shrink.shrinkqueue import ShrinkQueue
 
 
@@ -33,17 +34,21 @@ class QueueCommand:
     DROPPED = ("--foreground", "-y", "--yes")
 
     def __init__(self, queue: ShrinkQueue, validate: Callable[[list[str]], object],
-                 start: Callable[[list[str]], int]) -> None:
+                 start: Callable[[list[str]], int],
+                 running: Callable[[], int | None] | None = None) -> None:
         """Wire the command.
 
         Args:
             queue: The queue.
             validate: Checks shrink arguments.
             start: Runs ``mediatools shrink`` with arguments.
+            running: Returns the PID of the running shrink or None (see
+                :meth:`ShrinkQueue.recover`); the shrink's PID file if None.
         """
         self.queue = queue
         self.validate = validate
         self.start = start
+        self.running = running or RunControl("shrink").active_pid
 
     @staticmethod
     def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -77,7 +82,7 @@ class QueueCommand:
             0; 2 for invalid input; for ``--run`` the exit code of the
             started job (3 if another shrink runs, the job stays first).
         """
-        if self.queue.recover():
+        if self.queue.recover(self.running()):
             print("queue: a job left by an interrupted run is back as first entry (paused)")
         try:
             self.change(args)
