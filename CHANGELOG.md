@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.15.4] - 2026-11-26
+
 ### Fixed
 - A job started with *Continue* showed up twice in the GUI, as running and
   as "1 paused": the job moves into the background with a new process ID,
