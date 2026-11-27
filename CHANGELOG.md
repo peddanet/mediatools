@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-27
+
 ### Added
 - Copy text from anywhere in the window: right-click menu *Copy* / *Copy
   all* on status lines, lists (queue, jobs, files) and text areas (log,
