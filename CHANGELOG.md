@@ -5,6 +5,37 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-27
+
+### Added
+- Copy text from anywhere in the window: right-click menu *Copy* / *Copy
+  all* on status lines, lists (queue, jobs, files) and text areas (log,
+  output, results); in text areas the marked text, in lists the selected
+  rows (columns separated by tabs); Ctrl+C copies the marking or the
+  selected rows.
+- `tools/review.sh` of the dev-conventions bundle: four-eyes review of two
+  refs in Beyond Compare.
+
+### Changed
+- Development tools follow dev-conventions bundle v20. `tools/check.sh`
+  prints the gates in the common console look (numbered stages, one
+  PASS/FAIL/SKIP line each, result block), shows a progress bar for the
+  tests and the five slowest tests (`tools/pytest_progress.py`), and runs a
+  single gate with `--only <gate>`. `tools/release.sh`, `tools/same-code.sh`
+  and the new `tools/output.sh` come from the bundle with English dialogs
+  (`[y/N]`); while it waits for GitHub, `tools/release.sh` shows every
+  answer of `gh` and a progress line per CI job, works with gh 2.45 of
+  Ubuntu 24.04 (no `gh pr checks --json`) and counts only the required
+  checks.
+- CI runs one step per gate (`gate: <name>`), so GitHub and the release
+  script show which gate runs or failed; triggers unchanged.
+- `mediatools update` prints in the same look (colours in the terminal, plain
+  log) and asks in English: "Apply <branch> and release it as <part>?
+  [y/N]".
+- Line length 120 for pycodestyle and pylint (was 100).
+- `tools/check.sh` no longer looks for the development venv in
+  `~/.venvs/mediatools`; only `.venv` of the project.
+
 ## [1.15.4] - 2026-11-26
 
 ### Fixed

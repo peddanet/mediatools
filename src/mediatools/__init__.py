@@ -1,2 +1,2 @@
 """mediatools - maintenance tools for large local media collections."""
-__version__ = "1.15.4"
+__version__ = "1.16.0"

@@ -19,6 +19,7 @@ from mediatools.gui.commandform import CommandForm
 from mediatools.gui.commandspec import CommandSpec
 from mediatools.gui.configpanel import ConfigPanel
 from mediatools.gui.consoleview import ConsoleView
+from mediatools.gui.copymenu import CopyMenu
 from mediatools.gui.desktopentry import DesktopEntry
 from mediatools.gui.filespanel import FilesPanel
 from mediatools.gui.formstore import FormStore
@@ -97,6 +98,7 @@ class MediaToolsApp:
         self.consoles: list[ConsoleView] = []
         self.tabs: dict[str, ttk.Frame] = {}
         self.appearance = Appearance(root, config or Config())
+        CopyMenu(root)                  # kept alive by its bindings
         self.restarter: Callable[[], None] = self._exec_gui
         # no version in the title: launcher, dock and window search show the
         # title next to the menu entry "mediatools"; the version is in the

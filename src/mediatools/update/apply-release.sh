@@ -60,6 +60,14 @@ fi
 trap 'rm -f -- "$APPLY_RELEASE_COPY"' EXIT
 export -n APPLY_RELEASE_ORIGIN APPLY_RELEASE_COPY   # keep them from git hooks
 
+# -- console look (output.sh of the dev-conventions bundle, next to this file) --
+# Colours in the terminal, plain text in the log: the terminal decides here,
+# before the output goes through tee; release.sh inherits FORCE_COLOR.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then export FORCE_COLOR=1; fi
+# shellcheck source=src/mediatools/update/output.sh disable=SC1091  # path chosen at run time
+source "$(dirname "$APPLY_RELEASE_ORIGIN")/output.sh"
+stop() { printf '  %s✘ STOP%s  %s\n' "$R$B" "$X" "$1"; exit 1; }
+
 # -- options -------------------------------------------------------------------
 DL="$HOME/Downloads"
 REPO=""
@@ -104,11 +112,11 @@ NAME_RE='^mediatools-(feature|hotfix)-([A-Za-z0-9][A-Za-z0-9._-]*)( \([0-9]+\))?
 OLD_RE='^mediatools-hotfix-([0-9]+\.[0-9]+\.[0-9]+)-patch( \([0-9]+\))?\.tar\.gz$'
 STEP="start"
 
-step() { STEP="$1"; echo; echo "=== $STEP"; }
+step() { STEP="$1"; title "$STEP"; }
 # true if version $1 is lower than version $2
 version_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }
 # value of key $2 in the patch.info file $1
-info() { sed -n "s/^$2=//p" "$1" | head -n 1; }
+patch_info() { sed -n "s/^$2=//p" "$1" | head -n 1; }
 
 # the installed release: the link of install.sh, the old link, else the caller
 installed_version() {
@@ -181,37 +189,39 @@ classify() {
 if [ "$LIST" -eq 0 ]; then
   mkdir -p "$LOG_DIR"
   LOG="$LOG_DIR/apply-release_$(date +%Y-%m-%d_%H-%M-%S).log"
-  exec > >(tee -a "$LOG") 2>&1
+  exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "$LOG")) 2>&1   # log without colours
   # shellcheck disable=SC2154  # rc is assigned inside the trap string
-  trap 'rc=$?; echo; echo "FAILED in step: $STEP (line $LINENO, exit code $rc)"; echo "log: $LOG"' ERR
+  trap 'rc=$?; title "Result"; info "${R}${B}FAILED${X} in step: $STEP (line $LINENO, exit code $rc)"; info "log: $LOG"' ERR
 fi
 
 # -- step 1: newer release ------------------------------------------------------
 URL="$(repo_url)"
 INSTALLED="$(installed_version)"
 NEWEST="$(newest_release "$URL")"
-echo "installed release: $INSTALLED   (repository: $URL)"
+title "mediatools update"
+info "installed release: $INSTALLED   $(ts "(repository: $URL)")"
 if [ -z "$NEWEST" ]; then
-  echo "newest release:    unknown (repository not reachable) - step 1 skipped"
+  skip "newest release: unknown" "repository not reachable - step 1 skipped"
 elif version_lt "$INSTALLED" "${NEWEST#v}"; then
-  echo "newest release:    $NEWEST - newer"
+  info "newest release:    ${B}$NEWEST${X} - newer"
   if [ "$LIST" -eq 0 ]; then
     step "1 install $NEWEST"
     if [ "$CLONE" -eq 1 ] && [ -x "$REPO/install.sh" ]; then
       "$REPO/install.sh" "$NEWEST"
       program="$HOME/.local/bin/mediatools"
     else
-      [ -n "${MEDIATOOLS_VENV:-}" ] || { echo "no venv of the running program known"; exit 1; }
+      [ -n "${MEDIATOOLS_VENV:-}" ] || stop "no venv of the running program known"
       "$MEDIATOOLS_VENV/bin/python" -m pip install --quiet --disable-pip-version-check \
         --force-reinstall --no-deps "mediatools @ git+$URL@$NEWEST"
       program="$MEDIATOOLS_VENV/bin/mediatools"
     fi
     [ "$("$program" --version)" = "mediatools ${NEWEST#v}" ]
+    pass "mediatools ${NEWEST#v} installed" "$program"
     INSTALLED="${NEWEST#v}"
     "$program" reload || true                # a running shrink switches after its file
   fi
 else
-  echo "newest release:    $NEWEST - installed"
+  info "newest release:    $NEWEST - installed"
 fi
 
 # -- step 2: patch archives -----------------------------------------------------
@@ -225,31 +235,31 @@ for line in "${CLASSES[@]}"; do
   IFS=$'\t' read -r status _kind _name path <<< "$line"
   [ "$status" = pending ] || LEFTOVER+=("$status"$'\t'"$path")
 done
-echo "download folder:   $DL"
-[ ${#FOUND[@]} -gt 0 ] || echo "patch archives:    none"
+info "download folder:   $DL"
+[ ${#FOUND[@]} -gt 0 ] || info "patch archives:    none"
 for line in "${FOUND[@]}"; do
   IFS=$'\t' read -r kind name path <<< "$line"
-  printf '  pending  %-8s %-28s %s\n' "$kind" "$name" "$(basename "$path")"
+  info "$(printf '  %spending%s  %-8s %-28s %s' "$B" "$X" "$kind" "$name" "$(basename "$path")")"
 done
 for line in "${LEFTOVER[@]}"; do
   IFS=$'\t' read -r reason path <<< "$line"
-  printf '  %-8s %s (removed at the end)\n' "$reason" "$(basename "$path")"
+  detail "$(printf '  %-8s %s (removed at the end)' "$reason" "$(basename "$path")")"
 done
 for path in "$DL"/mediatools-hotfix-*-patch*.tar.gz; do
   if [ -f "$path" ] && [[ "$(basename "$path")" =~ $OLD_RE ]] \
      && version_lt "$INSTALLED" "${BASH_REMATCH[1]}"; then
-    printf '  refused  %s (old format of releases before 1.14.0 - apply it with that release)\n' \
-           "$(basename "$path")"
+    note "$(printf 'refused  %s (old format of releases before 1.14.0 - apply it with that release)' \
+           "$(basename "$path")")"
   fi
 done
 [ "$LIST" -eq 1 ] && exit 0
 
 APPLIED=()
 if [ ${#FOUND[@]} -gt 0 ]; then
-  [ "$CLONE" -eq 1 ] || { echo "patch archives need the clone ($REPO, or --repo DIR)"; exit 1; }
+  [ "$CLONE" -eq 1 ] || stop "patch archives need the clone ($REPO, or --repo DIR)"
   cd "$REPO"
   git am --abort 2>/dev/null || true         # leftover of an interrupted earlier run
-  [ -z "$(git status --porcelain)" ] || { echo "uncommitted changes in $REPO"; exit 1; }
+  [ -z "$(git status --porcelain)" ] || stop "uncommitted changes in $REPO"
 fi
 for line in "${FOUND[@]}"; do
   IFS=$'\t' read -r kind name path <<< "$line"
@@ -257,51 +267,53 @@ for line in "${FOUND[@]}"; do
   step "2 $(basename "$path")"
   tar -xzf "$path" -C "$dir"
   infofile="$(find "$dir" -name patch.info | head -n 1)"
-  [ -n "$infofile" ] || { echo "no patch.info in $path"; exit 1; }
-  branch="$(info "$infofile" branch)"; base="$(info "$infofile" base)"
-  release="$(info "$infofile" release)"; message="$(info "$infofile" message)"
-  [ "$branch" = "$kind/$name" ] || { echo "patch.info names $branch, the archive $kind/$name"; exit 1; }
-  case "$release" in patch|minor|major|none) ;; *) echo "release=$release?"; exit 1 ;; esac
-  echo "branch $branch from $base, release: $release - $message"
+  [ -n "$infofile" ] || stop "no patch.info in $path"
+  branch="$(patch_info "$infofile" branch)"; base="$(patch_info "$infofile" base)"
+  release="$(patch_info "$infofile" release)"; message="$(patch_info "$infofile" message)"
+  [ "$branch" = "$kind/$name" ] || stop "patch.info names $branch, the archive $kind/$name"
+  case "$release" in patch|minor|major|none) ;; *) stop "release=$release?" ;; esac
+  info "branch ${B}$branch${X} from $base, release: $release - $message"
   if [ "$YES" -eq 0 ]; then
-    if [ "$release" = none ]; then question="in $base mergen (ohne Release)"; else
-      question="einspielen und als $release veroeffentlichen"; fi
-    read -r -p "$branch $question? [j/N] " answer || answer=""
-    [[ "$answer" =~ ^[jJyY]$ ]] || { echo "skipped: $branch"; rm -rf "$dir"; continue; }
+    if [ "$release" = none ]; then question="Merge $branch into $base (no release)"; else
+      question="Apply $branch and release it as $release"; fi
+    read -r -p "  $question? [y/N] " answer || answer=""
+    [[ "$answer" =~ ^[yYjJ]$ ]] || { skip "$branch" "not applied"; rm -rf "$dir"; continue; }
   fi
 
   git fetch --quiet --tags origin
   git switch --quiet "$base"
   git merge --quiet --ff-only "origin/$base"
-  want="$(info "$infofile" base_tree)"
+  want="$(patch_info "$infofile" base_tree)"
   if [ -n "$want" ]; then
     [ "$(git rev-parse "$base^{tree}")" = "$want" ] \
-      || { echo "STOPP: $base differs from the base of the patch (tree $want)"; exit 1; }
+      || stop "$base differs from the base of the patch (tree $want)"
+    pass "base tree ${want:0:7} equals $base" "guard"
   fi
   while read -r bpath before _after; do
     [ "$(git rev-parse "$base:$bpath")" = "$before" ] \
-      || { echo "STOPP: $bpath on $base differs from the base of the patch"; exit 1; }
+      || stop "$bpath on $base differs from the base of the patch"
   done < <(sed -n 's/^blob=//p' "$infofile")
   if git rev-parse --quiet --verify "refs/heads/$branch" >/dev/null; then
-    echo "STOPP: branch $branch exists already - delete it: git branch -D $branch"; exit 1
+    stop "branch $branch exists already - delete it: git branch -D $branch"
   fi
   git switch --quiet -c "$branch" "$base"
   if ! git am --quiet "$(dirname "$infofile")"/*.patch; then
     git am --abort 2>/dev/null || true
     git switch --quiet "$base"
     git branch --quiet -D "$branch"
-    echo "STOPP: the patches do not apply onto $base; nothing changed"; exit 1
+    stop "the patches do not apply onto $base; nothing changed"
   fi
-  want="$(info "$infofile" tree)"
+  want="$(patch_info "$infofile" tree)"
   if [ -n "$want" ]; then
     [ "$(git rev-parse "HEAD^{tree}")" = "$want" ] \
-      || { echo "STOPP: result differs from the patch (tree $want) - check $branch"; exit 1; }
+      || stop "result differs from the patch (tree $want) - check $branch"
+    pass "patches applied, result tree ${want:0:7}" "guard"
   fi
   while read -r bpath _before after; do
     [ "$(git rev-parse "HEAD:$bpath")" = "$after" ] \
-      || { echo "STOPP: $bpath after the patch differs - check $branch"; exit 1; }
+      || stop "$bpath after the patch differs - check $branch"
   done < <(sed -n 's/^blob=//p' "$infofile")
-  git log --oneline "$base..HEAD"
+  git log --oneline "$base..HEAD" | while IFS= read -r commit; do detail "$commit"; done
 
   if [ "$release" = none ]; then
     tools/release.sh --merge-only --yes
@@ -313,7 +325,7 @@ for line in "${FOUND[@]}"; do
   APPLIED+=("$branch")
   rm -rf "$dir"
   if [ "$release" != none ]; then
-    [ "${line}" = "${FOUND[-1]}" ] || echo "further archives: run 'mediatools update' again"
+    [ "${line}" = "${FOUND[-1]}" ] || note "further archives: run 'mediatools update' again"
     break
   fi
 done
@@ -327,6 +339,10 @@ fi
 find "$DL" -maxdepth 1 -type f \( -name 'apply-mediatools-*.sh' -o -name 'apply-release*.sh' \) \
   ! -samefile "$APPLY_RELEASE_ORIGIN" -print0 | xargs -0 -r rm -v --
 
-step "done"
-if [ ${#APPLIED[@]} -gt 0 ]; then echo "applied: ${APPLIED[*]}"; else echo "no patch applied"; fi
-echo "log: $LOG"
+title "Result"
+if [ ${#APPLIED[@]} -gt 0 ]; then
+  info "${G}${B}DONE${X}  applied: ${APPLIED[*]}"
+else
+  info "${B}DONE${X}  no patch applied"
+fi
+info "log: $LOG"
