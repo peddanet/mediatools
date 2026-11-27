@@ -158,9 +158,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb shellcheck
       - name: python tools
         run: pip install -e ".[dev]"
-      - name: quality gates (format, lint, types, security, tests)
-        run: tools/check.sh
+      - name: "gate: privacy"
+        run: tools/check.sh --only privacy
+      - name: "gate: shell"
+        run: tools/check.sh --only shell
+      # ... one step per gate: format, lint, types, security
+      - name: "gate: tests"
+        run: tools/check.sh --only tests
 ~~~
+
+Since 1.16.0 every gate is its own step `gate: <name>` (dev-conventions
+bundle v20, `templates/ci.yml`): the GitHub page and the watcher of
+`tools/release.sh` show which gate runs or failed. The work is the same as
+one `tools/check.sh` run; the job sets `CI=true` (privacy scan skips itself,
+no check cache) and `FORCE_COLOR=1` (colours in the GitHub log).
 
 | Key | Meaning |
 |---|---|
@@ -253,9 +264,18 @@ tree; they are kept because the pre-push hook must never be bypassed.
 
 ## What `tools/release.sh` prints
 
-Every merge is announced with its pull request; the script waits
-`RELEASE_WAIT` seconds (default 30) after a push, because GitHub registers
-the checks of a new push with a delay, and then follows them. GitHub
+Every merge is announced with its pull request. After a push the script
+polls until GitHub has registered the required checks of the pull request
+(`gh pr checks <PR> --required`, at most `RELEASE_WAIT` seconds, default
+600); while it waits it prints every answer of `gh` and a line every
+`RELEASE_HEARTBEAT` seconds (default 30). While the checks run it prints one
+progress line per CI job whenever its step changes (bar of the finished
+steps, done/total, running step such as `gate: tests`, seconds since the
+job started). It reads the plain tab-separated form of `gh pr checks`,
+which every `gh` version has (gh 2.45 of Ubuntu 24.04 has no `--json`
+there). Only the required checks count: when `develop` holds nothing new,
+`merge/vX.Y.Z` is the tagged commit, and its finished tag run must not be
+taken for the checks of the pull request (bundle v20). GitHub
 answers now and then with a passing server error ("GraphQL: Something went
 wrong") or refuses a merge right after green checks; `gh pr create` and
 `gh pr merge` are therefore tried up to five times, `RELEASE_RETRY_PAUSE`
@@ -263,19 +283,20 @@ seconds (default 10) apart. A pull request GitHub created despite the error
 is found and reused; without a pull request number the script stops before
 any merge ("no pull request for ... - nothing merged").
 
+The output follows the common console look of all tool projects
+(`tools/output.sh`; block titles, numbered stages, PASS/FAIL/SKIP lines,
+colours only in a terminal); the format template is
+`templates/output-demo.sh` of the dev-conventions bundle. Shortened:
+
 ~~~text
-Pull Request #41: release/1.14.0 -> main
-Pruefungen von PR #41 ...
-gates (3.12)    pass    3m12s   https://github.com/peddanet/mediatools/actions/runs/<id>
-gates (3.14)    pass    3m05s   https://github.com/peddanet/mediatools/actions/runs/<id>
-Release-Check von v1.14.0 ...
-Fertig: v1.14.0 ist veroeffentlicht.
-Pull Request #42: merge/v1.14.0 -> develop
-...
-main                     2f1c...
-develop                  2f1c...
-v1.14.0                  2f1c...
-Bitgleich: JA
+══ Release v1.16.0 -> v1.16.1 (patch) ═══════════════════════════════════
+▶ Pull Request #57  release/1.16.1 -> main
+  gates (3.12)  ████████░░  8/10  gate: tests   2:10
+  gates (3.14)  ██████░░░░  6/10  gate: lint    1:52
+  ✔ PASS  required checks green                        2:41
+  ✔ PASS  merged · tag v1.16.1 · release check         0:11
+▶ Same code  tools/same-code.sh main develop v1.16.1
+  ✔ PASS  Bit-identical: YES
 ~~~
 
 # The runner: which machine, how much of it, who pays

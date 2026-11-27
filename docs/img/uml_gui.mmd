@@ -161,6 +161,16 @@ classDiagram
     +send()
     +cancel()
   }
+  class CopyMenu {
+    +root
+    +menu
+    +target
+    +init(root)
+    +open(event)
+    +copy_key(event)
+    +copy(all_of_it)
+    +text_of(widget, all_of_it)
+  }
   class DesktopEntry {
     +path
     +program
@@ -395,6 +405,7 @@ classDiagram
   MediaToolsApp ..> CommandSpec
   MediaToolsApp --> ConfigPanel
   MediaToolsApp --> ConsoleView
+  MediaToolsApp --> CopyMenu
   MediaToolsApp --> DesktopEntry
   MediaToolsApp --> FilesPanel
   MediaToolsApp --> FormStore

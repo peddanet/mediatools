@@ -792,7 +792,7 @@ Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Coding standard: one class per module, Google-style docstrings for every
 class, method and function (checked by pylint's `docparams` extension),
-maximum line length 100, standard library only, external programs called
+maximum line length 120, standard library only, external programs called
 without a shell.
 
 ```text

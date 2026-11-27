@@ -8,7 +8,7 @@ abstract: |
   This document is written for developers who maintain or extend
   mediatools. It describes the repository layout, the coding standard
   (Google-style docstrings enforced by pylint's docparams extension,
-  maximum line length 100, pylint score 10.00/10 for source, tests and
+  maximum line length 120, pylint score 10.00/10 for source, tests and
   tools), the layered architecture with one class per module, UML class
   diagrams of every package generated from the code, sequence diagrams of
   shrink, triage, broken, flatten and sync, the activity diagram of a snapshot run,
@@ -57,7 +57,7 @@ mediatools/
   LICENSE                   MIT
   pyproject.toml            packaging, pytest and pylint configuration
   install.sh                installs a release tag into a venv (~/.local/bin/mediatools)
-  .github/workflows/        CI: tools/check.sh on Python 3.12 and 3.14
+  .github/workflows/        CI: one step per gate (tools/check.sh --only) on Python 3.12 and 3.14
   .githooks/pre-push        runs tools/check.sh before every branch push
   src/mediatools/           package (one class per module)
   src/mediatools/gui/       Tk window (mediatools gui)
@@ -65,6 +65,9 @@ mediatools/
   tools/check.sh            quality gates (activates the development venv itself)
   tools/release.sh          integration and releases through pull requests (git-flow)
   tools/same-code.sh        bit-identity check of branches and tags (tree hashes)
+  tools/review.sh           four-eyes review of two refs in Beyond Compare
+  tools/output.sh           shared console look (title, stage, PASS/FAIL/SKIP, bar)
+  tools/pytest_progress.py  progress bar and slowest tests of pytest (loaded by conftest)
   tools/after-install.sh    called by release.sh after install.sh: reload, status
   tools/gen_docs.py         UML class diagrams + API reference from the code
   docs/handbook.md          user handbook (+ PDF)
@@ -331,6 +334,7 @@ loops.
 | `MediaToolsApp` | main window: a tab per command, savings, config editor, file browser |
 | `CommandForm`, `ConsoleView` | form of a command; live output with answer line and cancel |
 | `ShrinkPanel`, `SavingsPanel`, `ConfigPanel`, `FilesPanel` | shrink dashboard, savings table, INI editor, data folder browser |
+| `CopyMenu` | right-click menu *Copy* / *Copy all* and Ctrl+C for every label, list and text area of the window (class bindings, installed once by the app; since 1.16.0) |
 | `LogArea` | end of the shrink log in the shrink tab: scrolls both ways, follows new lines only while it shows the end, otherwise keeps the line at its upper edge (since 1.15.4) |
 
 The GUI has no function of its own. It runs the command line as child
@@ -536,7 +540,18 @@ git config core.hooksPath .githooks     # once per clone
 sudo apt install shellcheck             # once: gate "shell" (apt writes to /usr)
 tools/check.sh                          # all gates
 tools/check.sh --fast                   # without the test gate
+tools/check.sh --only lint              # one gate (CI runs one step per gate)
 ~~~
+
+The output follows the common console look of all tool projects
+(dev-conventions bundle v20, `tools/output.sh`): a block title with commit
+and Python version, one numbered stage per gate (`▶ [4/7] lint`) with one
+result line (`✔ PASS` / `✘ FAIL` / `– SKIP`, one fact, duration), the end
+of the output of a failing gate, and a result block `DONE` / `FAILED`. The
+test gate shows a progress bar instead of pytest's dots and lists the five
+slowest tests at the end (`tools/pytest_progress.py`, loaded by
+`tests/conftest.py`; `PYTEST_PROGRESS=0` switches it off). Colours appear
+in a terminal only; `NO_COLOR` switches them off, `FORCE_COLOR` on.
 
 **Check cache** (dev-conventions `templates/check-cache.sh`): after a full
 green run the key *tree of the working copy + Python version + hash of the
@@ -549,8 +564,7 @@ without the tree. `CHECK_FULL=1` forces a full run, CI (`CI=true`) always
 runs in full, and without `.git` (unpacked archive) nothing is cached.
 
 `tools/check.sh` uses an active venv; otherwise it activates `.venv` of
-the project, or the older `~/.venvs/mediatools` (with a note to move it),
-for its own run only - the calling terminal is unchanged and no
+the project for its own run only - the calling terminal is unchanged and no
 `deactivate` is needed. CI has neither and installs the tools directly.
 Nothing is created or installed by the script.
 
@@ -558,7 +572,7 @@ Nothing is created or installed by the script.
 |-----|----------|-------------|----------------------------------------------------|
 | 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits, identities; every identity address no-reply; fails (exit code 2) without local terms (skipped only in CI) and while lists of the layout before 1.5.0 exist |
 | 0   | shell    | shellcheck  | no finding in `install.sh`, `tools/*.sh`, the hook and the update script |
-| 1   | format   | pycodestyle | PEP 8 layout, max line length 100                  |
+| 1   | format   | pycodestyle | PEP 8 layout, max line length 120                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
 | 3   | types    | mypy        | no error; `check_untyped_defs`, `warn_unreachable` |
 | 4   | security | bandit      | no finding                                         |
@@ -797,14 +811,15 @@ tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
    and `develop` equal `origin`; `develop` contains `main`;
    `__version__` equals the newest tag.
 2. **Feature:** rebase onto `develop`, gates, question
-   "Release jetzt bauen?" (a part on the command line answers it); merge
+   "Build the release now?" (a part on the command line answers it); merge
    into `develop` through a pull request.
 3. **Release:** version from the newest tag and the part; non-empty
    `[Unreleased]` and message; on `release/X.Y.Z` (hotfix: on the hotfix
    branch) set `__version__` and the heading `## [X.Y.Z] - <date>`, run the
    gates, commit `mediatools X.Y.Z`.
-4. **Question** "... pushen, nach main mergen und vX.Y.Z veroeffentlichen?",
-   then: push, pull request into `main`, `gh pr checks --watch`, merge with
+4. **Question** "Push release/X.Y.Z, merge it into main and publish vX.Y.Z?",
+   then: push, pull request into `main`, wait for its required checks
+   (progress line per CI job, see `docs/ci-guide.md`), merge with
    the subject `mediatools X.Y.Z: <message>`; check that `main` has the tree
    of the release branch; annotated tag with the same text, push, wait for
    `release-check`.
@@ -819,10 +834,14 @@ tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
    of a running shrink, status).
 
 Remote helper branches are deleted after their merge. `CHECK_CMD`,
-`INSTALL_CMD`, `RELEASE_WAIT` (seconds after a push before the checks
-are watched, default 30) and `RELEASE_RETRY_PAUSE` (seconds between the up
-to five attempts of `gh pr create` and `gh pr merge`, default 10) replace
-the gate script, the installer and the pauses; the tests use them. Merge commits (no squash, no rebase) keep every
+`INSTALL_CMD`, `RELEASE_WAIT` (longest wait for the registration of the
+checks, default 600 s), `RELEASE_HEARTBEAT` (seconds between progress lines,
+default 30) and `RELEASE_RETRY_PAUSE` (seconds between the up to five
+attempts of `gh pr create` and `gh pr merge`, default 10) replace the gate
+script, the installer and the pauses; the tests use them. Questions are
+English and answered with `y` (`j` is accepted too). `tools/release.sh`,
+`tools/same-code.sh`, `tools/review.sh` and `tools/output.sh` are copies of
+the dev-conventions bundle v20 and stay byte-identical to it. Merge commits (no squash, no rebase) keep every
 commit; `git log --first-parent main` lists exactly the releases.
 
 # Applying delivered patch archives
@@ -855,13 +874,19 @@ release=minor                    patch | minor | major | none
 message=<one-line release message>
 ~~~
 
-Every guard stops loudly ("STOPP: ...") and leaves the clone as it was; a
+Every guard stops loudly ("✘ STOP  ...") and leaves the clone as it was; a
 patch that does not apply is aborted, its branch removed. The script
 copies itself to `/tmp` and runs from there, because switching branches
 and the installation rewrite it while bash reads it. It finds the clone
 next to itself (source checkout) or uses `~/Projects/mediatools`
 (`--repo DIR`), logs to `~/.local/state/mediatools/logs/apply-release_<ts>.log`
 and runs as a normal user; root would leave root-owned files in the clone.
+The output uses the common console look: it sources `output.sh` next to
+itself (`src/mediatools/update/output.sh`, a copy of `tools/output.sh`, kept
+equal by a test, because the installed package has no `tools/`). Colours
+appear in the terminal only; the log file is written without them. The
+question per archive is "Apply <branch> and release it as <part>? [y/N]"
+(`release=none`: "Merge <branch> into <base> (no release)? [y/N]").
 
 # Adding a subcommand
 
