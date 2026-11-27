@@ -17,6 +17,12 @@ name: quality-gates
 # request, and a merge into main/develop has the tree its pull request
 # already tested (branch protection: strict, no direct pushes).
 # A branch without a pull request: gh workflow run quality-gates --ref BRANCH
+# Every gate is its own step "gate: <name>" (tools/check.sh --only <name>,
+# dev-conventions bundle v20, templates/ci.yml), so the GitHub page and the
+# watcher of tools/release.sh show which gate runs or failed; the work is the
+# same as one tools/check.sh run. With CI=true the privacy scan skips itself
+# (no local terms on GitHub) and the check cache always checks in full;
+# FORCE_COLOR=1 keeps the colours in the GitHub log.
 on:
   push:
     tags: ["v*"]
@@ -27,11 +33,15 @@ on:
 jobs:
   gates:
     if: github.ref_type != 'tag'
+    name: gates (${{ matrix.python }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.14"]
+    env:
+      CI: "true"
+      FORCE_COLOR: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -43,8 +53,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg rsync rsnapshot xvfb shellcheck
       - name: python tools
         run: pip install -e ".[dev]"
-      - name: quality gates (format, lint, types, security, tests)
-        run: tools/check.sh
+      - name: "gate: privacy"
+        run: tools/check.sh --only privacy
+      - name: "gate: shell"
+        run: tools/check.sh --only shell
+      - name: "gate: format"
+        run: tools/check.sh --only format
+      - name: "gate: lint"
+        run: tools/check.sh --only lint
+      - name: "gate: types"
+        run: tools/check.sh --only types
+      - name: "gate: security"
+        run: tools/check.sh --only security
+      - name: "gate: tests"
+        run: tools/check.sh --only tests
 
   release-check:
     # A tag must point to a commit on main and match __version__.

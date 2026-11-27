@@ -35,6 +35,7 @@ def fixture_project(tmp_path: Path) -> dict[str, Path]:
     project, stubs, calls = tmp_path / "project", tmp_path / "bin", tmp_path / "calls.txt"
     (project / "tools").mkdir(parents=True)
     shutil.copy2(ROOT / "tools" / "check.sh", project / "tools" / "check.sh")
+    shutil.copy2(ROOT / "tools" / "output.sh", project / "tools" / "output.sh")
     (project / "tools" / "privacy_scan.py").write_text("", encoding="utf-8")
     (project / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     stubs.mkdir()
@@ -87,7 +88,7 @@ def test_second_run_of_the_same_tree_runs_only_privacy_and_shell(
     assert (project["project"] / ".git" / "checked-trees").is_file()
     out, called = check(project)
     assert called == ["privacy", "shellcheck"]
-    assert "This tree passed all gates before" in out and "CHECK_FULL=1" in out
+    assert "passed all gates before" in out and "CHECK_FULL=1" in out
     assert "tests" in check(project, CHECK_FULL="1")[1]
     assert "tests" in check(project, CI="true")[1]
     (project["project"] / "new.txt").write_text("changed\n", encoding="utf-8")

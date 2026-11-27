@@ -245,6 +245,7 @@ def test_check_activates_the_project_venv(tmp_path: Path) -> None:
     project = tmp_path / "project"
     (project / "tools").mkdir(parents=True)
     shutil.copy2(ROOT / "tools" / "check.sh", project / "tools" / "check.sh")
+    shutil.copy2(ROOT / "tools" / "output.sh", project / "tools" / "output.sh")
     (project / ".venv" / "bin").mkdir(parents=True)
     (project / ".venv" / "bin" / "activate").write_text('export VIRTUAL_ENV="$PWD/.venv"\n')
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}

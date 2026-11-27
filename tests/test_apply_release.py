@@ -2,7 +2,7 @@
 
 GitHub is replaced by a bare repository and the fake ``gh`` of
 ``test_release_tools``; the clone carries the real ``tools/release.sh`` and
-``tools/same-code.sh`` and a fake ``install.sh`` that writes a stand-in
+``tools/same-code.sh`` (with ``tools/output.sh``) and a fake ``install.sh`` that writes a stand-in
 program to ``~/.local/bin/mediatools``.
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ def fixture_setup(tmp_path: Path) -> dict[str, Path]:
     (repo / "pyproject.toml").write_text('[project]\nname = "mediatools"\n'
                                          'version = { attr = "mediatools.__version__" }\n')
     (repo / "tools").mkdir()
-    for name in ("release.sh", "same-code.sh"):
+    for name in ("release.sh", "same-code.sh", "output.sh"):
         shutil.copy2(ROOT / "tools" / name, repo / "tools" / name)
     (repo / "install.sh").write_text(FAKE_INSTALL)
     (repo / "install.sh").chmod(0o755)
@@ -96,7 +96,7 @@ def environment(setup: dict[str, Path]) -> dict[str, str]:
         Environment variables.
     """
     env = dict(os.environ, HOME=str(setup["home"]), APPLY_RELEASE_ALLOW_ROOT="1",
-               MEDIATOOLS_VERSION="1.2.5", CHECK_CMD="true", RELEASE_WAIT="0",
+               MEDIATOOLS_VERSION="1.2.5", CHECK_CMD="true", RELEASE_WAIT="0", NO_COLOR="1",
                FAKE_GH_DIR=str(setup["gh"]), FAKE_GH_ORIGIN=str(setup["origin"]),
                GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
@@ -259,7 +259,7 @@ def test_feature_archive_is_released_without_questions(setup: dict[str, Path]) -
     """
     path = archive(setup, "x", "patch")
     out = run(setup, "-y").stdout
-    assert "-> v1.2.6 aus develop - x done" in out and "applied: feature/x" in out
+    assert "-> v1.2.6 from develop - x done" in out and "applied: feature/x" in out
     assert "refs/tags/v1.2.6" in remote_tags(setup)
     assert not path.exists()
     assert (setup["home"] / ".local/share/mediatools/releases" / path.name).is_file()
@@ -288,7 +288,7 @@ def test_question_declined_keeps_the_archive(setup: dict[str, Path]) -> None:
     """
     path = archive(setup, "x", "minor")
     out = run(setup, stdin="n\n").stdout
-    assert "skipped: feature/x" in out and "no patch applied" in out
+    assert "– SKIP  feature/x" in out and "no patch applied" in out
     assert path.exists() and "v1.3.0" not in remote_tags(setup)
 
 
@@ -306,7 +306,7 @@ def test_wrong_base_stops_before_any_change(setup: dict[str, Path]) -> None:
     git("commit", "-qm", "develop moved", cwd=repo)
     git("push", "-q", "origin", "develop", cwd=repo)
     result = run(setup, "-y", check=False)
-    assert result.returncode != 0 and "STOPP: develop differs from the base" in result.stdout
+    assert result.returncode != 0 and "✘ STOP  develop differs from the base" in result.stdout
     assert path.exists()
     assert "feature/x" not in git("branch", "--list", "feature/*", cwd=repo)
 
@@ -325,7 +325,7 @@ def test_patch_that_does_not_apply_leaves_a_clean_clone(setup: dict[str, Path]) 
     git("commit", "-qm", "conflict", cwd=repo)
     git("push", "-q", "origin", "develop", cwd=repo)
     result = run(setup, "-y", check=False)
-    assert "STOPP: the patches do not apply onto develop" in result.stdout
+    assert "✘ STOP  the patches do not apply onto develop" in result.stdout
     assert not git("status", "--porcelain", cwd=repo)
     assert git("branch", "--show-current", cwd=repo) == "develop"
     assert "feature/x" not in git("branch", "--list", "feature/*", cwd=repo)
@@ -418,3 +418,13 @@ def test_update_subcommand_forwards_options(setup: dict[str, Path],
     updater.script = setup["home"] / "missing.sh"
     with pytest.raises(FileNotFoundError):
         updater.command()
+
+
+def test_output_library_next_to_the_script_is_the_bundle_copy() -> None:
+    """The update script runs from the installed package, without the clone's tools/.
+
+    It sources ``output.sh`` from its own folder; that copy must stay equal to
+    ``tools/output.sh`` of the dev-conventions bundle.
+    """
+    bundled = ROOT / "tools" / "output.sh"
+    assert (SCRIPT.parent / "output.sh").read_bytes() == bundled.read_bytes()
