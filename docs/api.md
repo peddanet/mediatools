@@ -2520,7 +2520,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, control: RunControl, installed: str = '1.15.3') -> None
+__init__(self, control: RunControl, installed: str = '1.15.4') -> None
 
 Remember the job and the installed release.
 
@@ -2799,7 +2799,7 @@ Attributes:
 **`__init__`**
 
 ~~~text
-__init__(self, package_dir: str | None = None, version: str = '1.15.3')
+__init__(self, package_dir: str | None = None, version: str = '1.15.4')
 
 Locate the imported package.
 
@@ -13660,6 +13660,98 @@ Send the input line to the running command.
 cancel(self) -> None
 
 Interrupt the running command.
+~~~
+
+### `CopyMenu` (`mediatools.gui.copymenu`) {.unnumbered}
+
+~~~text
+Right-click menu "Copy" / "Copy all" for every label, list and text area.
+
+Installed once for the whole window (class bindings), so every widget of
+these classes gets it, also ones created later:
+
+* text areas (log, output, results): "Copy" takes the marked text,
+  "Copy all" the whole content; marking works with the mouse even where
+  the area is read-only, and Ctrl+C copies the marking;
+* lists (queue, jobs, files): "Copy" takes the selected rows, "Copy all"
+  every row, one line per row with the columns separated by tabs;
+  Ctrl+C copies the selected rows;
+* labels (status lines): both copy the label's text.
+
+The text goes to the clipboard of the desktop, so it can be pasted into
+any other program while mediatools runs.
+
+Attributes:
+    root: The main window.
+    menu: The context menu.
+    target: Widget the menu was opened on.
+~~~
+
+**`__init__`**
+
+~~~text
+__init__(self, root: tk.Tk) -> None
+
+Bind the menu and Ctrl+C for all widgets of :attr:`CLASSES`.
+
+Args:
+    root: The main window.
+~~~
+
+**`open`**
+
+~~~text
+open(self, event: tk.Event) -> None
+
+Show the menu at the mouse on the clicked widget.
+
+Args:
+    event: The right click.
+~~~
+
+**`copy_key`**
+
+~~~text
+copy_key(self, event: tk.Event) -> str
+
+Ctrl+C: copy the marking (text area) or the selected rows (list).
+
+Args:
+    event: The key event.
+
+Returns:
+    "break", so the class binding does not copy a second time.
+~~~
+
+**`copy`**
+
+~~~text
+copy(self, all_of_it: bool) -> str
+
+Put the text of :attr:`target` on the clipboard.
+
+Args:
+    all_of_it: True for everything, False for the marking or the
+        selected rows (everything if nothing is marked).
+
+Returns:
+    The copied text ("" if there was nothing).
+~~~
+
+**`text_of`**
+
+~~~text
+text_of(widget: tk.Misc, all_of_it: bool) -> str
+
+Return the text a widget offers for copying.
+
+Args:
+    widget: Text area, list or label.
+    all_of_it: True for everything, False for the marking or the
+        selected rows (everything if nothing is marked).
+
+Returns:
+    The text, "" for other widgets.
 ~~~
 
 ### `DesktopEntry` (`mediatools.gui.desktopentry`) {.unnumbered}

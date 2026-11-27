@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Quality gates for mediatools.
+# check.sh - the quality gates of mediatools (from templates/check.sh of the
+# dev-conventions bundle v20).
 #
-# Runs the same checks locally (pre-push hook) and in CI, so a green local
-# run predicts a green pipeline. Every gate must pass; the script stops at
-# the first failure and returns its exit code.
+# Usage:  tools/check.sh [--fast] [--only GATE]
 #
-#   0. privacy  no locally listed term in files, paths or commit messages
-#   0. shell    shellcheck for every shell script
-#   1. format   pycodestyle, max line length 100
-#   2. lint     pylint incl. Google-style docstring checks, score 10.00/10
-#   3. types    mypy (config in pyproject.toml)
-#   4. security bandit (config in pyproject.toml)
-#   5. tests    pytest with branch coverage, threshold in pyproject.toml
+#   --fast       skip the gate "tests" (quick checks while editing)
+#   --only GATE  run one gate only (CI: one step per gate)
+#   -h, --help   this text
+#
+# Gates, in this order: privacy, shell, format, lint, types, security, tests.
+# Every gate prints one result line (PASS / FAIL / SKIP, one fact, duration);
+# the first failing gate stops the run and shows the end of its output.
+# The same script runs locally, in the pre-push hook and in CI, so a green
+# local run predicts a green pipeline.
+# Exit code: 0 all passed, 1 a gate failed, 2 wrong usage or missing tool.
 #
 # The tests of the GUI need Tk for Python (package python3-tk) and a
-# display; the script always restarts itself under xvfb-run (package
-# xvfb), a virtual display without a window, so no test touches the real
-# desktop - also when one is running.
-#
-# Usage: tools/check.sh [--fast]
-#   --fast  skip the test gate (used for quick checks while editing)
+# display; the script restarts itself under xvfb-run (package xvfb), a
+# virtual display without a window, so no test touches the real desktop.
+# The integration tests need ffmpeg, rsync and rsnapshot; a missing one
+# stops the run instead of silently lowering the coverage.
 #
 # Each tree is checked in full once: after a full green run the tree of the
 # working copy, the Python version and a hash of the installed packages are
@@ -27,39 +27,57 @@
 # again (the privacy scan also reads commit messages and tags). CHECK_FULL=1
 # forces a full run; CI (CI=true) always runs in full.
 #
-# Runs as a normal user; needs no root privileges.
-
+# Runs as a normal user; it only reads the working copy (and writes the
+# check cache inside .git).
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
+if [[ ! -f tools/output.sh ]]; then
+    echo "check.sh: tools/output.sh is missing - copy tools/output.sh of the dev-conventions bundle" >&2
+    exit 2
+fi
+# shellcheck source=tools/output.sh disable=SC1091  # path chosen at run time
+source tools/output.sh
 export PYTHONPATH="src:tests${PYTHONPATH:+:$PYTHONPATH}"
 
-# Development venv: an active one is used as it is; otherwise the first of
-# .venv in the project and ~/.venvs/<tool> (older layout, transition) is
-# activated for this script only - the activation ends with the script, the
-# calling shell stays as it was. CI has neither and installs the tools
-# directly. Nothing is created or installed here.
-if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-    for venv in .venv "$HOME/.venvs/mediatools"; do
-        if [[ -f "$venv/bin/activate" ]]; then
-            # shellcheck disable=SC1091  # path chosen at run time
-            source "$venv/bin/activate"
-            echo "venv: $venv (activated for this check)"
-            [[ "$venv" == .venv ]] || echo "note: $venv lies at the first level of the home" \
-                "directory; move it to .venv in the project (see CONTRIBUTING.md)"
-            break
-        fi
-    done
+GATES=(privacy shell format lint types security tests)
+declare -A ABOUT=(
+    [privacy]="tools/privacy_scan.py · files, paths, history"
+    [shell]="shellcheck"
+    [format]="pycodestyle · max line 120"
+    [lint]="pylint · 10.00/10, max line 120"
+    [types]="mypy"
+    [security]="bandit"
+    [tests]="pytest + coverage · branch ≥ 90 %"
+)
+
+FAST=false
+ONLY=""
+ARGS=("$@")
+while (($#)); do
+    case "$1" in
+        --fast) FAST=true ;;
+        --only) ONLY="${2:-}"; shift ;;
+        -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+        *) echo "check.sh: unknown argument $1" >&2; exit 2 ;;
+    esac
+    shift
+done
+if [[ -n "$ONLY" && -z "${ABOUT[$ONLY]:-}" ]]; then
+    echo "check.sh: unknown gate '$ONLY' - one of: ${GATES[*]}" >&2
+    exit 2
 fi
+wanted() { [[ -z "$ONLY" || "$ONLY" == "$1" ]]; }
+TESTS=false
+if wanted tests && ! $FAST; then TESTS=true; fi
 
-FAST=0
-[[ "${1:-}" == "--fast" ]] && FAST=1
-
-gate() {
-    local name="$1"; shift
-    printf '\n=== %-8s %s\n' "$name" "$*"
-    "$@"
-}
+# Development venv: an active one is used as it is; otherwise .venv of the
+# project is activated for this script only. CI has none and installs the
+# tools directly. Nothing is created or installed here.
+if [[ -z "${VIRTUAL_ENV:-}" && -f .venv/bin/activate ]]; then
+    # shellcheck disable=SC1091  # path chosen at run time
+    source .venv/bin/activate
+    detail "venv: .venv (activated for this check)"
+fi
 
 for tool in pycodestyle pylint mypy bandit; do
     command -v "$tool" >/dev/null || {
@@ -72,10 +90,7 @@ command -v shellcheck >/dev/null || {
     echo "missing tool: shellcheck  ->  sudo apt install shellcheck" >&2
     exit 2
 }
-
-if (( FAST == 0 )); then
-    # integration tests are skipped when these programs are missing, which
-    # would lower the coverage; demand a complete test environment instead
+if $TESTS; then
     missing=()
     for tool in ffmpeg ffprobe rsync rsnapshot; do
         command -v "$tool" >/dev/null || missing+=("$tool")
@@ -84,21 +99,21 @@ if (( FAST == 0 )); then
     # the tests always run on a virtual display, never on the real desktop
     if [[ "${MEDIATOOLS_XVFB:-}" != 1 ]]; then
         if command -v xvfb-run >/dev/null; then
-            exec env MEDIATOOLS_XVFB=1 xvfb-run -a "$0" "$@"
+            [[ -t 1 && -z "${NO_COLOR:-}" ]] && export FORCE_COLOR=1   # keep the colours
+            exec env MEDIATOOLS_XVFB=1 xvfb-run -a "$0" "${ARGS[@]}"
         fi
         missing+=("xvfb")
     fi
-    if (( ${#missing[@]} )); then
+    if ((${#missing[@]})); then
         echo "missing programs for the integration tests: ${missing[*]}" >&2
         echo "install with: sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb" >&2
         exit 2
     fi
 fi
 
-# Each tree is checked in full once (dev-conventions templates/check-cache.sh,
-# block 1): key = tree of the working copy + Python version + installed packages.
-# (deviation from the template: an unpacked archive without .git must not
-# end the script here - then nothing is cached)
+# --- check cache (templates/check-cache.sh, block 1) --------------------------------
+# key = tree of the working copy + Python version + installed packages; an
+# unpacked archive without .git caches nothing
 CHECKED="$(git rev-parse --git-dir 2>/dev/null || echo .git)/checked-trees"
 check_key() {
     local idx tree
@@ -113,32 +128,92 @@ check_key() {
         "$(python3 -m pip list --format=freeze 2>/dev/null | sha256sum | cut -c1-12)"
 }
 KEY=""
-if [[ "${CI:-}" != "true" && "${CHECK_FULL:-0}" != "1" ]]; then
+if [[ -z "$ONLY" && "${CI:-}" != "true" && "${CHECK_FULL:-0}" != "1" ]]; then
     KEY="$(check_key)" || KEY=""
 fi
 
-gate privacy  python3 tools/privacy_scan.py
-gate shell    shellcheck install.sh tools/*.sh .githooks/pre-push src/mediatools/update/*.sh
+# --- the gates: each prints its own output; its last line is the fact -------------
+shell_scripts() {
+    local files=(install.sh tools/*.sh .githooks/pre-push src/mediatools/update/*.sh)
+    shellcheck "${files[@]}"
+    echo "${#files[@]} scripts, no finding"
+}
+run_gate() {
+    case "$1" in
+        privacy)  python3 tools/privacy_scan.py ;;
+        shell)    shell_scripts ;;
+        format)   pycodestyle --max-line-length=120 src tests tools && echo "no finding" ;;
+        lint)     pylint --fail-under=10 src tests tools ;;
+        types)    mypy ;;
+        security) bandit -q -c pyproject.toml -r src && echo "no finding" ;;
+        tests)    python3 -m pytest -q -p no:cacheprovider --cov=mediatools --cov-report=term ;;
+    esac
+}
+# shortest useful fact of a gate's output
+fact_of() {
+    case "$1" in
+        lint)  grep -o 'rated at [0-9.]*/10' "$LOG" | tail -n 1 ;;
+        tests) printf '%s · coverage %s\n' "$(grep -oE '[0-9]+ passed' "$LOG" | tail -n 1)" \
+                   "$(grep -oE 'Total coverage: [0-9.]+%' "$LOG" | tail -n 1 | cut -d' ' -f3)" ;;
+        *)     grep -v '^[[:space:]]*$' "$LOG" | tail -n 1 | cut -c 1-44 ;;
+    esac
+}
 
-# check cache, block 2: a tree that passed all gates before skips the rest
+# --- run ---------------------------------------------------------------------------
+START=$SECONDS
+LOG="$(mktemp)"
+trap 'rm -f "$LOG"' EXIT
+selected=("${GATES[@]}")
+[[ -z "$ONLY" ]] || selected=("$ONLY")
+title "Quality gates  $(git rev-parse --short HEAD 2>/dev/null || echo "no git") · Python $(python3 -c 'import platform; print(platform.python_version())')"
+cached=false
 if [[ -n "$KEY" && -f "$CHECKED" ]] && grep -qxF "$KEY" "$CHECKED"; then
-    printf '\nThis tree passed all gates before (%s).\n' "${KEY%% *}"
-    printf 'format, lint, types, security and tests skipped - CHECK_FULL=1 forces them.\n'
-    printf '\nAll quality gates passed.\n'
+    cached=true
+    detail "check cache: tree ${KEY%% *} passed all gates before - privacy and shell only (CHECK_FULL=1 forces all)"
+fi
+n=0 failed="" passed=0 skipped=0
+for gate in "${selected[@]}"; do
+    n=$((n + 1))
+    stage "[$n/${#selected[@]}] $gate" "${ABOUT[$gate]}"
+    if $cached && [[ "$gate" != privacy && "$gate" != shell ]]; then
+        skip "$gate" "tree checked before"
+        skipped=$((skipped + 1))
+        continue
+    fi
+    if $FAST && [[ "$gate" == tests ]]; then
+        skip "tests" "--fast"
+        skipped=$((skipped + 1))
+        continue
+    fi
+    begin=$SECONDS code=0
+    if [[ "$gate" == tests ]]; then
+        run_gate "$gate" 2>&1 | tee "$LOG" || code=${PIPESTATUS[0]}
+    else
+        run_gate "$gate" >"$LOG" 2>&1 || code=$?
+    fi
+    if ((code == 0)); then
+        fact="$(fact_of "$gate")" || fact=""
+        pass "${fact:-$gate}" "$((SECONDS - begin)) s"
+        passed=$((passed + 1))
+    else
+        fail "$gate" "$((SECONDS - begin)) s"
+        [[ "$gate" == tests ]] || tail -n 30 "$LOG" | while IFS= read -r line; do detail "$line"; done
+        failed="$gate"
+        break
+    fi
+done
+
+# --- check cache, block 3: remember a fully checked tree (last 50) ------------------
+if [[ -z "$failed" && -n "$KEY" ]] && ! $cached && $TESTS; then
+    { [[ -f "$CHECKED" ]] && tail -n 49 "$CHECKED"; echo "$KEY"; } > "$CHECKED.tmp"
+    mv "$CHECKED.tmp" "$CHECKED"
+fi
+
+title "Result"
+if [[ -z "$failed" ]]; then
+    info "${G}${B}DONE${X}  $passed passed, $skipped skipped  $(ts "$((SECONDS - START)) s")"
     exit 0
 fi
-gate format   pycodestyle --max-line-length=100 src tests tools
-gate lint     pylint --fail-under=10 src tests tools
-gate types    mypy
-gate security bandit -q -c pyproject.toml -r src
-if (( FAST == 0 )); then
-    gate tests python3 -m pytest -q -p no:cacheprovider \
-        --cov=mediatools --cov-report=term
-    # check cache, block 3: remember this fully checked tree (last 50)
-    if [[ -n "$KEY" ]]; then
-        { [[ -f "$CHECKED" ]] && tail -n 49 "$CHECKED"; echo "$KEY"; } > "$CHECKED.tmp"
-        mv "$CHECKED.tmp" "$CHECKED"
-    fi
-fi
-
-printf '\nAll quality gates passed.\n'
+info "${R}${B}FAILED${X}  gate $failed  $(ts "$((SECONDS - START)) s")"
+note "nothing was changed; fix the finding and run tools/check.sh again"
+exit 1

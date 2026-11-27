@@ -207,8 +207,12 @@ looks for patch archives `mediatools-feature-<name>.tar.gz` or
 asks once per archive and releases it with `tools/release.sh` of the
 clone; users never have such archives. Browser copies (`... (1).tar.gz`)
 and second downloads of an archive already applied are recognised by their
-content and only removed. `-y` answers the questions with
-yes. Details: `docs/developer.md`, "Applying delivered patch archives".
+content and only removed. The question per archive is "Apply <branch>
+and release it as <part>? [y/N]"; `-y` answers the questions with yes. The
+output has the common look of the developer tools (block titles, `✔ PASS`
+/ `✘ FAIL` / `– SKIP` lines, colours in the terminal only; the log file
+holds plain text). Details: `docs/developer.md`, "Applying delivered patch
+archives".
 
 
 Code imported from a clone (development venv `.venv` with
@@ -1901,6 +1905,15 @@ directions. While it shows the end it follows new lines; scrolled up, it
 stays at the line at its upper edge, and the horizontal position stays as
 well. Scrolling back to the end makes it follow again.
 
+**Copying text.** Every text of the window can be copied (since 1.16.0):
+a right click on a status line, a list (queue, jobs, files) or a text area
+(log, output, results) opens a menu with *Copy* and *Copy all*. In a text
+area *Copy* takes the marked text (mark with the mouse, also where the area
+is read-only; Ctrl+C works as well); in a list it takes the selected rows,
+one line per row with the columns separated by tabs (Ctrl+C as well); on a
+status line both take its text. Nothing marked: *Copy* takes everything.
+The text goes to the clipboard of the desktop.
+
 `status`, `stop` and `reload` are buttons of the shrink tab; `attach` is
 replaced by the tab itself; `config --init/--path/--set` are covered by the
 editor.
@@ -2040,6 +2053,8 @@ instead of opening windows on the desktop.
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, copies by content and branch, applied before, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
 | `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
+| `test_copy_menu.py` | right-click menu and Ctrl+C: marked text or everything of a text area, selected or all rows of a list, text of a label |
+| `test_review.py` | `tools/review.sh` (bundle): two refs as real copies with named sides, fake Beyond Compare |
 | `test_examples.py` | samples in `examples/` equal the built-in template and hold terms; icons, entry and unit templates are package files; social preview 1280x640 |
 | `test_recent_speed.py` | ETA speed from the ledger: pauses do not count, parallel encodes once, three-hour window, too few files: no speed |
 | `test_menu_entry_current.py` | `install.sh` points the menu entry to the new link and keeps the old link while entry or unit name it; the GUI start keeps an existing entry current |

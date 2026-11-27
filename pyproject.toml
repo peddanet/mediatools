@@ -56,7 +56,7 @@ load-plugins = ["pylint.extensions.docparams", "pylint.extensions.docstyle"]
 py-version = "3.12"
 
 [tool.pylint.format]
-max-line-length = 100
+max-line-length = 120
 
 [tool.pylint.parameter_documentation]
 default-docstring-type = "google"

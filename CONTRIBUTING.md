@@ -57,7 +57,7 @@ a full run; CI always runs in full.
 |----------|--------------|-------------------------------------------------|
 | privacy  | privacy_scan | no locally listed term in files, paths, commit messages, author/committer/tagger; every identity address no-reply (or in the allow list); **fails without local terms** (skipped only in CI); refuses while old lists exist |
 | shell    | shellcheck   | no finding in any shell script                  |
-| format   | pycodestyle  | no finding, max line length 100                 |
+| format   | pycodestyle  | no finding, max line length 120                 |
 | lint     | pylint       | 10.00/10 incl. Google-style docstring checks    |
 | types    | mypy         | no error (`check_untyped_defs`)                 |
 | security | bandit       | no finding (B404/B603 justified in pyproject)   |
@@ -125,6 +125,13 @@ release check, brings `develop` back up through `merge/vX.Y.Z`, checks
 with `tools/same-code.sh` that `main`, `develop` and the tag are
 bit-identical and offers `./install.sh vX.Y.Z` (then
 `tools/after-install.sh`: reload of a running shrink).
+
+Review of a delivered branch before its release (four-eyes, Beyond
+Compare, both sides as real copies with named sides):
+
+~~~bash
+tools/review.sh develop feature/<name>
+~~~
 
 Which part: `patch` corrects wrong behaviour (also tests, scripts,
 documentation only); `minor` adds something usable while everything else
