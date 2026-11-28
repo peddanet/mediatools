@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-11-28
+
 ### Changed
 - The privacy gate also checks images (PNG, JPEG, GIF, WebP, BMP, TIFF): an
   image rendered from a tracked text source of the same name (`.svg`,
