@@ -16,9 +16,22 @@ are blanked out before the search, so a listed term stays forbidden
 everywhere except inside an allowed phrase - e.g. the term ``level`` with
 the allowed phrase ``sea level``.
 
-Scanned are the contents of all tracked files (PDFs via ``pdftotext`` if
-installed), the tracked file paths, all commit messages and the
-identities: author and committer of every commit, tagger of every tag.
+Scanned are the contents of all tracked files, the tracked file paths, all
+commit messages and the identities: author and committer of every commit,
+tagger of every tag. PDFs are read with ``pdftotext`` (package
+poppler-utils). Images (PNG, JPEG, GIF, WebP, BMP, TIFF) are checked through
+their text source when the repository tracks one of the same name
+(``<name>.svg`` or ``<name>.mmd``, from which the image is rendered): that
+text is scanned exactly, while text recognition of the rendered picture only
+adds misreadings (a method name losing its leading underscore, a word split
+into a shorter one that happens to be listed). Every
+other image - screenshots, icons - is read with the text recognition
+``tesseract`` (package tesseract-ocr), so it must not show a term either. A
+missing tool fails the scan (exit 2) instead of leaving files unread. The
+text of an image is kept in ``.git/privacy-ocr/<sha256 of the image>.txt``,
+so each image is recognised once; an image tesseract cannot read is a
+finding. Text recognition can misread small print - it adds a check, it does
+not replace looking at a screenshot.
 Matching ignores case; a term must not be part of a longer word (``cat``
 does not match ``concatenate``).
 
@@ -41,6 +54,7 @@ Exit codes: 0 clean or skipped in CI, 1 terms or private addresses found,
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -53,6 +67,10 @@ NO_REPLY = re.compile(r"^[^@\s]+@users\.noreply\.github\.com$|^noreply@github\.c
 STANDARD_DIRS = {"desktop", "documents", "downloads", "music", "pictures", "public",
                  "templates", "videos", "home", "projects", "scripts"}
 MIN_LENGTH = 3
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+TEXT_SOURCES = (".svg", ".mmd")
+TOOLS = {"pdftotext": "sudo apt install poppler-utils", "tesseract": "sudo apt install tesseract-ocr"}
+OCR_TIMEOUT = 120
 
 
 class PrivacyScan:
@@ -65,6 +83,10 @@ class PrivacyScan:
         allowed: Compiled alternation of the allowed phrases, or None.
         allowed_count: Number of allowed phrases.
         findings: ``(location, term)`` pairs.
+        missing: Tools needed but not installed (``pdftotext``, ``tesseract``).
+        images: Counts of the images: recognised, from the cache, checked
+            through their text source.
+        tracked: Paths of the tracked files.
     """
 
     def __init__(self, repo: str, terms: list[str], allowed: list[str] | None = None):
@@ -87,6 +109,9 @@ class PrivacyScan:
         self.allowed_count = len(phrases)
         self.allowed_addresses = {a.strip().lower() for a in allowed or [] if "@" in a}
         self.findings: list[tuple[str, str]] = []
+        self.missing: set[str] = set()
+        self.images = [0, 0, 0]
+        self.tracked: set[str] = set()
 
     @staticmethod
     def _phrase(text: str) -> str:
@@ -205,16 +230,81 @@ class PrivacyScan:
         full = os.path.join(self.repo, path)
         with open(full, "rb") as handle:
             data = handle.read()
-        if path.lower().endswith(".pdf"):
-            tool = shutil.which("pdftotext")
+        lower = path.lower()
+        if lower.endswith(".pdf"):
+            tool = self._tool("pdftotext")
             if tool is None:
-                print(f"warning: pdftotext missing, not scanned: {path}", file=sys.stderr)
                 return None
             return subprocess.run([tool, full, "-"], capture_output=True, text=True,
                                   errors="replace", check=False).stdout
+        if lower.endswith(IMAGE_SUFFIXES):
+            if self.text_source(path) is not None:
+                self.images[2] += 1          # its source is scanned as text
+                return None
+            return self._image_text(path, full, data)
         if b"\0" in data:
             return None
         return data.decode("utf-8", errors="replace")
+
+    def text_source(self, path: str) -> str | None:
+        """Return the tracked text an image is rendered from, if any.
+
+        Args:
+            path: Path of the image relative to the repository.
+
+        Returns:
+            ``<name>.svg`` or ``<name>.mmd`` next to the image if tracked, else None.
+        """
+        stem = os.path.splitext(path)[0]
+        if path.lower().endswith(TEXT_SOURCES):
+            return None
+        return next((stem + suffix for suffix in TEXT_SOURCES if stem + suffix in self.tracked), None)
+
+    def _tool(self, name: str) -> str | None:
+        """Return the path of a tool the scan needs, or note that it is missing.
+
+        Args:
+            name: ``pdftotext`` or ``tesseract``.
+
+        Returns:
+            Path of the program, or None (then the scan fails with exit 2).
+        """
+        tool = shutil.which(name)
+        if tool is None:
+            self.missing.add(name)
+        return tool
+
+    def _image_text(self, path: str, full: str, data: bytes) -> str | None:
+        """Return the text tesseract recognises in an image, from the cache if known.
+
+        Args:
+            path: Path relative to the repository.
+            full: Absolute path.
+            data: Content of the image.
+
+        Returns:
+            Recognised text; None if tesseract is missing or cannot read the
+            image (the latter is recorded as a finding).
+        """
+        cache = os.path.join(self._git("rev-parse", "--absolute-git-dir").strip(), "privacy-ocr",
+                             hashlib.sha256(data).hexdigest() + ".txt")
+        if os.path.exists(cache):
+            self.images[1] += 1
+            with open(cache, encoding="utf-8") as handle:
+                return handle.read()
+        tool = self._tool("tesseract")
+        if tool is None:
+            return None
+        result = subprocess.run([tool, full, "stdout"], capture_output=True, text=True,
+                                errors="replace", check=False, timeout=OCR_TIMEOUT)
+        if result.returncode != 0:
+            self.findings.append((path, "image text not readable by tesseract"))
+            return None
+        self.images[0] += 1
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, "w", encoding="utf-8") as handle:
+            handle.write(result.stdout)
+        return result.stdout
 
     def _search(self, location: str, text: str) -> None:
         """Record every term found in a text.
@@ -293,7 +383,8 @@ class PrivacyScan:
 
         Returns:
             0 if clean (or skipped in CI), 1 if something was found, 2 if
-            there are no local terms outside CI.
+            there are no local terms outside CI or a tool to read PDFs or
+            images is missing.
         """
         if self.pattern is None:
             if os.environ.get("CI") == "true":
@@ -304,9 +395,8 @@ class PrivacyScan:
                   "  create the deny list from the sample (CONTRIBUTING.md, local files):\n"
                   "  mediatools privacy   (shows where the lists belong)", file=sys.stderr)
             return 2
-        for path in self._git("ls-files", "-z").split("\0"):
-            if not path:
-                continue
+        self.tracked = {path for path in self._git("ls-files", "-z").split("\0") if path}
+        for path in sorted(self.tracked):
             self._search(f"path {path}", path)
             text = self._text_of(path)
             if text is not None:
@@ -316,6 +406,14 @@ class PrivacyScan:
         self.check_identities()
         for location, term in self.findings:
             print(f"{location}: {term}")
+        if any(self.images):
+            print(f"image text: {self.images[0]} image(s) recognised, {self.images[1]} from cache, "
+                  f"{self.images[2]} checked through their text source")
+        if self.missing:
+            for name in sorted(self.missing):
+                print(f"privacy scan FAILED: {name} is missing - files it reads were not scanned\n"
+                      f"  install it: {TOOLS[name]}", file=sys.stderr)
+            return 2
         print(f"privacy scan: {len(self.terms)} term(s), {self.allowed_count} allowed phrase(s), "
               f"{len(self.findings)} finding(s)")
         return 1 if self.findings else 0
