@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-11-28
+
 ### Fixed
 - The remaining time (ETA) of `mediatools shrink` counts only finished
   videos of the running job (its folder and filters; without a job, those
