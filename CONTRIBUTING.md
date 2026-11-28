@@ -36,7 +36,7 @@ One script, used locally, by the pre-push hook and in CI:
 ~~~bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'   # once: development venv
 git config core.hooksPath .githooks     # once per clone: activate pre-push hook
-sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb shellcheck  # once: tests, shellcheck
+sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb shellcheck poppler-utils tesseract-ocr  # once: tests, shellcheck, privacy scan of PDFs and images
 tools/check.sh                          # all gates
 tools/check.sh --fast                   # without tests, while editing
 tools/check.sh --yes                    # no question: tests on the free threads
@@ -70,7 +70,7 @@ a full run; CI always runs in full.
 
 | Gate     | Tool         | Pass criterion                                  |
 |----------|--------------|-------------------------------------------------|
-| privacy  | privacy_scan | no locally listed term in files, paths, commit messages, author/committer/tagger; every identity address no-reply (or in the allow list); **fails without local terms** (skipped only in CI); refuses while old lists exist |
+| privacy  | privacy_scan | no locally listed term in files (PDFs via `pdftotext`, text in images via `tesseract`), paths, commit messages, author/committer/tagger; every identity address no-reply (or in the allow list); **fails without local terms or without `pdftotext`/`tesseract`** (skipped only in CI); refuses while old lists exist |
 | shell    | shellcheck   | no finding in any shell script                  |
 | format   | pycodestyle  | no finding, max line length 120                 |
 | lint     | pylint       | 10.00/10 incl. Google-style docstring checks    |

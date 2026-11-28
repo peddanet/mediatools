@@ -3,6 +3,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -173,3 +174,131 @@ def test_read_list_ignores_comments(datadir: Path) -> None:
                                                    encoding="utf-8")
     assert privacy_scan.PrivacyScan.read_list("privacy_allowlist.txt") == ["sea level"]
     assert privacy_scan.PrivacyScan.read_list("missing.txt") == []
+
+
+def fake_tool(folder: Path, name: str, script: str) -> str:
+    """Write an executable stand-in for a tool.
+
+    Args:
+        folder: Folder for the script.
+        name: Program name.
+        script: Shell commands after the shebang.
+
+    Returns:
+        Path of the script.
+    """
+    path = folder / name
+    path.write_text("#!/bin/sh\n" + script + "\n", encoding="utf-8")
+    path.chmod(0o755)
+    return str(path)
+
+
+def which_with(tools: dict[str, str | None]) -> Callable[[str], str | None]:
+    """Return a ``shutil.which`` that knows the given tools and finds the rest normally.
+
+    Args:
+        tools: Program name -> path, or None for "not installed".
+
+    Returns:
+        Replacement for ``shutil.which``.
+    """
+    real = shutil.which
+    return lambda name: tools[name] if name in tools else real(name)
+
+
+@needs_git
+def test_text_in_images_is_searched_and_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                               capsys: pytest.CaptureFixture) -> None:
+    """A term shown in a picture is a finding; every picture is recognised once.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Replaces tesseract (fixture).
+        capsys: Output capture (fixture).
+    """
+    repo, tools = tmp_path / "repo", tmp_path / "bin"
+    tools.mkdir()
+    make_file(repo / "docs/img/shot.png", b"\x89PNG\r\n\x1a\n\0fake image")
+    git_repo(repo, "add a picture")
+    calls = tmp_path / "calls"
+    tesseract = fake_tool(tools, "tesseract", f'echo x >> "{calls}"\necho "Window: Secretname folder"')
+    monkeypatch.setattr(privacy_scan.shutil, "which", which_with({"tesseract": tesseract}))
+    scan = privacy_scan.PrivacyScan(str(repo), ["secretname"])
+    assert scan.run() == 1
+    assert ("docs/img/shot.png:1", "Secretname") in scan.findings
+    assert "image text: 1 image(s) recognised, 0 from cache, 0 checked" in capsys.readouterr().out
+    again = privacy_scan.PrivacyScan(str(repo), ["secretname"])
+    assert again.run() == 1 and again.images == [0, 1, 0]
+    assert calls.read_text(encoding="utf-8").count("x") == 1        # recognised once
+
+
+@needs_git
+def test_unreadable_image_is_a_finding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An image tesseract cannot read is not passed over silently.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Replaces tesseract (fixture).
+    """
+    repo, tools = tmp_path / "repo", tmp_path / "bin"
+    tools.mkdir()
+    make_file(repo / "logo.jpg", b"\xff\xd8\0not really")
+    git_repo(repo, "add a logo")
+    tesseract = fake_tool(tools, "tesseract", "echo broken >&2\nexit 1")
+    monkeypatch.setattr(privacy_scan.shutil, "which", which_with({"tesseract": tesseract}))
+    scan = privacy_scan.PrivacyScan(str(repo), ["secretname"])
+    assert scan.run() == 1
+    assert scan.findings == [("logo.jpg", "image text not readable by tesseract")]
+
+
+@needs_git
+@pytest.mark.parametrize(("name", "package"), [("tesseract", "tesseract-ocr"),
+                                               ("pdftotext", "poppler-utils")])
+def test_missing_reader_fails_the_scan(name: str, package: str, tmp_path: Path,
+                                       monkeypatch: pytest.MonkeyPatch,
+                                       capsys: pytest.CaptureFixture) -> None:
+    """Without pdftotext or tesseract the scan fails instead of skipping files.
+
+    Args:
+        name: The missing tool.
+        package: The package that provides it.
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Hides the tool (fixture).
+        capsys: Output capture (fixture).
+    """
+    make_file(tmp_path / "docs/guide.pdf", b"%PDF-1.4 fake")
+    make_file(tmp_path / "docs/img/shot.png", b"\x89PNG\r\n\x1a\n\0fake image")
+    git_repo(tmp_path, "add documents")
+    monkeypatch.setattr(privacy_scan.shutil, "which", which_with({name: None}))
+    scan = privacy_scan.PrivacyScan(str(tmp_path), ["secretname"])
+    assert scan.run() == 2
+    err = capsys.readouterr().err
+    assert f"{name} is missing" in err and f"sudo apt install {package}" in err
+
+
+@needs_git
+def test_image_with_text_source_is_checked_through_the_source(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A diagram rendered from a tracked .mmd or .svg is checked through that text, not by OCR.
+
+    Args:
+        tmp_path: Temporary directory (fixture).
+        monkeypatch: Replaces tesseract (fixture).
+    """
+    repo, tools = tmp_path / "repo", tmp_path / "bin"
+    tools.mkdir()
+    make_file(repo / "docs/img/uml.mmd", b"classDiagram\n  class Store\n")
+    make_file(repo / "docs/img/uml.png", b"\x89PNG\r\n\x1a\n\0rendered")
+    make_file(repo / "docs/img/shot.png", b"\x89PNG\r\n\x1a\n\0screenshot")
+    git_repo(repo, "add pictures")
+    calls = tmp_path / "calls"
+    tesseract = fake_tool(tools, "tesseract", f'echo "$1" >> "{calls}"\necho "Secretname Store"')
+    monkeypatch.setattr(privacy_scan.shutil, "which", which_with({"tesseract": tesseract}))
+    scan = privacy_scan.PrivacyScan(str(repo), ["secretname"])
+    assert scan.run() == 1                                   # the screenshot's misreading counts
+    assert [loc for loc, _ in scan.findings] == ["docs/img/shot.png:1"]
+    assert scan.images == [1, 0, 1]
+    assert "uml.png" not in calls.read_text(encoding="utf-8")
+    assert scan.text_source("docs/img/uml.png") == "docs/img/uml.mmd"
+    assert scan.text_source("docs/img/uml.mmd") is None
+    assert scan.text_source("docs/img/shot.png") is None

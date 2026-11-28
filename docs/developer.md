@@ -602,7 +602,7 @@ Nothing is created or installed by the script.
 
 | No. | Gate     | Tool        | Pass criterion                                     |
 |-----|----------|-------------|----------------------------------------------------|
-| 0   | privacy  | privacy_scan | no locally listed term in files, paths, commits, identities; every identity address no-reply; fails (exit code 2) without local terms (skipped only in CI) and while lists of the layout before 1.5.0 exist |
+| 0   | privacy  | privacy_scan | no locally listed term in files (also PDFs and the text in images), paths, commits, identities; every identity address no-reply; fails (exit code 2) without local terms or without `pdftotext`/`tesseract` (skipped only in CI) and while lists of the layout before 1.5.0 exist |
 | 0   | shell    | shellcheck  | no finding in `install.sh`, `tools/*.sh`, the hook and the update script |
 | 1   | format   | pycodestyle | PEP 8 layout, max line length 120                  |
 | 2   | lint     | pylint      | 10.00/10, docparams/docstyle (Google style)        |
@@ -610,9 +610,27 @@ Nothing is created or installed by the script.
 | 4   | security | bandit      | no finding                                         |
 | 5   | tests    | pytest      | all pass, branch coverage >= 90 %                  |
 
-**Privacy gate.** `tools/privacy_scan.py` searches all tracked files (PDFs
-via `pdftotext`), file paths and commit messages for terms that would allow
-conclusions about the processed data. The terms are never in the
+**Privacy gate.** `tools/privacy_scan.py` searches all tracked files, file
+paths and commit messages for terms that would allow conclusions about the
+processed data. PDFs are read with `pdftotext` (package `poppler-utils`).
+Images (PNG, JPEG, GIF, WebP, BMP, TIFF) are checked in one of two ways:
+
+| Image | Checked through | Example |
+|---|---|---|
+| rendered from a tracked text source of the same name (`<name>.svg`, `<name>.mmd`) | that source, scanned exactly as text | UML and sequence diagrams, lane diagrams |
+| without such a source | text recognition `tesseract` (package `tesseract-ocr`) | GUI screenshots, icons |
+
+Text recognition of a rendered diagram would only add misreadings: in the
+first run a private method name lost its leading underscore and a word was
+split into a shorter one, and both results happened to be listed terms,
+although the source of both diagrams is clean. **A missing
+`pdftotext` or `tesseract` fails the gate** (exit code 2, with the `apt`
+command): up to 1.17.1 a missing `pdftotext` only printed a warning and the
+PDFs stayed unread. The recognised text of each image is cached in
+`.git/privacy-ocr/<sha256 of the image>.txt`, so only new or changed images
+are read again. An image tesseract cannot read is a finding. Text
+recognition can misread small print: it adds a check, it does not replace
+looking at a screenshot before it is committed. The terms are never in the
 repository; they come from the deny list
 `~/.config/mediatools/privacy/denylist.txt` (one term per line; with
 `MEDIATOOLS_HOME` set: `$MEDIATOOLS_HOME/privacy_denylist.txt`) and from the
