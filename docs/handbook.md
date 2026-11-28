@@ -208,7 +208,11 @@ asks once per archive and releases it with `tools/release.sh` of the
 clone; users never have such archives. Browser copies (`... (1).tar.gz`)
 and second downloads of an archive already applied are recognised by their
 content and only removed. The question per archive is "Apply <branch>
-and release it as <part>? [y/N]"; `-y` answers the questions with yes. The
+and release it as <part>? [y/N]"; before it the terminal bell rings and,
+in a desktop session with `notify-send` (package `libnotify-bin`), a
+notice appears, so the question does not wait unnoticed in a background
+window (`NO_NOTIFY=1` switches the notice off); `-y` answers the
+questions with yes. The
 output has the common look of the developer tools (block titles, `✔ PASS`
 / `✘ FAIL` / `– SKIP` lines, colours in the terminal only; the log file
 holds plain text). Details: `docs/developer.md`, "Applying delivered patch
@@ -2051,7 +2055,7 @@ instead of opening windows on the desktop.
 | `test_runcontrol.py` | PID and stop files, `mediatools stop` during a run and without a run |
 | `test_results_inhibit.py` | result table layout and wrapping, report file of a run, sleep lock held/refused/missing |
 | `test_apply_release.py` | `mediatools update` / `apply-release.sh`: newer release installed first, patch archives with `patch.info` (newest copy, copies by content and branch, applied before, released, old copy, refused old format), hash guards, a patch that does not apply, chain of merge-only archives up to a release, release through `tools/release.sh` |
-| `test_release_tools.py` | `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release, hotfix, conflicts, red checks, failed tag check, refusals |
+| `test_release_tools.py` | copy of the dev-conventions bundle v21 (skipped while `tools/bundle.sha256` matches): `tools/release.sh` (GitHub variant, fake `gh`) and `tools/same-code.sh`: feature, merge-only, release with one check run and direct push, fallback when pushes are refused, parallel work, hotfix, conflicts, red checks, failed tag check, refusals |
 | `test_release_1140.py` | `install.sh` move to the XDG layout (old link, old venv in use, unit rewrite), cache folder, privacy refusal, menu entry, venv activation of `check.sh`, *Stop, then next* |
 | `test_copy_menu.py` | right-click menu and Ctrl+C: marked text or everything of a text area, selected or all rows of a list, text of a label |
 | `test_review.py` | `tools/review.sh` (bundle): two refs as real copies with named sides, fake Beyond Compare |
@@ -2066,8 +2070,9 @@ instead of opening windows on the desktop.
 
 The CI workflow (`.github/workflows/tests.yml`) runs all quality
 gates (`tools/check.sh`: privacy, shell, format, lint, types, security, tests) on Python
-3.12 and 3.14 for pull requests into `main` and `develop`; a release tag
-only gets the tag check (`release-check`). Which run checks what is shown in
+3.12 and 3.14 for pull requests into `main` and `develop` (one run per
+release: `tools/release.sh` pushes exactly the checked commit); a release
+tag only gets the tag check (`release-check`). Which run checks what is shown in
 `docs/developer.md`, section "CI runs"; the background is in
 `docs/ci-guide.md`.
 Architecture, UML diagrams and the API reference are in

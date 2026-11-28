@@ -171,7 +171,10 @@ Since 1.16.0 every gate is its own step `gate: <name>` (dev-conventions
 bundle v20, `templates/ci.yml`): the GitHub page and the watcher of
 `tools/release.sh` show which gate runs or failed. The work is the same as
 one `tools/check.sh` run; the job sets `CI=true` (privacy scan skips itself,
-no check cache) and `FORCE_COLOR=1` (colours in the GitHub log).
+no check cache, the tests run on all threads of the runner - 4 on a public
+repository, pytest-xdist) and `FORCE_COLOR=1` (colours in the GitHub log).
+The tests of files copied unchanged from the dev-conventions bundle are
+skipped while `tools/bundle.sha256` matches (since 1.17.0).
 
 | Key | Meaning |
 |---|---|
@@ -227,13 +230,17 @@ released states, each tagged `vX.Y.Z`. There is no separate `master`.
 | `main` (= `master`) | released versions, each tagged | - | - |
 | `develop` | integration of finished work | `main` | `main` via a release |
 | `feature/x` | one piece of work | `develop` | `develop` (pull request) |
-| `release/X.Y.Z` | short-lived: version number and CHANGELOG, made by `tools/release.sh` | `develop` | `main` (pull request) |
+| `release/X.Y.Z` | short-lived: carries the locally built release commit to its checks, made by `tools/release.sh` | `develop` | `main` (pull request checks, then direct push) |
 | `hotfix/x` | urgent fix of a release (gets the version commit itself) | `main` | `main` (pull request) |
-| `merge/vX.Y.Z` | helper of `tools/release.sh` for the merge back | `main` | `develop` (pull request) |
+| `merge/vX.Y.Z` | helper of `tools/release.sh`: second `develop` state of a hotfix, or the fallback merge back | `main` | `develop` (pull request) |
 
 `tools/release.sh` creates, pushes and deletes the `release/` and
-`merge/` branches itself; `main` and `develop` are protected, so even the
-version commit and the merge back reach them only through a pull request.
+`merge/` branches itself. `main` and `develop` are protected: they take
+only a commit whose required checks passed on a pull request. Since
+1.17.0 (dev-conventions bundle v21) the script builds the merges, the
+release commit and the tag locally, lets the pull request check exactly
+that commit and then pushes it directly with `git push --atomic`; GitHub
+writes no merge commit any more.
 
 ## Reading the lane diagrams
 
@@ -247,20 +254,26 @@ the gate run of the step:
 |---|---|---|
 | **LOCAL** | this PC, pre-push hook | `tools/check.sh` with the Python of the venv, on the working tree; can be bypassed with `--no-verify` |
 | **CI** | GitHub, fresh VM per job | `tools/check.sh` with Python 3.12 and 3.14 on the committed tree (pull requests); for a tag only `release-check`; binding for branch protection |
-| **none** | - | no test: the pull request tested the same tree before |
+| **none** | - | no test: a local step whose result the next push has checked, or the publication of a commit its pull request already checked |
 
 ![Feature and release with `tools/release.sh`](img/lanes_release.png){width=100%}
 
 ![Hotfix with `tools/release.sh` (also the end of `mediatools update` for a hotfix archive)](img/lanes_hotfix.png){width=100%}
 
-| Flow | LOCAL runs | CI runs on GitHub |
+| Flow | Full LOCAL runs | CI gate runs on GitHub |
 |---|---|---|
-| feature | 2 (gates of `release.sh`, pre-push hook) | 1 (pull request into `develop`) |
-| release | 3 (gates after the version change, push of `release/`, push of `merge/`) | 3 (pull request into `main`, tag, pull request into `develop`) |
-| hotfix | 3 (as release) | 3 |
+| feature only | 1 (gates of `release.sh`) | 1 (pull request into `develop`) |
+| feature + release | 1 (gates on the release tree) | 1 (pull request into `main`) + `release-check` of the tag |
+| hotfix | 1 | 1, or 2 at the same time while `develop` collects features + `release-check` |
 
-The local runs before a push repeat the gates of `release.sh` on the same
-tree; they are kept because the pre-push hook must never be bypassed.
+The pre-push hook still runs before every push and is never bypassed; it
+finds the tree in the check cache (`.git/checked-trees`) and runs only
+`privacy` and `shell`. Up to 1.16.0 a release took three CI runs (pull
+request into `main`, tag, pull request into `develop`) and two full local
+runs: GitHub's merge button wrote a new merge commit, which `develop` could
+only receive through a third pull request with the same content. If a branch
+rule still demands pull requests, `tools/release.sh` falls back to that way
+and says so.
 
 ## What `tools/release.sh` prints
 
@@ -275,7 +288,10 @@ job started). It reads the plain tab-separated form of `gh pr checks`,
 which every `gh` version has (gh 2.45 of Ubuntu 24.04 has no `--json`
 there). Only the required checks count: when `develop` holds nothing new,
 `merge/vX.Y.Z` is the tagged commit, and its finished tag run must not be
-taken for the checks of the pull request (bundle v20). GitHub
+taken for the checks of the pull request (bundle v20). Before every
+question the script rings the terminal bell and raises a desktop notice
+(`attention` of `tools/output.sh`, `notify-send -u critical`; `NO_NOTIFY=1`
+switches it off). GitHub
 answers now and then with a passing server error ("GraphQL: Something went
 wrong") or refuses a merge right after green checks; `gh pr create` and
 `gh pr merge` are therefore tried up to five times, `RELEASE_RETRY_PAUSE`
@@ -294,7 +310,7 @@ colours only in a terminal); the format template is
   gates (3.12)  ████████░░  8/10  gate: tests   2:10
   gates (3.14)  ██████░░░░  6/10  gate: lint    1:52
   ✔ PASS  required checks green                        2:41
-  ✔ PASS  merged · tag v1.16.1 · release check         0:11
+  ✔ PASS  pushed main, develop, tag · release check    0:11
 ▶ Same code  tools/same-code.sh main develop v1.16.1
   ✔ PASS  Bit-identical: YES
 ~~~
@@ -581,19 +597,20 @@ call (normal user, repository owner):
 ~~~bash
 gh api -X PUT "repos/peddanet/mediatools/branches/main/protection" --input - <<'EOF'
 { "required_status_checks": { "strict": true,
-    "contexts": ["gates (3.12)", "gates (3.14)"] },
+    "checks": [ { "context": "gates (3.12)", "app_id": 15368 },
+                { "context": "gates (3.14)", "app_id": 15368 } ] },
   "enforce_admins": true,
-  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "required_pull_request_reviews": null,
   "restrictions": null, "allow_force_pushes": false, "allow_deletions": false }
 EOF
 ~~~
 
 | Field | Effect |
 |---|---|
-| `contexts` | names of the checks that must succeed; they must match the job names exactly |
+| `checks` | names of the checks that must succeed (they must match the job names exactly) and the app that must report them: 15368 = GitHub Actions; with "any source" anybody with write access could set such a status by API |
 | `strict: true` | the PR branch must be **up to date** with the target before merging; otherwise it must be updated and tested again |
 | `enforce_admins: true` | the owner is bound too |
-| `required_pull_request_reviews` | changes only through a PR; 0 approvals because there is a single maintainer |
+| `required_pull_request_reviews: null` | no pull request required: `tools/release.sh` (bundle v21) opens one for the checks and then pushes the checked commit directly; GitHub accepts that push only once the required checks of that commit passed. Set (as up to 1.16.0), the script falls back to merging on GitHub with three CI runs per release. Collaborators would get a ruleset "review by owner" (pull request, 1 approval, bypass "Repository admin - always"); 0 approvals protect against nobody |
 | `allow_force_pushes` / `allow_deletions` | history of `main`/`develop` cannot be rewritten or deleted |
 
 Consequences: a check name that is no longer produced (e.g. after

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # check.sh - the quality gates of mediatools (from templates/check.sh of the
-# dev-conventions bundle v20).
+# dev-conventions bundle v21).
 #
-# Usage:  tools/check.sh [--fast] [--only GATE]
+# Usage:  tools/check.sh [--fast] [--only GATE] [--yes]
 #
 #   --fast       skip the gate "tests" (quick checks while editing)
 #   --only GATE  run one gate only (CI: one step per gate)
+#   --yes        no question: the tests take the free threads
 #   -h, --help   this text
 #
 # Gates, in this order: privacy, shell, format, lint, types, security, tests.
@@ -14,6 +15,17 @@
 # The same script runs locally, in the pre-push hook and in CI, so a green
 # local run predicts a green pipeline.
 # Exit code: 0 all passed, 1 a gate failed, 2 wrong usage or missing tool.
+#
+# Parallel tests (pytest-xdist, a dev dependency): in a terminal check.sh
+# asks "N of M threads free (load L) - run the tests on N workers? [Y/n]";
+# free = threads minus the load of the last minute (rounded), at least 1. Without a
+# terminal (pre-push hook, release.sh --yes) or with --yes it takes the free
+# threads without asking; in CI (CI=true) all threads of the runner.
+# CHECK_WORKERS=N fixes the number, CHECK_WORKERS=0 or 1 runs them one after
+# another. Without pytest-xdist the tests run one after another, with a note.
+# The tests of unchanged bundle files are skipped (tools/bundle.sha256,
+# tools/bundle_tests.py); CHECK_BUNDLE_TESTS=1 runs them anyway.
+# The coverage table is printed only when the coverage is below the limit.
 #
 # The tests of the GUI need Tk for Python (package python3-tk) and a
 # display; the script restarts itself under xvfb-run (package xvfb), a
@@ -52,10 +64,14 @@ declare -A ABOUT=(
 
 FAST=false
 ONLY=""
+YES=false
+XDIST=()
+WORKERS=1
 ARGS=("$@")
 while (($#)); do
     case "$1" in
         --fast) FAST=true ;;
+        --yes|-y) YES=true ;;
         --only) ONLY="${2:-}"; shift ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         *) echo "check.sh: unknown argument $1" >&2; exit 2 ;;
@@ -138,6 +154,39 @@ shell_scripts() {
     shellcheck "${files[@]}"
     echo "${#files[@]} scripts, no finding"
 }
+# workers - number of pytest workers (sets WORKERS; 1 = one after another)
+workers() {
+    local threads load free answer=""
+    threads="$(nproc)"
+    if [[ -n "${CHECK_WORKERS:-}" ]]; then
+        [[ "$CHECK_WORKERS" =~ ^[0-9]+$ ]] || { note "CHECK_WORKERS=$CHECK_WORKERS is no number - one worker"; CHECK_WORKERS=1; }
+        WORKERS=$((CHECK_WORKERS > 1 ? CHECK_WORKERS : 1))
+        detail "tests: $WORKERS worker(s), set by CHECK_WORKERS"
+    elif [[ -n "${CI:-}" ]]; then
+        WORKERS=$threads
+        detail "tests: $WORKERS workers (all threads of the CI runner)"
+    else
+        load="$(cut -d ' ' -f 1 /proc/loadavg)"
+        free="$(awk -v t="$threads" -v l="$load" 'BEGIN { f = t - int(l + 0.5); print (f < 1 ? 1 : f) }')"
+        WORKERS=$free
+        if ! $YES && [[ -t 0 && -t 1 ]] && ((free > 1)); then
+            attention "$free of $threads threads free - run the tests on $free workers?"
+            read -r -p "  $free of $threads threads free (load $load) - run the tests on $free workers? [Y/n] " answer \
+                || answer=n
+            [[ ! "$answer" =~ ^[nN]$ ]] || WORKERS=1
+        fi
+        detail "tests: $WORKERS worker(s) - $free of $threads threads free (load $load)"
+    fi
+    if ((WORKERS > 1)) && ! python3 -c 'import xdist' 2>/dev/null; then
+        note "pytest-xdist is not installed - the tests run one after another (.venv/bin/pip install -e '.[dev]')"
+        WORKERS=1
+    fi
+}
+# the coverage table only when the limit is missed (pyproject.toml: fail_under)
+coverage_table() {
+    grep -q 'FAIL Required test coverage' "$LOG" || return 0
+    python3 -m coverage report 2>&1 | while IFS= read -r line; do detail "$line"; done
+}
 run_gate() {
     case "$1" in
         privacy)  python3 tools/privacy_scan.py ;;
@@ -146,12 +195,21 @@ run_gate() {
         lint)     pylint --fail-under=10 src tests tools ;;
         types)    mypy ;;
         security) bandit -q -c pyproject.toml -r src && echo "no finding" ;;
-        tests)    python3 -m pytest -q -p no:cacheprovider --cov=mediatools --cov-report=term ;;
+        # console_output_style=classic: no "[100%]" of pytest next to the progress bar;
+        # --cov-report= : no table on a green run (coverage_table shows it below the limit)
+        tests)    python3 -m pytest -q -p no:cacheprovider -o console_output_style=classic \
+                      --cov=mediatools --cov-report= "${XDIST[@]}" ;;
     esac
 }
 # shortest useful fact of a gate's output
 fact_of() {
     case "$1" in
+        # "privacy scan: 413 term(s), 26 allowed phrase(s), 0 finding(s)" -> "413 terms, 26 allowed, 0 findings"
+        privacy) local short
+                 short="$(sed -nE 's/^privacy scan: ([0-9]+) term.*, ([0-9]+) allowed.*, ([0-9]+) finding.*/\1 terms, \2 allowed, \3 findings/p' \
+                          "$LOG" | tail -n 1)"
+                 [[ -n "$short" ]] || short="$(grep -v '^[[:space:]]*$' "$LOG" | tail -n 1 | cut -c 1-44)"
+                 echo "$short" ;;
         lint)  grep -o 'rated at [0-9.]*/10' "$LOG" | tail -n 1 ;;
         tests) printf '%s · coverage %s\n' "$(grep -oE '[0-9]+ passed' "$LOG" | tail -n 1)" \
                    "$(grep -oE 'Total coverage: [0-9.]+%' "$LOG" | tail -n 1 | cut -d' ' -f3)" ;;
@@ -185,6 +243,12 @@ for gate in "${selected[@]}"; do
         skipped=$((skipped + 1))
         continue
     fi
+    if [[ "$gate" == tests ]]; then
+        workers
+        XDIST=()
+        # loadscope: the tests of one class (or module) stay on one worker
+        ((WORKERS == 1)) || XDIST=(-n "$WORKERS" --dist loadscope)
+    fi
     begin=$SECONDS code=0
     if [[ "$gate" == tests ]]; then
         run_gate "$gate" 2>&1 | tee "$LOG" || code=${PIPESTATUS[0]}
@@ -197,7 +261,9 @@ for gate in "${selected[@]}"; do
         passed=$((passed + 1))
     else
         fail "$gate" "$((SECONDS - begin)) s"
-        [[ "$gate" == tests ]] || tail -n 30 "$LOG" | while IFS= read -r line; do detail "$line"; done
+        if [[ "$gate" == tests ]]; then coverage_table; else
+            tail -n 30 "$LOG" | while IFS= read -r line; do detail "$line"; done
+        fi
         failed="$gate"
         break
     fi

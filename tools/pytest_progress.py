@@ -9,9 +9,13 @@ works for every pytest run (check.sh, CI, IDE):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     pytest_plugins = ["pytest_progress"]
 
-It prints a progress bar (percent, count, elapsed time, slowest module so
-far): in a terminal one line that is redrawn, in a pipe or log a new line
-at every tenth of the run. After the run it lists the five slowest tests.
+It prints a progress bar (percent, count, elapsed time, module of the test
+that finished last, i.e. the module that runs now): in a terminal one line
+that is redrawn, in a pipe or log a new line at every tenth of the run.
+After the run it lists the five slowest tests and the three slowest
+modules. Until bundle v20 the last column showed the slowest module so far,
+which read like the running one. With pytest-xdist (check.sh -n) it runs
+in the controlling process only and counts the tests the workers report.
 Colours follow output.sh: never with NO_COLOR, else with FORCE_COLOR or a
 terminal. PYTEST_PROGRESS=0 switches the plugin off.
 """
@@ -28,6 +32,7 @@ import pytest
 
 WIDTH = 30
 SLOWEST = 5
+SLOWEST_MODULES = 3
 
 
 def _colour() -> bool:
@@ -51,12 +56,12 @@ class Progress:
             terminal: The terminal reporter plugin of pytest.
         """
         self.terminal = terminal
-        self.tty = sys.stdout.isatty()
         self.codes = ("\033[32m", "\033[2m", "\033[0m") if _colour() else ("", "", "")
         self.count = {"total": 0, "done": 0, "tenth": -1}
         self.start = time.monotonic()
         self.durations: list[tuple[float, str]] = []
         self.modules: dict[str, float] = defaultdict(float)
+        self.current = ""
 
     def line(self) -> str:
         """Build the progress line.
@@ -67,10 +72,9 @@ class Progress:
         green, dim, reset = self.codes
         done, total = self.count["done"], self.count["total"]
         filled = done * WIDTH // total
-        slow = max(self.modules.items(), key=lambda item: item[1])[0] if self.modules else ""
         return (f"  {green}{'█' * filled}{dim}{'░' * (WIDTH - filled)}{reset}"
                 f" {done * 100 // total:3d} %  {done:3d}/{total}"
-                f"  {dim}{time.monotonic() - self.start:5.1f} s  {slow}{reset}")
+                f"  {dim}{time.monotonic() - self.start:5.1f} s  {self.current}{reset}")
 
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
@@ -80,6 +84,17 @@ class Progress:
             items: The collected tests.
         """
         self.count["total"] = len(items)
+
+    @pytest.hookimpl(optionalhook=True)
+    def pytest_xdist_node_collection_finished(self, node: Any, ids: list[str]) -> None:
+        """Count the tests under pytest-xdist, where the workers collect.
+
+        Args:
+            node: The worker that finished collecting (unused).
+            ids: The ids of the tests it collected; every worker collects all.
+        """
+        del node
+        self.count["total"] = max(self.count["total"], len(ids))
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_report_teststatus(self) -> Any:
@@ -99,13 +114,14 @@ class Progress:
         Args:
             report: Report of one phase of one test.
         """
-        self.modules[report.nodeid.split("::", 1)[0]] += report.duration
+        self.current = report.nodeid.split("::", 1)[0]
+        self.modules[self.current] += report.duration
         if report.when == "call":
             self.durations.append((report.duration, report.nodeid))
         if report.when != "teardown" or not self.count["total"]:
             return
         self.count["done"] += 1
-        if self.tty:
+        if sys.stdout.isatty():
             self.terminal.write("\r" + self.line())
             if self.count["done"] == self.count["total"]:
                 self.terminal.write("\n")
@@ -124,6 +140,9 @@ class Progress:
         self.terminal.write_line(f"  {dim}Slowest tests:{reset}")
         for duration, nodeid in sorted(self.durations, reverse=True)[:SLOWEST]:
             self.terminal.write_line(f"  {dim}{duration:6.2f} s  {nodeid}{reset}")
+        self.terminal.write_line(f"  {dim}Slowest modules (sum of their tests):{reset}")
+        for module, duration in sorted(self.modules.items(), key=lambda item: -item[1])[:SLOWEST_MODULES]:
+            self.terminal.write_line(f"  {dim}{duration:6.2f} s  {module}{reset}")
 
 
 @pytest.hookimpl(trylast=True)
@@ -134,6 +153,7 @@ def pytest_configure(config: pytest.Config) -> None:
         config: The pytest configuration.
     """
     terminal = config.pluginmanager.get_plugin("terminalreporter")
-    if terminal is None or os.environ.get("PYTEST_PROGRESS") == "0":
+    worker = hasattr(config, "workerinput")  # pytest-xdist worker: the controller draws
+    if terminal is None or worker or os.environ.get("PYTEST_PROGRESS") == "0":
         return
     config.pluginmanager.register(Progress(terminal), "pytest-progress-bar")
