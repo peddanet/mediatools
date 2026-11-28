@@ -285,7 +285,7 @@ class Shrinker:
         base.ratio = self.state["throughput"].ratio()
         base.freed = self._freed_overall
         ledger = self.state["ledger"]
-        base.recent = RecentSpeed(ledger).rate if ledger is not None else None
+        base.recent = RecentSpeed(ledger, self._own_rows()).rate if ledger is not None else None
         self.display.base = self.state["base"]
         if self.control is not None:
             self.display.status_path = self.control.status_file
@@ -465,6 +465,20 @@ class Shrinker:
         if self.display is not None:
             self.display.file_done(item.size)
         self._job_progress(item.size, item.path)
+
+    def _own_rows(self) -> Callable[[LedgerRow], bool] | None:
+        """Return the test which ledger rows belong to this run's job.
+
+        Returns:
+            The job's :meth:`JobSpec.matches`; without a job the rows of this
+            session; None when neither is known (every row counts).
+        """
+        job, session = self.state["job"], self.state["session"]
+        if job is not None:
+            return job.matches
+        if session:
+            return lambda row: row.session == session
+        return None
 
     def _freed_overall(self) -> int:
         """Return the bytes freed by shrinking in all sessions, this process included.

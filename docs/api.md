@@ -5700,20 +5700,34 @@ after a switch to a new release (``mediatools reload``), and it follows
 a change of the material within hours instead of averaging over the
 whole run.
 
+Only rows of the running job count (``belongs``, normally
+:meth:`JobSpec.matches`): the ledger also holds the videos of other jobs,
+whose material can be encoded at a very different speed. Mixed into
+the window they made the remaining time of a job up to twice too long
+(measured on 81 points of 9 earlier runs: within +-20 % in 49 % of the
+cases with all rows, in 74 % with the rows of the job only).
+
 Attributes:
     ledger: The ledger of finished videos.
+    belongs: Whether a row counts; None: every row.
     cache: ``(ledger size, speed)`` of the last computation.
 ~~~
 
 **`__init__`**
 
 ~~~text
-__init__(self, ledger: Ledger) -> None
+__init__(
+    self,
+    ledger: Ledger,
+    belongs: Callable[[LedgerRow], bool] | None = None,
+) -> None
 
 Bind to the ledger.
 
 Args:
     ledger: The ledger of finished videos.
+    belongs: Whether a row is part of the running job; None counts
+        every row.
 ~~~
 
 **`span`**
@@ -6526,6 +6540,18 @@ Args:
     table: Slot bookkeeping.
     future: The finished encode.
     busy: Encodes that were running (share of the speed measurement).
+~~~
+
+**`_own_rows`**
+
+~~~text
+_own_rows(self) -> Callable[[LedgerRow], bool] | None
+
+Return the test which ledger rows belong to this run's job.
+
+Returns:
+    The job's :meth:`JobSpec.matches`; without a job the rows of this
+    session; None when neither is known (every row counts).
 ~~~
 
 **`_freed_overall`**

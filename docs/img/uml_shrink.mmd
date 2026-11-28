@@ -314,8 +314,9 @@ classDiagram
   }
   class RecentSpeed {
     +ledger
+    +belongs
     +cache
-    +init(ledger)
+    +init(ledger, belongs)
     +span(row)
     +busy(spans)
     +rate()
@@ -396,6 +397,7 @@ classDiagram
     -_start_free_slots(pool, table, pending)
     -_progress_into(cell)
     -_collect(table, future, busy)
+    -_own_rows()
     -_freed_overall()
     -_report_plan(todo, total, rate)
     -_attach_bar_filter()
@@ -588,8 +590,9 @@ classDiagram
   ProgressReport ..> ShrinkDatabase
   ProgressReport --> ThroughputLog
   QueueCommand --> ShrinkQueue
+  RecentSpeed ..> JobSpec
   RecentSpeed --> Ledger
-  RecentSpeed ..> LedgerRow
+  RecentSpeed --> LedgerRow
   ResultTable ..> FileResult
   SavingsLog ..> Savings
   Shrinker ..> FileResult

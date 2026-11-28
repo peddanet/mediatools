@@ -361,8 +361,8 @@ space  session since 2026-11-12 04:56: 32.6 GiB read -> 5.2 GiB written = 27.4 G
 
 The first line counts source GiB: what was *read* since the first shrink
 log (all sessions) and what is still *to go*; percentage and ETA follow from these (the ETA divides
-the source GiB to go by the speed of the last three hours of running time;
-pauses do not count). The size after shrinking is
+the source GiB to go by the speed of the last three hours of running time
+of the same job; pauses and other jobs do not count). The size after shrinking is
 given in brackets; the space line shows written and freed space. A session
 lasts from `mediatools shrink` until the run ends and survives `mediatools
 reload`. `mediatools savings` lists the freed space per session
@@ -816,6 +816,7 @@ Documentation:
 | [`docs/handbook.md`](docs/handbook.md) | user handbook: installation, every subcommand, safety design |
 | [`docs/developer.md`](docs/developer.md) | architecture, UML class/sequence/state/activity diagrams, data formats, testing, release |
 | [`docs/api.md`](docs/api.md) | API reference generated from the docstrings |
+| [`docs/eta.md`](docs/eta.md) | how the remaining time (ETA) of a shrink job is estimated: variables, running time, backtest, proposed model |
 
 ## License
 
