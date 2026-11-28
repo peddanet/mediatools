@@ -5,6 +5,8 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-28
+
 ### Added
 - `mediatools update` rings the terminal bell and raises a desktop notice
   (`notify-send`, if installed) before its question, so it does not wait
