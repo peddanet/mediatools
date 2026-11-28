@@ -648,7 +648,7 @@ known". The time in the line "to encode" is computed once, when the plan
 is made, and therefore marked "(at plan time)"; it does not change. During
 the run the remaining time (ETA) of the progress display takes over: the
 bytes still to go divided by the speed of the last three hours of running
-time.
+time of the same job.
 Leftover folders are listed one by one with `-v`; answering "no" keeps
 them.
 
@@ -729,7 +729,11 @@ shrinking in brackets, and the source GiB still to go in this run's plan;
 the percentage is read / (read + to go), the ETA the GiB to go divided by
 the speed of the recent **running time**: the source bytes of the newest
 finished videos over the time in which they were encoded, taken back
-until three hours of running time are covered (from the ledger). Time in
+until three hours of running time are covered (from the ledger). Only
+videos of the running job count (its folder and filters; without a job, the
+videos of this session): another job's material can be encoded at a very
+different speed, and mixed in it made the ETA up to twice too long (all
+variables, the measurement and a proposed model: `docs/eta.md`). Time in
 which nothing was encoded - a stop, a crash, a suspended process
 (Ctrl+Z), the planning phase - does not count, and the speed does not
 start again after a `mediatools reload`. Earlier releases divided by

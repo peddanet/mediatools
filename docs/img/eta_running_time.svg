@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="330" viewBox="0 0 900 330" font-family="DejaVu Sans, sans-serif" font-size="14">
+  <title>Running time: union of encode intervals</title>
+  <rect width="900" height="330" fill="#ffffff"/>
+  <!-- time axis -->
+  <line x1="60" y1="270" x2="860" y2="270" stroke="#444" stroke-width="1.5"/>
+  <polygon points="860,270 850,265 850,275" fill="#444"/>
+  <text x="866" y="275" fill="#444">t</text>
+  <g fill="#444" font-size="12" text-anchor="middle">
+    <line x1="100" y1="266" x2="100" y2="274" stroke="#444"/><text x="100" y="290">0 s</text>
+    <line x1="260" y1="266" x2="260" y2="274" stroke="#444"/><text x="260" y="290">100 s</text>
+    <line x1="420" y1="266" x2="420" y2="274" stroke="#444"/><text x="420" y="290">200 s</text>
+    <line x1="580" y1="266" x2="580" y2="274" stroke="#444"/><text x="580" y="290">300 s</text>
+    <line x1="740" y1="266" x2="740" y2="274" stroke="#444"/><text x="740" y="290">400 s</text>
+  </g>
+  <!-- slot labels -->
+  <text x="20" y="62" fill="#185FA5" font-weight="bold">slot 1</text>
+  <text x="20" y="112" fill="#0F6E56" font-weight="bold">slot 2</text>
+  <!-- slot 1: file A 0-100, file C 100-180 -->
+  <rect x="100" y="45" width="160" height="26" rx="4" fill="#185FA5"/>
+  <text x="180" y="63" fill="#fff" text-anchor="middle">file A: 100 s</text>
+  <rect x="260" y="45" width="128" height="26" rx="4" fill="#4F8FCF"/>
+  <text x="324" y="63" fill="#fff" text-anchor="middle">file C: 80 s</text>
+  <!-- slot 2: file B 20-140 -->
+  <rect x="132" y="95" width="192" height="26" rx="4" fill="#0F6E56"/>
+  <text x="228" y="113" fill="#fff" text-anchor="middle">file B: 120 s</text>
+  <!-- pause 180-300 -->
+  <rect x="388" y="40" width="192" height="86" fill="#F3E4C8" stroke="#BA7517" stroke-dasharray="5,4"/>
+  <text x="484" y="80" fill="#8A5510" text-anchor="middle">pause / stop</text>
+  <text x="484" y="100" fill="#8A5510" text-anchor="middle">(not counted)</text>
+  <!-- slot 1: file D 300-400 -->
+  <rect x="580" y="45" width="160" height="26" rx="4" fill="#185FA5"/>
+  <text x="660" y="63" fill="#fff" text-anchor="middle">file D: 100 s</text>
+  <!-- union bar -->
+  <text x="20" y="180" fill="#A32D2D" font-weight="bold">union</text>
+  <rect x="100" y="163" width="288" height="26" rx="4" fill="#A32D2D"/>
+  <text x="244" y="181" fill="#fff" text-anchor="middle">0 - 180 s: 180 s</text>
+  <rect x="580" y="163" width="160" height="26" rx="4" fill="#A32D2D"/>
+  <text x="660" y="181" fill="#fff" text-anchor="middle">300 - 400 s: 100 s</text>
+  <text x="100" y="230" fill="#222">sum of encode times = 100 + 120 + 80 + 100 = 400 s</text>
+  <text x="100" y="250" fill="#222">running time (union) = 180 + 100 = 280 s     wall time = 400 s (incl. 120 s pause)</text>
+</svg>
