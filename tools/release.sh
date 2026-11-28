@@ -12,12 +12,14 @@
 #
 # The script looks at the current branch and does what fits it:
 #
-#   feature/<name>  rebases the branch onto develop and runs the quality
-#                   gates. Then it asks "Build the release now?": n asks
-#                   whether to merge it into develop only (collect further
-#                   features first), y merges it and releases at once.
-#                   Merging means: push the branch, pull request into
-#                   develop, wait for the required checks, merge.
+#   feature/<name>  rebases the branch onto develop and asks "Build the
+#                   release now?": y merges it into develop and releases at
+#                   once (gates once, on the release); n runs the gates and
+#                   asks whether to merge it into develop only (collect
+#                   further features first). Merging means: merge locally
+#                   (--no-ff), push that commit as the feature branch, pull
+#                   request into develop, wait for its required checks, push
+#                   the same commit to develop.
 #   develop         releases the features collected on develop: asks for
 #                   the version part (default minor) and the release message.
 #   hotfix/<name>   releases an urgent fix, always as a patch, into main and
@@ -35,13 +37,17 @@
 #      (CHANGELOG.md must describe the change under "## [Unreleased]") on a
 #      short-lived branch release/X.Y.Z (develop) or on the hotfix branch,
 #   3. runs all quality gates (tools/check.sh) BEFORE anything is pushed,
-#   4. asks once, then: pull request into main, required checks, merge with
+#   4. builds locally, as the Forgejo variant: --no-ff merge into main with
 #      the message "<tool> X.Y.Z: <release message>", annotated tag vX.Y.Z
-#      with the same text on that merge, release check of the tag,
-#   5. brings develop up to main through the helper branch merge/vX.Y.Z and
-#      a pull request, and checks with tools/same-code.sh that main, develop
-#      and the tag hold bit-identical code (after a hotfix while develop
-#      collects features: main and the tag),
+#      with the same text, develop moved to the same commit (a hotfix while
+#      develop collects features: develop gets it through a merge),
+#   5. asks once, then: pushes that commit as release/X.Y.Z (or the hotfix
+#      branch), pull request into main, waits for its required checks - one
+#      CI run on exactly the commit that is published - and pushes it to
+#      main and develop together with the tag (git push --atomic, never
+#      forced); release check of the tag; tools/same-code.sh checks that
+#      main, develop and the tag are bit-identical (after a hotfix while
+#      develop collects features: main and the tag),
 #   6. asks before ./install.sh vX.Y.Z, shows the installed version and runs
 #      tools/after-install.sh vX.Y.Z if the project has one.
 #
@@ -55,7 +61,17 @@
 #   -h, --help         this text
 #
 # Nothing leaves the machine before a question is answered with y (or
-# --yes). If a step fails, the script stops and prints what is left to do.
+# --yes). If a step fails, the script stops and prints what is left to do;
+# before the publishing push it puts local main and develop back to the
+# state of origin (they held only this run's merges).
+#
+# GitHub refuses the direct push when a rule wants pull requests: then the
+# script merges the pull request instead (gh pr merge), tags GitHub's merge
+# commit and brings develop up through merge/vX.Y.Z and a pull request, as
+# up to bundle v20 (one more CI run). When main or develop on origin moved
+# while the run waited (somebody else pushed), it publishes nothing: the
+# new state has to be gated and checked again. Every question rings the
+# terminal bell and raises a desktop notice (attention in tools/output.sh).
 #
 # Runs as a normal user; needs git with access to origin and the GitHub CLI
 # gh, logged in (gh auth login). CHECK_CMD replaces tools/check.sh,
@@ -92,9 +108,9 @@
 # --log-failed, last 40 lines). The CI run of a tag is watched the same way.
 #
 # Only the REQUIRED checks of a pull request count (gh pr checks --required):
-# when develop holds nothing new, merge/vX.Y.Z is the tagged commit itself,
-# and its finished tag run (release check, skipped gates) would otherwise
-# look like finished checks of the pull request (session-snap 2.1.4).
+# a commit can also carry the finished run of a tag (release check, skipped
+# gates), which must not look like finished checks of the pull request
+# (session-snap 2.1.4).
 #
 # gh versions: the script uses only "gh pr checks" without --json (its
 # tab-separated output; Ubuntu 24.04 ships gh 2.45, which has no --json for
@@ -174,8 +190,13 @@ finish() {
         info "${R}${B}FAILED${X}  the message above names what is unchanged and how to undo"
     fi
 }
+LOCAL_ONLY=false   # true while main/develop hold local merges not yet on origin
 on_exit() {
     local code=$?
+    if ((code)) && $LOCAL_ONLY; then
+        undo_local
+        note "local main and develop are back at the state of origin; $WORK keeps its commits"
+    fi
     summary
     finish "$code"
 }
@@ -185,6 +206,7 @@ trap on_exit EXIT
 ask() {
     local answer="" begin=$SECONDS
     if $YES; then echo "$1 [y/N] y"; return 0; fi
+    attention "$1"
     read -r -p "$1 [y/N] " answer || answer=""
     record "Answer to: $1" $((SECONDS - begin))
     [[ "$answer" =~ ^[jJyY]$ ]]
@@ -564,9 +586,78 @@ LAST="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' main 2>/d
 grep -q "^__version__ = \"${LAST#v}\"$" "$INIT" \
     || die "$INIT does not say ${LAST#v} (version of $LAST) - was it changed by hand?"
 
-# --- feature: rebase, gates, merge into develop ----------------------------------
+# --- where origin stood at the start (parallel work, see publish) -------------------
+ORIGIN_MAIN="$(git rev-parse origin/main)"
+ORIGIN_DEVELOP="$(git rev-parse origin/develop)"
+WORK="$BRANCH"     # the branch the run started on; it keeps its commits in every case
+TAG="" RB="" MB="" PR_MAIN="" PR_DEVELOP=""
+
+# undo_local - main and develop back where origin had them at the start, the tag
+# and the helper branch of this run deleted; the work branch keeps its commits
+undo_local() {
+    git switch --quiet "$WORK" 2>/dev/null || true
+    if [[ "$WORK" == develop ]]; then
+        git reset --quiet --hard "$ORIGIN_DEVELOP"
+    else
+        git branch --quiet -f develop "$ORIGIN_DEVELOP"
+    fi
+    git branch --quiet -f main "$ORIGIN_MAIN"
+    [[ -z "$TAG" ]] || git tag -d "$TAG" >/dev/null 2>&1 || true
+    [[ -z "$RB" || "$RB" == "$WORK" ]] || git branch -q -D "$RB" 2>/dev/null || true
+}
+
+# start_check BRANCH COMMIT BASE TITLE - push COMMIT as BRANCH and open (or find)
+# its pull request into BASE; its number goes to PR. The required checks then
+# run on exactly the commit that publish puts on BASE.
+PR=""
+start_check() {
+    timed "Push $1" git push --quiet --force-with-lease origin "$2:refs/heads/$1"
+    PR="$(pull_request "$1" "$3" "$4")"
+    info "Pull Request #$PR: $1 -> $3 ($(git rev-parse --short "$2"))"
+}
+
+# moved - succeeds when main or develop on origin changed since the start
+moved() {
+    git fetch --quiet origin
+    [[ "$(git rev-parse origin/main)" != "$ORIGIN_MAIN" \
+        || "$(git rev-parse origin/develop)" != "$ORIGIN_DEVELOP" ]]
+}
+
+# publish REFSPEC... - put the checked commits straight onto main/develop (and
+# the tag), all or nothing (--atomic), never forced. Returns 1 when GitHub
+# refused (branch protection that wants pull requests); stops when origin
+# moved meanwhile (somebody else pushed): then nothing is published and the
+# new state must be gated and checked again.
+publish() {
+    local out code=0
+    out="$(git push --atomic origin "$@" 2>&1)" || code=$?
+    if ((code)) && [[ "$out" == *"does not support --atomic"* ]]; then
+        code=0
+        out="$(git push origin "$@" 2>&1)" || code=$?
+    fi
+    ((code)) || return 0
+    if moved; then
+        undo_local
+        die "main or develop changed on origin while this run waited (parallel work) - nothing
+was published; local main and develop are back at the state of origin, $WORK keeps its commits.
+Start tools/release.sh again: the new state is gated and checked in full"
+    fi
+    printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 6 | while IFS= read -r line; do detail "$line"; done
+    return 1
+}
+
+# drop_remote BRANCH... - delete helper branches on origin (their pull requests
+# count as merged once their commit is on the base branch)
+drop_remote() {
+    local branch
+    for branch in "$@"; do
+        [[ -z "$branch" ]] || git push --quiet origin --delete "$branch" 2>/dev/null || true
+    done
+}
+
+# --- feature: rebase, then merge into develop or release at once --------------------
 if [[ "$KIND" == feature ]]; then
-    title "Integrate $BRANCH"
+    title "Feature $BRANCH · step 1/3 · local: rebase onto develop"
     info "Feature $BRANCH: rebase onto develop"
     if ! git rebase --quiet develop; then
         git rebase --abort
@@ -574,8 +665,6 @@ if [[ "$KIND" == feature ]]; then
   git rebase develop   (fix the files, git add ..., git rebase --continue)
 and start tools/release.sh again"
     fi
-    # shellcheck disable=SC2086  # CHECK_CMD may carry arguments
-    timed "Gates $BRANCH" $CHECK_CMD || die "quality gates failed on $BRANCH - develop is unchanged"
     if $MERGE_ONLY; then
         RELEASE=false
     elif [[ -n "$PART" ]] || ask "Build the release now?"; then
@@ -583,15 +672,43 @@ and start tools/release.sh again"
     else
         RELEASE=false
     fi
-    if ! $RELEASE && ! $MERGE_ONLY && ! ask "Merge $BRANCH into develop (push, PR, checks)?"; then
-        note "Not pushed; develop is unchanged. Later: tools/release.sh on $BRANCH"
+    if ! $RELEASE; then
+        # shellcheck disable=SC2086  # CHECK_CMD may carry arguments
+        timed "Gates $BRANCH" $CHECK_CMD || die "quality gates failed on $BRANCH - develop is unchanged"
+        if ! $MERGE_ONLY && ! ask "Merge $BRANCH into develop (push, PR, checks)?"; then
+            note "Not pushed; develop is unchanged. Later: tools/release.sh on $BRANCH"
+            exit 0
+        fi
+        git switch --quiet develop
+        git merge --quiet --no-ff "$BRANCH" -m "Merge $BRANCH into develop"
+        LOCAL_ONLY=true
+        INTEGRATED="$(git rev-parse develop)"
+        title "Feature $BRANCH · step 2/3 · GitHub: required checks of $(git rev-parse --short "$INTEGRATED")"
+        start_check "$BRANCH" "$INTEGRATED" develop "Merge $BRANCH into develop"
+        PR_DEVELOP="$PR"
+        checks "$PR_DEVELOP"
+        title "Feature $BRANCH · step 3/3 · publish: develop"
+        if timed "Push develop" publish "$INTEGRATED:refs/heads/develop"; then
+            info "develop is $(git rev-parse --short "$INTEGRATED"), the commit GitHub checked"
+        else
+            note "GitHub refused the direct push (a rule wants pull requests) - merging pull request #$PR_DEVELOP instead"
+            timed "Merge of PR #$PR_DEVELOP" merge_pull_request "$PR_DEVELOP" "Merge $BRANCH into develop"
+            LOCAL_ONLY=false
+            git fetch --quiet origin
+            git merge --quiet --ff-only origin/develop
+        fi
+        LOCAL_ONLY=false
+        drop_remote "$BRANCH"
+        pass "$BRANCH is merged into develop" ""
+        DONE_TEXT="$BRANCH is merged into develop"
+        note "Delete the local feature branch with: git branch -d $BRANCH"
         exit 0
     fi
-    integrate "$BRANCH" develop "Merge $BRANCH into develop"
-    pass "$BRANCH is merged into develop" ""
-    DONE_TEXT="$BRANCH is merged into develop"
-    note "Delete the local feature branch with: git branch -d $BRANCH"
-    $RELEASE || exit 0
+    # release at once: the feature joins develop here, the gates run once on the release
+    git switch --quiet develop
+    git merge --quiet --no-ff "$BRANCH" -m "Merge $BRANCH into develop"
+    LOCAL_ONLY=true
+    info "$BRANCH is merged into develop (local; published with the release)"
     KIND=develop
     BRANCH=develop
 fi
@@ -608,6 +725,7 @@ must start from main: git switch -c hotfix/<name> main  (then git cherry-pick th
 fi
 if [[ -z "$PART" ]]; then
     if $YES; then PART=minor; else
+        attention "Release part patch/minor/major?"
         begin=$SECONDS
         read -r -p "Release part patch/minor/major [minor]: " PART || PART=""
         record "Answer to: release part" $((SECONDS - begin))
@@ -619,32 +737,39 @@ case "$PART" in
     patch) PATCH=$((PATCH + 1)) ;;
     minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
     major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-    *)     die "release part must be patch, minor or major, not '$PART'" ;;
+    *)     undo_local; die "release part must be patch, minor or major, not '$PART'" ;;
 esac
 VERSION="$MAJOR.$MINOR.$PATCH"
-TAG="v$VERSION"
-git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 \
-    && die "tag $TAG exists already on origin"
-git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG exists already"
-awk '/^## \[Unreleased\]/ { inside = 1; next } /^## \[/ { inside = 0 }
-     inside && NF { found = 1 } END { exit !found }' "$CHANGELOG" \
-    || die "$CHANGELOG: nothing under ## [Unreleased] - describe the change first"
+if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1 \
+    || git rev-parse --quiet --verify "refs/tags/v$VERSION" >/dev/null; then
+    undo_local
+    die "tag v$VERSION exists already"
+fi
+if ! awk '/^## \[Unreleased\]/ { inside = 1; next } /^## \[/ { inside = 0 }
+          inside && NF { found = 1 } END { exit !found }' "$CHANGELOG"; then
+    undo_local
+    die "$CHANGELOG: nothing under ## [Unreleased] - describe the change first"
+fi
 if [[ -z "$MESSAGE" ]]; then
+    attention "Release message (one line)?"
     begin=$SECONDS
     read -r -p "Release message (one line): " MESSAGE || MESSAGE=""
     record "Answer to: release message" $((SECONDS - begin))
 fi
-[[ -n "${MESSAGE//[[:space:]]/}" ]] || die "the release message is empty"
+if [[ -z "${MESSAGE//[[:space:]]/}" ]]; then undo_local; die "the release message is empty"; fi
 SUBJECT="$TOOL $VERSION: $MESSAGE"
-title "Release $TAG"
-info "Release: $LAST -> $TAG from $BRANCH - $MESSAGE"
+title "Release v$VERSION · step 1/3 · local: release commit, gates, merge"
+info "Release: $LAST -> v$VERSION from $BRANCH - $MESSAGE"
 
 if [[ "$KIND" == develop ]]; then
     RB="release/$VERSION"
-    git rev-parse --quiet --verify "refs/heads/$RB" >/dev/null \
-        && die "branch $RB exists already (left by an earlier run?) - delete it: git branch -D $RB"
+    if git rev-parse --quiet --verify "refs/heads/$RB" >/dev/null; then
+        RB=""
+        undo_local
+        die "branch release/$VERSION exists already (left by an earlier run?) - delete it: git branch -D release/$VERSION"
+    fi
     git switch --quiet -c "$RB" develop
-    DROP="git switch develop && git branch -D $RB"
+    DROP="git switch $WORK && git branch -D $RB"
 else
     RB="$BRANCH"
     DROP="git switch $BRANCH && git reset --hard origin/$BRANCH 2>/dev/null || git reset --hard HEAD~1"
@@ -654,40 +779,105 @@ sed -i "0,/^## \[Unreleased\]$/s//## [Unreleased]\n\n## [$VERSION] - $(date +%F)
 # shellcheck disable=SC2086  # CHECK_CMD may carry arguments
 if ! timed "Gates $RB" $CHECK_CMD; then
     git checkout -- "$INIT" "$CHANGELOG"
-    if [[ "$KIND" == develop ]]; then git switch --quiet develop; git branch -D "$RB" >/dev/null; fi
+    undo_local
     die "quality gates failed - nothing was released; main and develop are as before"
 fi
 git commit --quiet -am "$TOOL $VERSION"
 
-# --- release: pull request into main, tag ----------------------------------------
+# main, the tag and develop are built here, as on Forgejo; GitHub then checks
+# the commit of main once and receives exactly that commit
+TAG="v$VERSION"
+LOCAL_ONLY=true
+git switch --quiet main
+git merge --quiet --no-ff "$RB" -m "$SUBJECT"
+git tag -a "$TAG" -m "$SUBJECT"
+RELEASED="$(git rev-parse main)"
+git switch --quiet develop
+DEVELOP_TO="$RELEASED"     # empty: develop stays (conflict); else the commit for develop
+if [[ "$KIND" == hotfix && "$(git rev-parse develop)" != "$ORIGIN_MAIN" ]]; then
+    # develop collects unreleased features: it gets the hotfix through a merge
+    if git merge --quiet --no-ff main -m "Merge $TAG into develop" >/dev/null 2>&1; then
+        DEVELOP_TO="$(git rev-parse develop)"
+    else
+        git merge --abort
+        DEVELOP_TO=""
+    fi
+else
+    git merge --quiet --ff-only main
+fi
+git switch --quiet "$RB"
+
 echo
-if ! ask "Push $RB, merge it into main and publish $TAG?"; then
-    note "Not pushed. Discard with: $DROP"
+if ! ask "Publish $TAG (GitHub checks it once, then main, develop and the tag)?"; then
+    KEEP="$RB" RB=""         # the release commit stays on its branch for later
+    undo_local
+    git switch --quiet "$KEEP"
+    note "Not pushed; the tag was not kept. Discard with: $DROP"
     exit 0
 fi
-integrate "$RB" main "$SUBJECT"
-[[ "$(tree main)" == "$(tree "$RB")" ]] \
-    || die "main after the merge differs from $RB - check on GitHub before tagging"
-git tag -a "$TAG" -m "$SUBJECT"
-timed "Push $TAG" git push --quiet origin "$TAG"
+
+# --- release: GitHub checks the commits -----------------------------------------
+title "Release $TAG · step 2/3 · GitHub: required checks of $(git rev-parse --short "$RELEASED")"
+start_check "$RB" "$RELEASED" main "$SUBJECT"
+PR_MAIN="$PR"
+if [[ -n "$DEVELOP_TO" && "$DEVELOP_TO" != "$RELEASED" ]]; then
+    # a hotfix while develop collects: a second state, checked at the same time
+    MB="merge/$TAG"
+    start_check "$MB" "$DEVELOP_TO" develop "Merge $TAG into develop"
+    PR_DEVELOP="$PR"
+fi
+checks "$PR_MAIN"
+[[ -z "$PR_DEVELOP" ]] || checks "$PR_DEVELOP"
+
+# --- release: publish -------------------------------------------------------------
+title "Release $TAG · step 3/3 · publish: main, develop and $TAG"
+REFS=("$RELEASED:refs/heads/main" "refs/tags/$TAG")
+[[ -z "$DEVELOP_TO" ]] || REFS+=("$DEVELOP_TO:refs/heads/develop")
+if timed "Push main, develop and $TAG" publish "${REFS[@]}"; then
+    LOCAL_ONLY=false
+    DIRECT=true
+    info "main and $TAG are $(git rev-parse --short "$RELEASED"), the commit GitHub checked"
+    git fetch --quiet origin
+    drop_remote "$RB" "$MB"
+else
+    DIRECT=false
+    note "GitHub refused the direct push (a rule wants pull requests) - merging pull request #$PR_MAIN instead"
+    git tag -d "$TAG" >/dev/null
+    timed "Merge of PR #$PR_MAIN" merge_pull_request "$PR_MAIN" "$SUBJECT"
+    LOCAL_ONLY=false
+    git fetch --quiet origin
+    git switch --quiet main
+    git merge --quiet --ff-only origin/main
+    [[ "$(tree main)" == "$(tree "$RELEASED")" ]] \
+        || die "main after the merge differs from the checked commit - check on GitHub before tagging"
+    git tag -a "$TAG" -m "$SUBJECT"
+    timed "Push $TAG" git push --quiet origin "$TAG"
+    drop_remote "$RB"
+fi
 info "Release check of $TAG ..."
 tag_check "$TAG"
 pass "$TAG is published" ""
 DONE_TEXT="$TAG is published"
 
-# --- back into develop -------------------------------------------------------------
-MB="merge/$TAG"
-git switch --quiet -C "$MB" main
-if ! git merge --quiet --no-ff develop -m "Merge develop into $MB" >/dev/null; then
-    git merge --abort
-    git switch --quiet main
-    die "$TAG is released, but merging it back into develop has conflicts. Finish by hand:
+# --- back into develop: only when the direct push was refused, or on a conflict -----
+if [[ -z "$DEVELOP_TO" ]] || ! $DIRECT; then
+    MB="merge/$TAG"
+    git switch --quiet develop
+    git reset --quiet --hard "$ORIGIN_DEVELOP"
+    git switch --quiet -C "$MB" main
+    if ! git merge --quiet --no-ff develop -m "Merge develop into $MB" >/dev/null; then
+        git merge --abort
+        git switch --quiet main
+        die "$TAG is released, but merging it back into develop has conflicts. Finish by hand:
   git switch $MB && git merge --no-ff develop   (fix the files, git add ..., git commit)
   git push -u origin $MB && gh pr create --base develop --head $MB --fill
 then merge the pull request once its checks are green"
+    fi
+    integrate "$MB" develop "Merge $TAG into develop"
+    git branch -q -D "$MB" 2>/dev/null || true
 fi
-integrate "$MB" develop "Merge $TAG into develop"
-git branch -q -D "$MB" "$RB" 2>/dev/null || true
+git switch --quiet develop
+[[ "$RB" == "$WORK" ]] || git branch -q -D "$RB" 2>/dev/null || true
 
 # --- bit-identical? --------------------------------------------------------------
 echo

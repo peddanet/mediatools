@@ -1,28 +1,34 @@
 name: quality-gates
 
 # Branching model (see CONTRIBUTING.md):
-#   feature/*  -> pull request into develop
+#   feature/*  -> merged into develop
 #   develop    -> integration; release merge into main
 #   main       -> releases only, every release is an annotated tag vX.Y.Z
 #
 # Which event runs what (see docs/developer.md, "CI runs"):
-#   pull_request into main/develop  gates on the merge result; required check
-#   push of a tag v*                 release-check only: the tagged merge commit has
-#                                    the tree its pull request already tested
-#                                    (branch protection: strict), so the gates
-#                                    would only repeat that run
+#   pull_request into main/develop  gates; required check. Since dev-conventions
+#                                    bundle v21 tools/release.sh builds merges,
+#                                    release commit and tag locally, opens the pull
+#                                    request only for these checks and then pushes
+#                                    exactly the checked commit to main/develop
+#                                    (one CI run per release)
+#   push of a tag v*                 release-check only: the tagged commit is the
+#                                    one its pull request already tested, so the
+#                                    gates would only repeat that run
 # Python versions: the oldest supported (requires-python) and the newest; the
 # pre-push hook on the developer's PC covers the version in between.
 # Branch pushes start no run: work branches are checked through their pull
-# request, and a merge into main/develop has the tree its pull request
-# already tested (branch protection: strict, no direct pushes).
+# request, and the push to main/develop carries the commit its pull request
+# already tested (branch protection: required checks from GitHub Actions).
 # A branch without a pull request: gh workflow run quality-gates --ref BRANCH
 # Every gate is its own step "gate: <name>" (tools/check.sh --only <name>,
-# dev-conventions bundle v20, templates/ci.yml), so the GitHub page and the
+# dev-conventions bundle v21, templates/ci.yml), so the GitHub page and the
 # watcher of tools/release.sh show which gate runs or failed; the work is the
 # same as one tools/check.sh run. With CI=true the privacy scan skips itself
 # (no local terms on GitHub) and the check cache always checks in full;
-# FORCE_COLOR=1 keeps the colours in the GitHub log.
+# the tests use all threads of the runner (pytest-xdist; 4 on a public
+# repository) and skip the tests of unchanged bundle files
+# (tools/bundle.sha256); FORCE_COLOR=1 keeps the colours in the GitHub log.
 on:
   push:
     tags: ["v*"]

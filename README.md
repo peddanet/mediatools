@@ -786,8 +786,8 @@ Inside the development venv `mediatools` runs the code of the clone, and
 (`~/.local/bin/mediatools`) is not affected by anything in the clone.
 
 Branching: `main` holds releases only (tag `vX.Y.Z`), `develop` integrates,
-work happens on `feature/*` branches; `tools/release.sh` merges them
-through pull requests and publishes releases.
+work happens on `feature/*` branches; `tools/release.sh` merges them,
+lets GitHub check the result once and publishes releases.
 Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Coding standard: one class per module, Google-style docstrings for every

@@ -279,6 +279,8 @@ def test_shrink_tab_default_division(root: tk.Tk, tmp_path: Path, datadir: Path)
     panel = ShrinkPanel(ttk.PanedWindow(root), refresh_ms=0)
     assert not app.layout_shrink(panes, panel)                       # too small: unchanged
     MediaToolsApp.fit_status(ttk.PanedWindow(root), status)          # not shown: no error
+    root.geometry("1280x900")                                        # Tk 8.6: a window left this small
+    root.update()                                                    # crashed focus in the next Tk()
 
 
 def test_window_size_follows_the_screen() -> None:

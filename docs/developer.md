@@ -63,7 +63,7 @@ mediatools/
   src/mediatools/gui/       Tk window (mediatools gui)
   tests/                    pytest suite
   tools/check.sh            quality gates (activates the development venv itself)
-  tools/release.sh          integration and releases through pull requests (git-flow)
+  tools/release.sh          integration and releases, one CI run each (git-flow)
   tools/same-code.sh        bit-identity check of branches and tags (tree hashes)
   tools/review.sh           four-eyes review of two refs in Beyond Compare
   tools/output.sh           shared console look (title, stage, PASS/FAIL/SKIP, bar)
@@ -541,17 +541,49 @@ sudo apt install shellcheck             # once: gate "shell" (apt writes to /usr
 tools/check.sh                          # all gates
 tools/check.sh --fast                   # without the test gate
 tools/check.sh --only lint              # one gate (CI runs one step per gate)
+tools/check.sh --yes                    # no question: tests on the free threads
 ~~~
 
 The output follows the common console look of all tool projects
-(dev-conventions bundle v20, `tools/output.sh`): a block title with commit
+(dev-conventions bundle v21, `tools/output.sh`): a block title with commit
 and Python version, one numbered stage per gate (`▶ [4/7] lint`) with one
 result line (`✔ PASS` / `✘ FAIL` / `– SKIP`, one fact, duration), the end
 of the output of a failing gate, and a result block `DONE` / `FAILED`. The
-test gate shows a progress bar instead of pytest's dots and lists the five
-slowest tests at the end (`tools/pytest_progress.py`, loaded by
-`tests/conftest.py`; `PYTEST_PROGRESS=0` switches it off). Colours appear
-in a terminal only; `NO_COLOR` switches them off, `FORCE_COLOR` on.
+privacy gate reports its counts (`413 terms, 26 allowed, 0 findings`). The
+test gate shows a progress bar instead of pytest's dots (the last column is
+the module running now; pytest's own `[100%]` is switched off with
+`-o console_output_style=classic`) and lists the five slowest tests and the
+three slowest modules at the end (`tools/pytest_progress.py`, loaded by
+`tests/conftest.py`; `PYTEST_PROGRESS=0` switches it off). The coverage
+table is printed only when the coverage is below 90 %. Colours appear
+in a terminal only; `NO_COLOR` switches them off, `FORCE_COLOR` on. Before
+every question (number of test workers) the terminal bell rings and a
+desktop notice appears (`attention`; `NO_NOTIFY=1` switches the notice off).
+
+**Parallel tests** (dev-conventions bundle v21): pytest-xdist runs the
+tests with `-n N --dist loadscope` (the tests of one module stay on one
+worker). In a terminal `tools/check.sh` asks `N of M threads free (load L)
+- run the tests on N workers? [Y/n]`, where free = threads minus the
+rounded load of the last minute, at least 1; without a terminal (pre-push
+hook, `release.sh --yes`) or with `--yes` it takes the free threads without
+asking; in CI (`CI=true`) all threads of the runner (4 on public
+repositories). `CHECK_WORKERS=N` fixes the number, `CHECK_WORKERS=0` or `1`
+runs them one after another; without pytest-xdist they run one after
+another with a note. All workers share the virtual display of `xvfb-run`.
+Measured in the development sandbox (2 threads): 92 s one after another,
+40 s on 4 workers.
+
+**Tests of unchanged bundle files are skipped.** `tools/bundle.sha256`
+(manifest of the dev-conventions bundle, `sha256sum` format) lists the
+files copied byte for byte (`tools/release.sh`, `tools/output.sh`,
+`tools/same-code.sh`, `tools/review.sh`, `tools/pytest_progress.py`,
+`tools/bundle_tests.py`, `tests/test_release_tools.py`,
+`tests/test_review.py`). While all match, `tools/bundle_tests.py` marks
+the two test files as skipped - they repeat what the dev-conventions
+repository tests at its tag. One changed file runs everything;
+`CHECK_BUNDLE_TESTS=1` runs them anyway; check by hand with
+`sha256sum -c tools/bundle.sha256`. `src/mediatools/update/output.sh` stays
+equal to `tools/output.sh` (a test enforces it).
 
 **Check cache** (dev-conventions `templates/check-cache.sh`): after a full
 green run the key *tree of the working copy + Python version + hash of the
@@ -660,9 +692,9 @@ protection. Since 1.2.13 GitHub starts a run for exactly two events:
 
 | Event | Run on GitHub | Checks | Purpose |
 |---|---|---|---|
-| pull request into `main` or `develop` | `gates (3.12)`, `gates (3.14)` | the **merge result** of the PR branch and its target | required check: the merge button stays locked until all are green |
-| push of a tag `v*` | `release-check` only (since 1.5.1) | tag on `main`, tag = `__version__`; the gates ran on the pull request for the same tree | release gate |
-| push of a branch (any) | none | - | work branches are checked through their PR; a merge into `main`/`develop` has the tree its PR already tested (`strict` protection, no direct pushes) |
+| pull request into `main` or `develop` | `gates (3.12)`, `gates (3.14)` | the commit `tools/release.sh` built locally (release commit or feature merge) | required check: `main`/`develop` take only a commit whose checks passed |
+| push of a tag `v*` | `release-check` only (since 1.5.1) | tag on `main`, tag = `__version__`; the gates ran on the pull request for the same commit | release gate |
+| push of a branch (any) | none | - | work branches are checked through their PR; the direct push to `main`/`develop` carries exactly the commit its PR already tested |
 | `gh workflow run quality-gates --ref BRANCH` | the gates | that branch | manual run for a branch without PR |
 
 The two diagrams show the branches as parallel lanes (`main` = former
@@ -673,8 +705,8 @@ is allowed. The badge on the right names the gate run of the step:
 **LOCAL** = pre-push hook on this PC (one Python version), **CI** = run on
 GitHub (Python 3.12 and 3.14; for a tag only `release-check`), **none** =
 nothing is tested at this step because the pull request tested the same
-tree before. Every step is done by `tools/release.sh` (section "Release
-procedure").
+commit, or the step is local and the next push is checked. Every step is
+done by `tools/release.sh` (section "Release procedure").
 
 ![Feature and release with `tools/release.sh`: which branch goes where, and which run tests it](img/lanes_release.png){width=100%}
 
@@ -682,11 +714,20 @@ procedure").
 
 Count per flow:
 
-| Flow | Local runs | CI runs on GitHub |
+| Flow | Full local gate runs | CI gate runs on GitHub |
 |---|---|---|
-| feature | 2 (gates of `release.sh`, push `feature/x`) | 1 (PR into `develop`) |
-| release | 3 (gates after the version change, push `release/X.Y.Z`, push `merge/vX.Y.Z`) | 3 (PR into `main`, tag, PR into `develop`) |
-| hotfix | 3 (as release, with `hotfix/x`) | 3 |
+| feature only (`--merge-only`) | 1 (gates of `release.sh`; the pre-push hook finds the tree in the check cache: privacy and shell only) | 1 (PR into `develop`) |
+| feature + release, or release of `develop` | 1 (gates on the release tree; pre-push hook as above) | 1 (PR into `main`) + `release-check` of the tag (seconds) |
+| hotfix | 1 | 1, or 2 at the same time while `develop` collects features (second state as `merge/vX.Y.Z`) + `release-check` |
+
+Up to 1.16.0 (dev-conventions bundle v20) a release needed three CI runs
+on two contents (PR into `main`, the tag, `merge/vX.Y.Z` into `develop`),
+because GitHub's merge button wrote a new merge commit that `develop` had to
+receive through a third pull request, plus a second full local run on the
+release tree. Since 1.17.0 everything is built locally and only the
+published commit is checked. If GitHub refuses the direct push (a branch
+rule wants pull requests), `tools/release.sh` falls back to that older way
+and says so (section "Branch protection").
 
 Before 1.2.13 the workflow also ran on every push to `main` and `develop`.
 These two runs per release tested a tree already tested by the pull request
@@ -703,8 +744,8 @@ waited for them, they only made the Actions list harder to read.
 | `develop`     | integration of finished features      | `main`    | `main`             |
 | `feature/<x>` | one feature or fix                    | `develop` | `develop` (PR)     |
 | `hotfix/<x>`  | urgent fix of a release               | `main`    | `main` + `develop` (PR) |
-| `release/X.Y.Z` | short-lived: version and CHANGELOG heading (`release.sh`) | `develop` | `main` (PR) |
-| `merge/vX.Y.Z`  | short-lived: the release back into `develop` (`release.sh`) | `main` | `develop` (PR) |
+| `release/X.Y.Z` | short-lived: carries the locally built release commit to its PR checks (`release.sh`) | `develop` | `main` (PR checks, then direct push) |
+| `merge/vX.Y.Z`  | short-lived: second `develop` state of a hotfix, or the fallback merge back (`release.sh`) | `main` | `develop` (PR) |
 
 **`main` is the branch called `master` in older git-flow texts.** git-flow
 (Driessen, 2010) names the release branch `master`; GitHub creates new
@@ -725,11 +766,15 @@ tag equals `v` + `__version__`.
 
 ## Branch protection
 
-`main` and `develop` are protected on GitHub: changes only by pull request,
-merge only with both `gates` jobs green and the branch up to date, the
-rule applies to administrators too, no force push, no deletion. Set once
-per branch by the repository owner (normal user; `gh` acts with the owner's
-token):
+`main` and `develop` are protected on GitHub: they take only a commit
+whose required checks `gates (3.12)` and `gates (3.14)` passed, reported by
+GitHub Actions (app id 15368; with "any source" anybody with write access
+could set such a status by API), the rule applies to administrators too,
+no force push, no deletion. A pull request is **not** required by the
+classic protection (dev-conventions bundle v21): `tools/release.sh` opens
+one anyway to get the checks, and GitHub then accepts the direct push of
+exactly that commit. Set once per branch by the repository owner (normal
+user; `gh` acts with the owner's token):
 
 ~~~bash
 for branch in develop main; do
@@ -737,10 +782,13 @@ gh api -X PUT "repos/peddanet/mediatools/branches/$branch/protection" --input - 
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["gates (3.12)", "gates (3.14)"]
+    "checks": [
+      { "context": "gates (3.12)", "app_id": 15368 },
+      { "context": "gates (3.14)", "app_id": 15368 }
+    ]
   },
   "enforce_admins": true,
-  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "required_pull_request_reviews": null,
   "restrictions": null,
   "allow_force_pushes": false,
   "allow_deletions": false
@@ -749,14 +797,22 @@ EOF
 done
 ~~~
 
-The `contexts` must name exactly the jobs the workflow produces: a name no
-job produces any more blocks every merge, a new matrix entry is not
+The check names must match exactly the jobs the workflow produces: a name no
+job produces any more blocks every push, a new matrix entry is not
 required until it is listed. After a change of the Python matrix the
 command above is run again with the new list.
 
-`required_approving_review_count: 0` demands a pull request but no second
-person's approval (single maintainer). Tags are not affected by branch
-protection; the integrator pushes release tags directly.
+With a protection that still demands a pull request
+(`required_pull_request_reviews` set, as up to 1.16.0) `tools/release.sh`
+keeps working through its fallback (merge on GitHub, `merge/vX.Y.Z`), with
+three CI runs per release. Collaborators, if there ever are any, get a
+ruleset "review by owner" on `main` and `develop` (pull request with one
+approval, bypass "Repository admin - always"): their changes are reviewed,
+while the owner's `release.sh` still pushes directly after green checks;
+rulesets and the classic protection add up, the strictest rule applies.
+Zero required approvals protect against nobody: the author approves his own
+pull request. Tags are not affected by branch protection; `release.sh`
+pushes the tag together with `main` and `develop`.
 
 ## Feature cycle
 
@@ -766,8 +822,9 @@ git switch develop && git pull --ff-only && git switch -c feature/<name>
 tools/release.sh                       # rebase, gates, then the questions
 ~~~
 
-"Release jetzt bauen?" `n` and then `j` merges the feature into `develop`
-only (push, pull request, checks, merge); `j` merges and releases at once.
+"Build the release now? [y/N]" `n` and then `y` merges the feature into
+`develop` only (local merge, push, pull request checks, direct push); `y`
+merges and releases at once, with one gate run and one CI run.
 The remote feature branch is deleted after the merge; the local one with
 `git branch -d feature/<name>`.
 
@@ -799,8 +856,10 @@ pandoc ci-guide.md -o ci-guide.pdf --pdf-engine=xelatex --resource-path=.
 Done by `tools/release.sh` (GitHub variant of the script of the
 dev-conventions handover; tests in `tests/test_release_tools.py`). It runs
 as normal user; `git` and `gh` (logged in once: `gh auth login`) act on
-the clone and on GitHub with the integrator's account. Because `main` and
-`develop` are protected, every change of them goes through a pull request.
+the clone and on GitHub with the integrator's account. Since 1.17.0
+(bundle v21) it builds every merge, the release commit and the tag
+locally, as on Forgejo, lets GitHub check exactly the commit to be
+published once, and then pushes that commit directly.
 
 ~~~bash
 tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
@@ -810,39 +869,58 @@ tools/release.sh [patch|minor|major] [-m MESSAGE] [--yes] [--merge-only]
    `develop`, `hotfix/*`; `main` refused); `gh` logged in; local `main`
    and `develop` equal `origin`; `develop` contains `main`;
    `__version__` equals the newest tag.
-2. **Feature:** rebase onto `develop`, gates, question
-   "Build the release now?" (a part on the command line answers it); merge
-   into `develop` through a pull request.
+2. **Feature:** rebase onto `develop`, question "Build the release now?"
+   (a part on the command line answers it). Without a release: gates,
+   question "Merge feature/x into develop (push, PR, checks)?", local
+   `--no-ff` merge into `develop`, its pull request checks that commit,
+   then `develop` is pushed. With a release: the local merge into
+   `develop` joins the release, and the gates run only once, on the
+   release tree.
 3. **Release:** version from the newest tag and the part; non-empty
    `[Unreleased]` and message; on `release/X.Y.Z` (hotfix: on the hotfix
    branch) set `__version__` and the heading `## [X.Y.Z] - <date>`, run the
-   gates, commit `mediatools X.Y.Z`.
-4. **Question** "Push release/X.Y.Z, merge it into main and publish vX.Y.Z?",
-   then: push, pull request into `main`, wait for its required checks
-   (progress line per CI job, see `docs/ci-guide.md`), merge with
-   the subject `mediatools X.Y.Z: <message>`; check that `main` has the tree
-   of the release branch; annotated tag with the same text, push, wait for
-   `release-check`.
-5. **Back into `develop`:** `merge/vX.Y.Z` from `main` with `develop`
-   merged in, pull request, checks, merge; a conflict (e.g. CHANGELOG after
-   a hotfix) stops here with the commands to finish by hand - the release
-   itself is complete.
+   gates, commit `mediatools X.Y.Z`; local `--no-ff` merge into `main`
+   with the subject `mediatools X.Y.Z: <message>`, annotated tag with the
+   same text, `develop` moved to the same commit (hotfix while `develop`
+   collects features: `develop` gets a local merge of `main`).
+4. **Question** "Publish vX.Y.Z (GitHub checks it once, then main, develop
+   and the tag)?", then: push `release/X.Y.Z`, pull request into `main`,
+   wait for its required checks (progress line per CI job, see
+   `docs/ci-guide.md`); a second `develop` state is pushed as
+   `merge/vX.Y.Z` and checked at the same time.
+5. **Publish:** `git push --atomic origin <commit>:main <commit>:develop
+   vX.Y.Z` - all or nothing, never forced; the pull request then shows as
+   merged and the helper branches are deleted; wait for `release-check` of
+   the tag. Fallbacks: GitHub refuses the direct push (a rule wants pull
+   requests) -> the pull request is merged on GitHub, the merge commit is
+   tagged and `develop` comes back through `merge/vX.Y.Z` (one more CI run,
+   as up to 1.16.0); `main` or `develop` on origin moved meanwhile ->
+   nothing is published, local `main`/`develop` go back to origin, the tag
+   is deleted, the work branch keeps its commits.
 6. **Bit-identity:** `tools/same-code.sh main develop vX.Y.Z` (after a
    hotfix while `develop` collects features: `main vX.Y.Z`).
 7. **Install:** question, `./install.sh vX.Y.Z`,
    `~/.local/bin/mediatools --version`, `tools/after-install.sh` (reload
    of a running shrink, status).
 
-Remote helper branches are deleted after their merge. `CHECK_CMD`,
+Every question rings the terminal bell and raises a desktop notice with
+`notify-send -u critical` when a desktop session exists (`attention` of
+`tools/output.sh`; `NO_NOTIFY=1` switches the notice off), so a question
+does not wait unnoticed in a background window. `CHECK_CMD`,
 `INSTALL_CMD`, `RELEASE_WAIT` (longest wait for the registration of the
-checks, default 600 s), `RELEASE_HEARTBEAT` (seconds between progress lines,
+checks, default 600 s), `RELEASE_POLL` (seconds between two questions to
+GitHub, default 5), `RELEASE_HEARTBEAT` (seconds between progress lines,
 default 30) and `RELEASE_RETRY_PAUSE` (seconds between the up to five
 attempts of `gh pr create` and `gh pr merge`, default 10) replace the gate
 script, the installer and the pauses; the tests use them. Questions are
 English and answered with `y` (`j` is accepted too). `tools/release.sh`,
-`tools/same-code.sh`, `tools/review.sh` and `tools/output.sh` are copies of
-the dev-conventions bundle v20 and stay byte-identical to it. Merge commits (no squash, no rebase) keep every
-commit; `git log --first-parent main` lists exactly the releases.
+`tools/same-code.sh`, `tools/review.sh`, `tools/output.sh`,
+`tools/pytest_progress.py`, `tools/bundle_tests.py`,
+`tests/test_release_tools.py` and `tests/test_review.py` are copies of the
+dev-conventions bundle v21 and stay byte-identical to it
+(`sha256sum -c tools/bundle.sha256`). Merge commits (no squash, no rebase)
+keep every commit; `git log --first-parent main` lists exactly the
+releases.
 
 # Applying delivered patch archives
 

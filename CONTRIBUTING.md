@@ -4,18 +4,20 @@
 
 | Branch           | Purpose                                         | Created from | Merged into               | How |
 |------------------|-------------------------------------------------|--------------|---------------------------|-----|
-| `main`           | releases only; every release is a tag `vX.Y.Z`  | -            | -                         | pull request only |
-| `develop`        | integration of finished features                | `main`       | `main` (through a release)| pull request only |
+| `main`           | releases only; every release is a tag `vX.Y.Z`  | -            | -                         | only a commit whose required checks passed |
+| `develop`        | integration of finished features                | `main`       | `main` (through a release)| only a commit whose required checks passed |
 | `feature/<name>` | one feature or fix                              | `develop`    | `develop`                 | `tools/release.sh` |
 | `hotfix/<name>`  | urgent fix of the released version              | `main`       | `main` + `develop`        | `tools/release.sh` |
-| `release/X.Y.Z`  | short-lived: version and CHANGELOG heading      | `develop`    | `main`                    | made by `tools/release.sh` |
-| `merge/vX.Y.Z`   | short-lived: the release back into `develop`    | `main`       | `develop`                 | made by `tools/release.sh` |
+| `release/X.Y.Z`  | short-lived: carries the locally built release commit to GitHub for its checks | `develop` | `main` | made by `tools/release.sh` |
+| `merge/vX.Y.Z`   | short-lived: a second `develop` state (hotfix while `develop` collects features) or the fallback merge back | `main` | `develop` | made by `tools/release.sh` |
 
 Rules:
 
-1. `main` and `develop` are protected on GitHub: changes only through a
-   pull request whose required checks (`gates (3.12)`, `gates (3.14)`)
-   are green, also for the owner. `tools/release.sh` does all of it.
+1. `main` and `develop` are protected on GitHub: they take only a commit
+   whose required checks (`gates (3.12)`, `gates (3.14)`) passed on a pull
+   request, also from the owner. `tools/release.sh` does all of it
+   (dev-conventions bundle v21: one CI run per release, then a direct push
+   of exactly the checked commit).
 2. Every push of a branch runs the quality gates locally (pre-push hook,
    never bypassed with `--no-verify`); CI runs them for every pull request.
 3. The version lives only in `src/mediatools/__init__.py` and is set only by
@@ -37,15 +39,28 @@ git config core.hooksPath .githooks     # once per clone: activate pre-push hook
 sudo apt install ffmpeg rsync rsnapshot python3-tk xvfb shellcheck  # once: tests, shellcheck
 tools/check.sh                          # all gates
 tools/check.sh --fast                   # without tests, while editing
+tools/check.sh --yes                    # no question: tests on the free threads
 ~~~
+
+**Parallel tests.** The tests run on several workers (pytest-xdist,
+`-n N --dist loadscope`). In a terminal `tools/check.sh` asks
+`N of M threads free (load L) - run the tests on N workers? [Y/n]` (free =
+threads minus the rounded load of the last minute); without a terminal
+(pre-push hook, `release.sh --yes`) or with `--yes` it takes the free
+threads without asking, in CI all threads of the runner (4 on a public
+repository). `CHECK_WORKERS=N` fixes the number, `CHECK_WORKERS=1` runs
+them one after another. The tests of files copied unchanged from the
+dev-conventions bundle are skipped while `sha256sum -c tools/bundle.sha256`
+passes (`tools/bundle_tests.py`); `CHECK_BUNDLE_TESTS=1` runs them anyway.
+The coverage table appears only when the coverage is below 90 %.
 
 **Each tree is checked in full once.** After a full green run
 `tools/check.sh` remembers the tree of the working copy (uncommitted and
 untracked files included), the Python version and a hash of the installed
 packages in `.git/checked-trees`; for a known key only `privacy` and
 `shell` run again and the script says what it skipped. `release.sh` and
-the pre-push hook call it several times for the same code, so a release
-needs two full runs instead of five. `CHECK_FULL=1 tools/check.sh` forces
+the pre-push hook call it several times for the same code; since bundle
+v21 a release needs one full run (on the release tree). `CHECK_FULL=1 tools/check.sh` forces
 a full run; CI always runs in full.
 
 `tools/check.sh` activates the development venv itself for its own run
@@ -112,19 +127,28 @@ All steps run as a normal user; `git` and `gh` (logged in once with
 
 | Current branch   | What the script does                                                   |
 |------------------|------------------------------------------------------------------------|
-| `feature/<name>` | rebase onto `develop`, gates, then "Release jetzt bauen?": `j` merges and releases, `n` asks whether to merge into `develop` only |
+| `feature/<name>` | rebase onto `develop`, then "Build the release now? [y/N]": `y` merges and releases, `n` asks whether to merge into `develop` only |
 | `develop`        | release of the collected features: asks the part (default minor) and the release message |
 | `hotfix/<name>`  | patch release into `main` and back into `develop`                       |
 | `main`           | refused                                                                |
 
-Merging means: push the branch, pull request, wait for the required
-checks, merge on GitHub. A release sets version and CHANGELOG heading on
-`release/X.Y.Z`, runs the gates, merges into `main` with the message
-`mediatools X.Y.Z: <release message>`, tags `vX.Y.Z`, waits for the
-release check, brings `develop` back up through `merge/vX.Y.Z`, checks
-with `tools/same-code.sh` that `main`, `develop` and the tag are
-bit-identical and offers `./install.sh vX.Y.Z` (then
-`tools/after-install.sh`: reload of a running shrink).
+Everything is built locally, as on Forgejo: the feature is merged into
+`develop` (`--no-ff`), version and CHANGELOG heading are set on
+`release/X.Y.Z`, the gates run once, the release commit is merged into
+`main` with the message `mediatools X.Y.Z: <release message>`, tagged
+`vX.Y.Z`, and `develop` moves to the same commit. Then `release/X.Y.Z` is
+pushed, its pull request runs the required checks once on exactly that
+commit, and `git push --atomic` publishes `main`, `develop` and the tag
+(all or nothing). If GitHub refuses the direct push (a rule wants pull
+requests), the script merges the pull request instead and brings
+`develop` back through `merge/vX.Y.Z`, as up to bundle v20. If somebody
+pushed to `main` or `develop` meanwhile, nothing is published and local
+`main`/`develop` go back to the state of origin. At the end
+`tools/same-code.sh` checks that `main`, `develop` and the tag are
+bit-identical, and `./install.sh vX.Y.Z` is offered (then
+`tools/after-install.sh`: reload of a running shrink). Every question
+rings the terminal bell and raises a desktop notice (`attention` of
+`tools/output.sh`; `NO_NOTIFY=1` switches the notice off).
 
 Review of a delivered branch before its release (four-eyes, Beyond
 Compare, both sides as real copies with named sides):

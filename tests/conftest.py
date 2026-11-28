@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-pytest_plugins = ["pytest_progress"]           # progress bar of the bundle (tools/pytest_progress.py)
+pytest_plugins = ["pytest_progress", "bundle_tests"]   # bundle: progress bar, skip tests of unchanged bundle files
 
 CHILD_TIMEOUT = 300           # seconds; a child that takes longer is killed, the test fails
 VIRTUAL_DISPLAY_HINT = "the Tk tests need the virtual display of tools/check.sh (Xvfb)"
