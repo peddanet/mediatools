@@ -6,7 +6,8 @@
 # Functions: title (block), stage (gate / CI job / step), pass, fail, skip
 # (result line: text, duration or fact on the right), info, detail, note,
 # bar (test progress), ts (dim time stamp), ci (one CI line), timing (one
-# row of the time measurement). templates/output-demo.sh shows each look.
+# row of the time measurement), attention (before a question: bell and
+# desktop notice). templates/output-demo.sh shows each look.
 #
 # Colours: never when NO_COLOR is set (it wins over FORCE_COLOR); else when
 # FORCE_COLOR is set or standard output is a terminal. Log files are plain
@@ -64,4 +65,13 @@ ci() {      # one CI line: time job step result
 }
 timing() {  # one row of the time measurement table
     printf '  %s %s%6s%s\n' "$(pad "$1" 44)" "$D" "$2" "$X"
+}
+attention() {  # before a question read from a terminal: bell, desktop notice
+    [[ -t 0 && -z "${CI:-}" ]] || return 0
+    { printf '\a' >/dev/tty; } 2>/dev/null || true
+    [[ -z "${NO_NOTIFY:-}" && -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]] || return 0
+    command -v notify-send >/dev/null 2>&1 || return 0
+    # -u critical: the notice stays until it is clicked away (libnotify-bin)
+    notify-send -u critical -a "${0##*/}" "${0##*/} waits for an answer" "$1" \
+        >/dev/null 2>&1 || true
 }

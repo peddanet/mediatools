@@ -276,6 +276,7 @@ for line in "${FOUND[@]}"; do
   if [ "$YES" -eq 0 ]; then
     if [ "$release" = none ]; then question="Merge $branch into $base (no release)"; else
       question="Apply $branch and release it as $release"; fi
+    attention "$question?"   # bell and desktop notice (output.sh), the question may wait in the background
     read -r -p "  $question? [y/N] " answer || answer=""
     [[ "$answer" =~ ^[yYjJ]$ ]] || { skip "$branch" "not applied"; rm -rf "$dir"; continue; }
   fi

@@ -5,6 +5,45 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-28
+
+### Added
+- `mediatools update` rings the terminal bell and raises a desktop notice
+  (`notify-send`, if installed) before its question, so it does not wait
+  unnoticed in a background window; `NO_NOTIFY=1` switches the notice off.
+- Parallel tests: `tools/check.sh` runs pytest on several workers
+  (pytest-xdist, new dev dependency); in a terminal it asks how many free
+  threads to use, `--yes` and the pre-push hook take the free threads, CI
+  uses all threads of the runner; `CHECK_WORKERS=N` fixes the number.
+
+### Changed
+- Development tools follow dev-conventions bundle v21. `tools/release.sh`
+  builds merges, release commit and tag locally, lets GitHub check exactly
+  the commit to be published once and pushes it directly to `main` and
+  `develop` with the tag: one CI run per release instead of three, and one
+  full local gate run instead of two. It falls back to merging on GitHub
+  when a branch rule demands pull requests, and publishes nothing when
+  `main` or `develop` moved meanwhile. Every question of `release.sh` and
+  `check.sh` rings the bell and raises a desktop notice.
+- The tests of files copied unchanged from the bundle are skipped while
+  `tools/bundle.sha256` matches (`tools/bundle_tests.py`);
+  `CHECK_BUNDLE_TESTS=1` runs them.
+- `tools/check.sh` output: the privacy gate reports its counts
+  (`413 terms, 26 allowed, 0 findings`) instead of a line cut after 44
+  characters; no lone `[100%]` of pytest after the progress bar; the
+  coverage table only when the coverage is below 90 %. The progress bar
+  names the module running now and the summary lists the three slowest
+  modules.
+- Documentation: release procedure, CI runs, branch protection (required
+  checks from GitHub Actions, no pull request requirement) and lane
+  diagrams describe the new flow.
+
+### Fixed
+- A GUI test left the window at 1280 x 200; a later test in the same
+  process then crashed Tk 8.6 in `focus_force` (segmentation fault). It
+  showed only with parallel tests, where the order of the modules changes;
+  the test now restores the window size.
+
 ## [1.16.0] - 2026-11-27
 
 ### Added
