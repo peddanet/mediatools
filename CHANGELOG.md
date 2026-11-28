@@ -5,6 +5,23 @@ All notable changes are documented here. Versions follow
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-11-28
+
+### Changed
+- The privacy gate also checks images (PNG, JPEG, GIF, WebP, BMP, TIFF): an
+  image rendered from a tracked text source of the same name (`.svg`,
+  `.mmd`) is checked through that source; every other image - screenshots,
+  icons - is read with the text recognition `tesseract`, so a screenshot
+  cannot show a forbidden term unnoticed. The recognised text is cached by
+  the image's content in `.git/privacy-ocr/`; only new or changed images are
+  read again. An image tesseract cannot read is a finding.
+
+### Fixed
+- The privacy gate fails (exit code 2) when `pdftotext` or `tesseract` is
+  missing, with the `apt` command to install it; before, a missing
+  `pdftotext` only printed a warning that the check log hid, and the PDFs
+  were not scanned although the gate passed.
+
 ## [1.17.1] - 2026-11-28
 
 ### Fixed
